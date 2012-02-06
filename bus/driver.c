@@ -31,6 +31,7 @@
 #include "services.h"
 #include "selinux.h"
 #include "signals.h"
+#include "smack.h"
 #include "stats.h"
 #include "utils.h"
 
@@ -2357,6 +2358,10 @@ static const MessageHandler dbus_message_handlers[] = {
     bus_driver_handle_get_id },
   { "GetConnectionCredentials", "s", "a{sv}",
     bus_driver_handle_get_connection_credentials },
+  { "GetConnectionSmackContext",
+    DBUS_TYPE_STRING_AS_STRING,
+    DBUS_TYPE_STRING_AS_STRING,
+    bus_smack_handle_get_connection_context },
   { NULL, NULL, NULL, NULL }
 };
 

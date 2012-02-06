@@ -145,6 +145,8 @@ if(WIN32)
     set(FD_SETSIZE "8192" CACHE STRING "The maximum number of connections that can be handled at once")
 endif()
 
+option (DBUS_ENABLE_SMACK "enable smack checks in the daemon" OFF)
+
 find_package(EXPAT)
 find_package(X11)
 find_package(GLib2)
@@ -589,6 +591,7 @@ message("        Building bus stats API:   ${DBUS_ENABLE_STATS}                "
 message("        installing system libs:   ${DBUS_INSTALL_SYSTEM_LIBS}         ")
 message("        Building inotify support: ${DBUS_BUS_ENABLE_INOTIFY}          ")
 message("        Building kqueue support:  ${DBUS_BUS_ENABLE_KQUEUE}           ")
+message("        Building Smack support:   ${DBUS_ENABLE_SMACK}                ")
 message("        Building Doxygen docs:    ${DBUS_ENABLE_DOXYGEN_DOCS}         ")
 message("        Building XML docs:        ${DBUS_ENABLE_XML_DOCS}             ")
 message("        Daemon executable name:   ${DBUS_DAEMON_NAME}")
