@@ -87,7 +87,7 @@ bus daemon).
 
 %prep
 # COMMON2-BEGIN
-%setup -n %{name}-%{version} -q
+%setup -n dbus-%{version} -q
 
 %build
 autoreconf -fi
