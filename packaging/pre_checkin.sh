@@ -2,7 +2,7 @@
 # vim:sw=4 et
 # This script is called automatically during autobuild checkin.
 
-cp -lf dbus.changes dbus-x11.changes
+#cp -lf dbus.changes dbus-x11.changes
 
 for spec in dbus-x11.spec; do
     cp -f $spec.in $spec
@@ -19,4 +19,3 @@ for spec in dbus-x11.spec; do
     #fi
 done
 
-osc service localrun format_spec_file
