@@ -1,21 +1,3 @@
-#
-# spec file for package dbus-x11
-#
-# Copyright (c) 2012 SUSE LINUX Products GmbH, Nuernberg, Germany.
-#
-# All modifications and additions to the file contributed by third parties
-# remain the property of their copyright owners, unless otherwise agreed
-# upon. The license for this file, and modifications and additions to the
-# file, is the same license as for the pristine package itself (unless the
-# license for the pristine package is not an Open Source License, in which
-# case the license is the MIT License). An "Open Source License" is a
-# license that conforms to the Open Source Definition (Version 1.9)
-# published by the Open Source Initiative.
-
-# Please submit bugfixes or comments via http://bugs.opensuse.org/
-#
-
-
 Name:           dbus-x11
 %define _name   dbus
 BuildRequires:  pkgconfig(x11)
@@ -39,18 +21,13 @@ BuildRequires:  pkg-config
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
 %endif
-Version:        1.5.12
+Version:        1.6.8
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/%{_name}-%{version}.tar.gz
 Source1:        rc.boot.dbus
 Source3:        dbus_at_console.ck
 Source4:        baselibs.conf
-Patch0:         dbus-log-deny.patch
-# PATCH-FIX-OPENSUSE coolo@suse.de -- force a feature configure won't accept without x11 in buildrequires
-Patch1:         dbus-do-autolaunch.patch
-Patch2:         dbus-cve-2012-3524.patch
 BuildRequires:  libcap-ng-devel
-BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 # COMMON1-END
 # COMMON1-END
 
@@ -62,9 +39,6 @@ in this separate package so server systems need not install X.
 # COMMON2-BEGIN
 # COMMON2-BEGIN
 %setup -n %{_name}-%{version} -q
-%patch0 -p1
-%patch1 -p1
-%patch2 -p1
 
 %build
 autoreconf -fi
