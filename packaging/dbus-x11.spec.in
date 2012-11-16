@@ -1,6 +1,6 @@
 Name:           dbus-x11
 %define _name   dbus
-BuildRequires:  xorg-x11-devel
+BuildRequires:  pkgconfig(x11)
 Url:            http://dbus.freedesktop.org/
 License:        GPL2+ or AFL 2.1
 Group:          System/Daemons
