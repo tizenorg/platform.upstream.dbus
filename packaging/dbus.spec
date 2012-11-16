@@ -23,7 +23,7 @@ BuildRequires:  pkgconfig(libsystemd-login)
 %endif
 Version:        1.6.8
 Release:        0
-Source0:        http://dbus.freedesktop.org/releases/dbus/%{name}-%{version}.tar.gz
+Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
 Source3:        dbus_at_console.ck
 Source4:        baselibs.conf
