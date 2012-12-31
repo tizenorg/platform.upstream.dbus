@@ -27,6 +27,8 @@ Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
 Source3:        dbus_at_console.ck
 Source4:        baselibs.conf
+Source5:        dbus-user.service
+Source6:        dbus-user.socket
 BuildRequires:  libcap-ng-devel
 # COMMON1-END
 # COMMON1-END

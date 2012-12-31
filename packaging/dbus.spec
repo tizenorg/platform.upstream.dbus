@@ -27,6 +27,8 @@ Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
 Source3:        dbus_at_console.ck
 Source4:        baselibs.conf
+Source5:        dbus-user.service
+Source6:        dbus-user.socket
 BuildRequires:  libcap-ng-devel
 # COMMON1-END
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
@@ -121,7 +123,6 @@ make DESTDIR=%{buildroot} install
 mkdir -p %{buildroot}/etc/init.d
 mkdir -p %{buildroot}/usr/sbin
 install -m 755 %{SOURCE1} %{buildroot}/%{_sysconfdir}/init.d/dbus
-ln -sf %{_sysconfdir}/init.d/dbus %{buildroot}/%{_sbindir}/rcdbus
 install -d %{buildroot}/%{_localstatedir}/run/dbus
 mkdir -p %{buildroot}/%{_libdir}/pkgconfig
 mkdir -p %{buildroot}/lib/dbus-1/system-services
@@ -139,6 +140,9 @@ install -m 755 %{SOURCE3} %{buildroot}%{_sysconfdir}/ConsoleKit/run-session.d
 mkdir -p %{buildroot}%{_localstatedir}%{_libdir}/dbus
 touch %{buildroot}/%{_localstatedir}%{_libdir}/dbus/machine-id
 
+mkdir -p %{buildroot}%{_unitdir_user}
+install -m0644 %{SOURCE5} %{buildroot}%{_unitdir_user}/dbus.service
+install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 
 
 %pre
@@ -158,7 +162,7 @@ touch %{buildroot}/%{_localstatedir}%{_libdir}/dbus/machine-id
 %dir %{_localstatedir}%{_libdir}/dbus
 %dir /lib/dbus-1
 %dir /lib/dbus-1/system-services
-%doc  COPYING 
+%license  COPYING 
 %config(noreplace) %{_sysconfdir}/dbus-1/session.conf
 %config(noreplace) %{_sysconfdir}/dbus-1/system.conf
 %{_sysconfdir}/init.d/dbus
@@ -168,7 +172,6 @@ touch %{buildroot}/%{_localstatedir}%{_libdir}/dbus/machine-id
 %{_bindir}/dbus-monitor
 %{_bindir}/dbus-send
 %{_bindir}/dbus-uuidgen
-%{_sbindir}/rcdbus
 # See doc/system-activation.txt in source tarball for the rationale
 # behind these permissions
 %attr(4750,root,dbus) %verify(not mode) %{_libdir}/dbus/dbus-daemon-launch-helper
@@ -177,6 +180,8 @@ touch %{buildroot}/%{_localstatedir}%{_libdir}/dbus/machine-id
 %dir %{_unitdir}
 %{_unitdir}/dbus.service
 %{_unitdir}/dbus.socket
+%{_unitdir_user}/dbus.service
+%{_unitdir_user}/dbus.socket
 %dir %{_unitdir}/dbus.target.wants
 %{_unitdir}/dbus.target.wants/dbus.socket
 %dir %{_unitdir}/multi-user.target.wants
