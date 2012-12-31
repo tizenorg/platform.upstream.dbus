@@ -1,5 +1,7 @@
+* Mon Dec 31 2012 Anas Nashif <anas.nashif@intel.com> accepted/trunk/20121214.212129@85929a0
+- add user session units
+
 * Fri Nov 30 2012 Simon McVittie <simon.mcvittie@collabora.co.uk> submit/trunk/20121130.161145@ea9c991
 - regenerate packaging/dbus-x11.spec with ( cd packaging && sh pre_checkin.sh )
-- fixed splitting
 - fixed splitting
 
