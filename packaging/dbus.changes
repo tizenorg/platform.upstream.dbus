@@ -1,3 +1,6 @@
+* Tue Jan 15 2013 Anas Nashif <anas.nashif@intel.com> submit/trunk/20121231.155624@d287e71
+- No OOMScoreAdjust for user session
+
 * Mon Dec 31 2012 Anas Nashif <anas.nashif@intel.com> accepted/trunk/20121214.212129@85929a0
 - add user session units
 
