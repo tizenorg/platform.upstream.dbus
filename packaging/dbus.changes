@@ -1,3 +1,6 @@
+* Fri Mar 22 2013 Anas Nashif <anas.nashif@intel.com> dbus-1.6.8@aed2a13
+- Fixed package groups
+
 * Tue Jan 15 2013 Anas Nashif <anas.nashif@intel.com> submit/trunk/20121231.155624@d287e71
 - No OOMScoreAdjust for user session
 
