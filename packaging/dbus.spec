@@ -5,7 +5,7 @@ Name:           dbus
 Url:            http://dbus.freedesktop.org/
 Summary:        D-Bus Message Bus System
 License:        GPL-2.0+ or AFL-2.1
-Group:          System/Daemons
+Group:          Base/IPC
 # COMMON1-BEGIN
 
 # We can't enable this right now, because it will create a build cycle between
@@ -36,14 +36,13 @@ Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 Provides:	dbus-1
 
 %package -n %{_libname}
-
 Summary:        Library package for D-Bus
-Group:          Development/Libraries/Other
+Group:          Base/IPC
 
 %package devel
 
 Summary:        Developer package for D-Bus
-Group:          Development/Libraries/Other
+Group:          Development/Libraries
 Requires:       %{_libname} = %{version}
 Requires:       dbus
 Requires:       glibc-devel
@@ -51,7 +50,7 @@ Requires:       glibc-devel
 %package devel-doc
 
 Summary:        Developer documentation package for D-Bus
-Group:          Development/Libraries/Other
+Group:          Documentation
 Requires:       %{name} = %{version}
 BuildArch:      noarch
 
