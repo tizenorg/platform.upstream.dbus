@@ -1,7 +1,6 @@
 %define dbus_user_uid           81
 
 Name:           dbus
-%define _libname libdbus
 Url:            http://dbus.freedesktop.org/
 Summary:        D-Bus Message Bus System
 License:        GPL-2.0+ or AFL-2.1
@@ -35,7 +34,7 @@ Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 
 Provides:	dbus-1
 
-%package -n %{_libname}
+%package -n libdbus
 Summary:        Library package for D-Bus
 Group:          Base/IPC
 
@@ -43,7 +42,7 @@ Group:          Base/IPC
 
 Summary:        Developer package for D-Bus
 Group:          Development/Libraries
-Requires:       %{_libname} = %{version}
+Requires:       libdbus = %{version}
 Requires:       dbus
 Requires:       glibc-devel
 
@@ -62,7 +61,7 @@ a general one-to-one message passing framework, which can be used by
 any two apps to communicate directly (without going through the message
 bus daemon).
 
-%description -n %{_libname}
+%description -n libdbus
 D-Bus is a message bus system, a simple way for applications to talk to
 one another. D-Bus supplies both a system daemon and a
 per-user-login-session daemon. Also, the message bus is built on top of
@@ -150,9 +149,9 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 /usr/sbin/useradd -c 'System message bus' -u %{dbus_user_uid} -g %{dbus_user_uid} \
         -s /sbin/nologin -r -d '/' dbus 2> /dev/null || :
 
-%post -n %{_libname} -p /sbin/ldconfig
+%post -n libdbus -p /sbin/ldconfig
 
-%postun -n %{_libname} -p /sbin/ldconfig
+%postun -n libdbus -p /sbin/ldconfig
 
 %docs_package
 
@@ -188,7 +187,7 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 %dir %{_unitdir}/sockets.target.wants
 %{_unitdir}/sockets.target.wants/dbus.socket
 
-%files -n %{_libname}
+%files -n libdbus
 %defattr(-, root, root)
 %{_libdir}/libdbus-1.so.*
 # Own those directories in the library instead of dbus-1, since dbus users
