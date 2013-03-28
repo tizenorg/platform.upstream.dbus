@@ -1,3 +1,6 @@
+* Thu Mar 28 2013 Anas Nashif <anas.nashif@intel.com> submit/trunk/20130322.183615@399a3d0
+- Cleanup lib name in spec
+
 * Fri Mar 22 2013 Anas Nashif <anas.nashif@intel.com> dbus-1.6.8@aed2a13
 - Fixed package groups
 
