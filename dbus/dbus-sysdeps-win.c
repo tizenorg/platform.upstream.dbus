@@ -3084,8 +3084,6 @@ _dbus_get_standard_system_servicedirs (DBusList **dirs)
   return TRUE;
 }
 
-_DBUS_DEFINE_GLOBAL_LOCK (atomic);
-
 /**
  * Atomically increments an integer
  *
