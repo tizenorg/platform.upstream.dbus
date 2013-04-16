@@ -14,8 +14,10 @@ Group:          Base/IPC
 BuildRequires:  doxygen
 BuildRequires:  expat-devel
 BuildRequires:  libtool
+BuildRequires:  libxslt-tools
 BuildRequires:  libzio
 BuildRequires:  pkg-config
+BuildRequires:  xmlto
 %if %{with_systemd}
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
@@ -216,6 +218,7 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 %doc %{_datadir}/doc/dbus/dbus-specification.html
 %doc %{_datadir}/doc/dbus/dbus-test-plan.html
 %doc %{_datadir}/doc/dbus/dbus-tutorial.html
+%doc %{_datadir}/doc/dbus/dbus.devhelp
 %doc %{_datadir}/doc/dbus/diagram.*
 %doc %{_datadir}/doc/dbus/system-activation.txt
 %doc doc/*.txt doc/file-boilerplate.c doc/TODO
