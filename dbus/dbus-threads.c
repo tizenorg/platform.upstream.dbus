@@ -504,8 +504,7 @@ init_locks (void)
 #undef LOCK_ADDR
   };
 
-  _dbus_assert (_DBUS_N_ELEMENTS (global_locks) ==
-                _DBUS_N_GLOBAL_LOCKS);
+  _DBUS_STATIC_ASSERT (_DBUS_N_ELEMENTS (global_locks) == _DBUS_N_GLOBAL_LOCKS);
 
   i = 0;
   
