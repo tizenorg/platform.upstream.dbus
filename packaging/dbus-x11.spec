@@ -15,11 +15,13 @@ Summary:        D-Bus Message Bus System
 BuildRequires:  doxygen
 BuildRequires:  expat-devel
 BuildRequires:  libtool
+BuildRequires:  libxslt-tools
 BuildRequires:  libzio
 BuildRequires:  pkg-config
 %if %{with_systemd}
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
+BuildRequires:  xmlto
 %endif
 Version:        1.6.8
 Release:        0
