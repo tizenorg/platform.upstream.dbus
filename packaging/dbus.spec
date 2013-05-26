@@ -22,7 +22,7 @@ BuildRequires:  xmlto
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
 %endif
-Version:        1.6.8
+Version:        1.6.10
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
