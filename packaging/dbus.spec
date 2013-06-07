@@ -137,8 +137,8 @@ chmod a-x AUTHORS COPYING HACKING NEWS README doc/*.txt doc/file-boilerplate.c d
 #
 install -d %{buildroot}%{_sysconfdir}/ConsoleKit/run-session.d
 install -m 755 %{SOURCE3} %{buildroot}%{_sysconfdir}/ConsoleKit/run-session.d
-mkdir -p %{buildroot}%{_localstatedir}%{_libdir}/dbus
-touch %{buildroot}/%{_localstatedir}%{_libdir}/dbus/machine-id
+mkdir -p %{buildroot}%{_localstatedir}/lib/dbus
+touch %{buildroot}/%{_localstatedir}/lib/dbus/machine-id
 
 mkdir -p %{buildroot}%{_unitdir_user}
 install -m0644 %{SOURCE5} %{buildroot}%{_unitdir_user}/dbus.service
@@ -159,7 +159,7 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 
 %files
 %defattr(-, root, root)
-%dir %{_localstatedir}%{_libdir}/dbus
+%dir %{_localstatedir}/lib/dbus
 %dir /lib/dbus-1
 %dir /lib/dbus-1/system-services
 %license  COPYING 
@@ -176,7 +176,7 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 # behind these permissions
 %attr(4750,root,dbus) %verify(not mode) %{_libdir}/dbus/dbus-daemon-launch-helper
 %ghost %{_localstatedir}/run/dbus
-%ghost %{_localstatedir}%{_libdir}/dbus/machine-id
+%ghost %{_localstatedir}/lib/dbus/machine-id
 %dir %{_unitdir}
 %{_unitdir}/dbus.service
 %{_unitdir}/dbus.socket
