@@ -22,7 +22,7 @@ BuildRequires:  xmlto
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
 %endif
-Version:        1.6.10
+Version:        1.6.12
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
@@ -120,15 +120,12 @@ make %{?_smp_mflags}
 %install
 # COMMON2-END
 make DESTDIR=%{buildroot} install
-mkdir -p %{buildroot}/etc/init.d
 mkdir -p %{buildroot}/usr/sbin
-install -m 755 %{SOURCE1} %{buildroot}/%{_sysconfdir}/init.d/dbus
 install -d %{buildroot}/%{_localstatedir}/run/dbus
 mkdir -p %{buildroot}/%{_libdir}/pkgconfig
 mkdir -p %{buildroot}/lib/dbus-1/system-services
 mkdir -p %{buildroot}/%{_datadir}/dbus-1/system-services
 mkdir -p %{buildroot}/%{_datadir}/dbus-1/interfaces
-#mkdir -p %{buildroot}/%{_libdir}/dbus-1.0/include/
 rm -f %{buildroot}/%{_libdir}/*.la
 #
 rm -f %{buildroot}/%{_bindir}/dbus-launch
@@ -165,7 +162,6 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 %license  COPYING 
 %config(noreplace) %{_sysconfdir}/dbus-1/session.conf
 %config(noreplace) %{_sysconfdir}/dbus-1/system.conf
-%{_sysconfdir}/init.d/dbus
 %{_sysconfdir}/ConsoleKit
 %{_bindir}/dbus-cleanup-sockets
 %{_bindir}/dbus-daemon
