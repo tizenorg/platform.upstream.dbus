@@ -1,0 +1,8 @@
+Change-Id: Iacdcab2583d2f0dad13b932d0662d5a920d0198b
+Code-Review+2: Anas Nashif <anas.nashif@intel.com>
+Verified+1: Anas Nashif <anas.nashif@intel.com>
+Submitted-by: Anas Nashif <anas.nashif@intel.com>
+Submitted-at: Wed, 19 Jun 2013 07:00:41 -0700
+Reviewed-on: https://review.tizen.org/gerrit/4109
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
