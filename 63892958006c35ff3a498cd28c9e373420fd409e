@@ -1,0 +1,8 @@
+Change-Id: I63892958006c35ff3a498cd28c9e373420fd409e
+Code-Review+2: Anas Nashif <anas.nashif@intel.com>
+Verified+1: Simon McVittie <simon.mcvittie@collabora.co.uk>
+Submitted-by: Anas Nashif <anas.nashif@intel.com>
+Submitted-at: Wed, 19 Jun 2013 06:00:44 -0700
+Reviewed-on: https://review.tizen.org/gerrit/4098
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
