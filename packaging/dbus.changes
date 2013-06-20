@@ -1,3 +1,6 @@
+* Thu Jun 20 2013 Anas Nashif <anas.nashif@intel.com> dbus-1.6.12@46d2277
+- Update to dbus 1.6.12
+
 * Wed Jun 19 2013 Simon McVittie <simon.mcvittie@collabora.co.uk> accepted/tizen/20130608.001941@6389295
 - TZPC-3044, CVE-2013-2168: fix local denial of service (backport from 1.6.12)
 - TZPC-1971: make libdbus thread-safe by default (backport from 1.7.4/1.7.6)
