@@ -1,0 +1,10 @@
+Change-Id: Ibe4690faa9ef0ea719f0484658d543a0240bc24c
+Code-Review+1: Patrick McCarty <patrick.mccarty@linux.intel.com>
+Code-Review+2: Anas Nashif <anas.nashif@intel.com>
+Verified+1: Anas Nashif <anas.nashif@intel.com>
+Code-Review+1: William Douglas <william.douglas@intel.com>
+Submitted-by: Anas Nashif <anas.nashif@intel.com>
+Submitted-at: Thu, 20 Jun 2013 14:36:51 -0700
+Reviewed-on: https://review.tizen.org/gerrit/4170
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
