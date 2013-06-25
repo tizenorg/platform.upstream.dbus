@@ -28,6 +28,7 @@
 #define DBUS_BUS_H
 
 #include <dbus/dbus-connection.h>
+#include "dbus-address.h"
 
 DBUS_BEGIN_DECLS
 
@@ -46,6 +47,10 @@ DBusConnection *dbus_bus_get_private      (DBusBusType     type,
 DBUS_EXPORT
 dbus_bool_t     dbus_bus_register         (DBusConnection *connection,
 					   DBusError      *error);
+DBUS_EXPORT
+dbus_bool_t		dbus_bus_register_kdbus	  (DBusAddressEntry *entry,
+						DBusConnection *connection,
+						DBusError *error);
 DBUS_EXPORT
 dbus_bool_t     dbus_bus_set_unique_name  (DBusConnection *connection,
 					   const char     *unique_name);

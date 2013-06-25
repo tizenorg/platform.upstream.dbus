@@ -31,6 +31,8 @@
 #include "dbus-threads-internal.h"
 #include "dbus-connection-internal.h"
 #include "dbus-string.h"
+#include "dbus-transport-kdbus.h"
+
 
 /**
  * @defgroup DBusBus Message bus APIs
@@ -485,6 +487,8 @@ internal_bus_get (DBusBusType  type,
       goto out;
     }
 
+  _dbus_verbose (" !!! dbus_connection_open finished successfully   !!!! \n");  //todo RP to be removed
+
   if (!dbus_bus_register (connection, error))
     {
       _dbus_connection_close_possibly_shared (connection);
@@ -598,6 +602,67 @@ dbus_bus_get_private (DBusBusType  type,
   return internal_bus_get (type, TRUE, error);
 }
 
+/* kdbus add-on [RP] - bus register for kdbus
+ * Function checks if the method is kdbus. If yes - it registers on the bus, if no - does nothing and returns TRUE
+ * Must be invoked before dbus_bus_register because in kdbus it's realized in different manner
+ * and dbus_bus_register can not be used for that.
+ * It does not collide with dbus_bus_register because dbus_bus_register at the beginning checks
+ * whether unique_name has already been assigned and doesn't try to do it again.
+ */
+dbus_bool_t dbus_bus_register_kdbus(DBusAddressEntry *entry, DBusConnection *connection, DBusError *error)
+{
+	dbus_bool_t retval = TRUE;
+	const char *method;
+
+	method = dbus_address_entry_get_method (entry);
+	_dbus_assert (method != NULL);
+
+	if (strcmp (method, "kdbus") == 0)
+    {
+		BusData *bd;
+
+		_dbus_return_val_if_fail (connection != NULL, FALSE);
+		_dbus_return_val_if_error_is_set (error, FALSE);
+
+		retval = FALSE;
+
+		if (!_DBUS_LOCK (bus_datas))
+		{
+		  _DBUS_SET_OOM (error);
+		  /* do not "goto out", that would try to unlock */
+		  return FALSE;
+		}
+
+		bd = ensure_bus_data (connection);
+		if (bd == NULL)
+		{
+		  _DBUS_SET_OOM (error);
+		  goto out;
+		}
+
+		if (bd->unique_name != NULL)
+		{
+		  _dbus_verbose ("Ignoring attempt to register the same DBusConnection %s with the message bus a second time.\n",
+						 bd->unique_name);
+		  /* Success! */
+		  retval = TRUE;
+		  goto out;
+		}
+
+		if(!bus_register_kdbus(&bd->unique_name, connection, error))
+			goto out;
+
+		retval = TRUE;
+
+		out:
+		_DBUS_UNLOCK (bus_datas);
+
+		if (!retval)
+		_DBUS_ASSERT_ERROR_IS_SET (error);
+    }
+	return retval;
+}
+
 /**
  * Registers a connection with the bus. This must be the first
  * thing an application does when connecting to the message bus.
@@ -652,7 +717,7 @@ dbus_bus_register (DBusConnection *connection,
                    DBusError      *error)
 {
   DBusMessage *message, *reply;
-  char *name;
+  char name[18];
   BusData *bd;
   dbus_bool_t retval;
 
@@ -707,7 +772,7 @@ dbus_bus_register (DBusConnection *connection,
                                    DBUS_TYPE_STRING, &name,
                                    DBUS_TYPE_INVALID))
     goto out;
-  
+
   bd->unique_name = _dbus_strdup (name);
   if (bd->unique_name == NULL)
     {

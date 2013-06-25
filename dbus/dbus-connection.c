@@ -44,6 +44,7 @@
 #include "dbus-threads-internal.h"
 #include "dbus-bus.h"
 #include "dbus-marshal-basic.h"
+#include "dbus-transport-kdbus.h"
 
 #ifdef DBUS_DISABLE_CHECKS
 #define TOOK_LOCK_CHECK(connection)
@@ -1843,6 +1844,22 @@ connection_try_from_address_entry (DBusAddressEntry *entry,
 #ifndef DBUS_DISABLE_CHECKS
   _dbus_assert (!connection->have_connection_lock);
 #endif
+
+  /* kdbus add-on [RP] - bus register for kdbus
+   * Function checks if the method is kdbus. If yes - it registers on the bus, if no - does nothing and returns TRUE
+   * Must be invoked before dbus_bus_register because in kdbus it's realized in different manner
+   * and dbus_bus_register can not be used for that.
+   * It does not collide with dbus_bus_register because dbus_bus_register at the beginning checks
+   * whether unique_name has already been assigned and doesn't try to do it again.
+   */
+
+  if(!dbus_bus_register_kdbus(entry, connection, error))
+  {
+	  _dbus_connection_close_possibly_shared (connection);
+      dbus_connection_unref (connection);
+      connection = NULL;
+  }
+
   return connection;
 }
 

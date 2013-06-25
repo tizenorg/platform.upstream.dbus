@@ -21,7 +21,7 @@
  *
  */
 
-#include <config.h>
+#include <../config.h>
 #include "dbus-transport-protected.h"
 #include "dbus-transport-unix.h"
 #include "dbus-transport-socket.h"
@@ -32,6 +32,8 @@
 #include "dbus-credentials.h"
 #include "dbus-mainloop.h"
 #include "dbus-message.h"
+
+#include "dbus-transport-kdbus.h"
 #ifdef DBUS_BUILD_TESTS
 #include "dbus-server-debug-pipe.h"
 #endif
@@ -347,6 +349,7 @@ static const struct {
 } open_funcs[] = {
   { _dbus_transport_open_socket },
   { _dbus_transport_open_platform_specific },
+  { _dbus_transport_open_kdbus },
   { _dbus_transport_open_autolaunch }
 #ifdef DBUS_BUILD_TESTS
   , { _dbus_transport_open_debug_pipe }

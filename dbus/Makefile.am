@@ -106,6 +106,8 @@ DBUS_SHARED_arch_sources = 			\
 	dbus-sysdeps-pthread.c			\
 	dbus-transport-unix.c			\
 	dbus-transport-unix.h			\
+	dbus-transport-kdbus.c			\
+	dbus-transport-kdbus.h			\
 	dbus-userdb.c				\
 	dbus-userdb.h 				\
 	sd-daemon.c                             \
