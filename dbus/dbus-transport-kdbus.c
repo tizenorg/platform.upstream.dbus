@@ -21,6 +21,13 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+
+#define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
+
 
 /*struct and type below copied from dbus_transport_socket.c
  * needed for _dbus_transport_new_for_socket_kdbus and kdbus_vtable(?)
@@ -58,10 +65,15 @@ struct DBusTransportSocket
                                          */
 };
 
+
+
 //prototypes of local functions, needed for compiler
 int _dbus_connect_kdbus (const char *path, DBusError *error);
 DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError *error);
 DBusTransport* _dbus_transport_new_for_socket_kdbus (int fd, const DBusString *server_guid, const DBusString *address);
+struct kdbus_policy *make_policy_name(const char *name);
+struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id);
+void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size);
 
 /* Functions from dbus_transport_socket - to be modified or reused
  *
@@ -1431,9 +1443,97 @@ DBusTransportOpenResult _dbus_transport_open_kdbus(DBusAddressEntry  *entry,
     }
 }
 
+struct kdbus_policy *make_policy_name(const char *name)
+{
+	struct kdbus_policy *p;
+	__u64 size;
+
+	size = offsetof(struct kdbus_policy, name) + strlen(name) + 1;
+	p = malloc(size);
+	if (!p)
+		return NULL;
+	memset(p, 0, size);
+	p->size = size;
+	p->type = KDBUS_POLICY_NAME;
+	strcpy(p->name, name);
+
+	return p;
+}
+
+struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
+{
+	struct kdbus_policy *p;
+	__u64 size = sizeof(*p);
+
+	p = malloc(size);
+	if (!p)
+		return NULL;
+
+	memset(p, 0, size);
+	p->size = size;
+	p->type = KDBUS_POLICY_ACCESS;
+	p->access.type = type;
+	p->access.bits = bits;
+	p->access.id = id;
+
+	return p;
+}
+
+void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
+{
+	struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
+
+	if (cmd_policy->size + policy->size > max_size)
+		return;
+
+	memcpy(dst, policy, policy->size);
+	cmd_policy->size += KDBUS_ALIGN8(policy->size);
+	free(policy);
+}
+
+dbus_bool_t bus_register_kdbus_policy(const char* name, DBusConnection *connection, DBusError *error)
+{
+	struct kdbus_cmd_policy *cmd_policy;
+	struct kdbus_policy *policy;
+	int size = 0xffff;
+	int fd;
+
+	if(!dbus_connection_get_socket(connection, &fd))
+	{
+		dbus_set_error (error, "Failed to get fd for registering policy", NULL);
+		return FALSE;
+	}
+
+	cmd_policy = (struct kdbus_cmd_policy *) alloca(size);
+	memset(cmd_policy, 0, size);
+
+	policy = (struct kdbus_policy *) cmd_policy->policies;
+	cmd_policy->size = offsetof(struct kdbus_cmd_policy, policies);
+
+	policy = make_policy_name(name);    		//todo to be verified or changed when meaning will be known
+	append_policy(cmd_policy, policy, size);
+
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, getuid());
+	append_policy(cmd_policy, policy, size);
+
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_RECV, 0);
+	append_policy(cmd_policy, policy, size);
+
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_SEND, 0);
+	append_policy(cmd_policy, policy, size);
+
+	if (ioctl(fd, KDBUS_CMD_EP_POLICY_SET, cmd_policy) < 0)
+	{
+		dbus_set_error(error,_dbus_error_from_errno (errno), "Error setting EP policy: %s", _dbus_strerror (errno));
+		return FALSE;
+	}
+
+	_dbus_verbose("Policy %s set correctly\n", name);
+	return TRUE;
+}
+
 dbus_bool_t bus_register_kdbus(char** unique_name, DBusConnection *connection, DBusError *error)
 {
-	dbus_bool_t retval = TRUE;
 	char name[18];
 	struct kdbus_cmd_hello hello;
 	int fd;
@@ -1452,23 +1552,84 @@ dbus_bool_t bus_register_kdbus(char** unique_name, DBusConnection *connection, D
 
 	if(!dbus_connection_get_socket(connection, &fd))
 	{
-		dbus_set_error (error, "failed to get fd for connection", NULL);
+		dbus_set_error (error, "failed to get fd for bus registration", NULL);
 		return FALSE;
 	}
 	if (ioctl(fd, KDBUS_CMD_HELLO, &hello))
 	{
-		dbus_set_error(error,_dbus_error_from_errno (errno), "Failed to send  hello: %s", _dbus_strerror (errno));
+		dbus_set_error(error,_dbus_error_from_errno (errno), "Failed to send hello: %s", _dbus_strerror (errno));
 		return FALSE;
 	}
 
-	_dbus_verbose("-- Our peer ID is: %llu\n", (unsigned long long)hello.id);  //todo [RP] can be removed after development
-	*unique_name = _dbus_strdup(name);
+	_dbus_verbose("-- Our peer ID is: %llu\n", (unsigned long long)hello.id);
 	sprintf(name, "%llx", (unsigned long long)hello.id);
+	*unique_name = _dbus_strdup(name);
 	if (*unique_name == NULL)
 	{
 	  _DBUS_SET_OOM (error);
 	  return FALSE;
 	}
 
-	return retval;
+	return TRUE;
+}
+
+uint64_t bus_request_name_kdbus(DBusConnection *connection, const char *name, const uint64_t flags, DBusError *error)
+{
+	struct kdbus_cmd_name *cmd_name;
+	int fd;
+	uint64_t size = sizeof(*cmd_name) + strlen(name) + 1;
+	uint64_t flags_kdbus = 0;
+
+	cmd_name = alloca(size);
+
+	memset(cmd_name, 0, size);
+	strcpy(cmd_name->name, name);
+	cmd_name->size = size;
+
+	if(flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
+		flags_kdbus |= KDBUS_NAME_ALLOW_REPLACEMENT;
+	if(!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
+		flags_kdbus |= KDBUS_NAME_QUEUE;
+	if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
+		flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
+
+	cmd_name->conn_flags = flags_kdbus;
+
+	if(!dbus_connection_get_socket(connection, &fd))
+	{
+		dbus_set_error (error, "failed to get fd for name request", NULL);
+		return FALSE;
+	}
+
+	_dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
+
+	if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name))
+	{
+		dbus_set_error(error,_dbus_error_from_errno (errno), "error acquiring name: %s", _dbus_strerror (errno));
+		return FALSE;
+	}
+
+	_dbus_verbose("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
+
+	if(cmd_name->conn_flags & KDBUS_NAME_IN_QUEUE)
+		return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
+	else
+		return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
+	//todo now 2 codes are never returned - DBUS_REQUEST_NAME_REPLY_EXISTS and DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
+}
+
+/**
+ * Checks if the connection's transport is kdbus on the basis of its address
+ *
+ * @param pointer to the connection
+ * @returns TRUE if kdbus transport, otherwise FALSE
+ */
+dbus_bool_t dbus_transport_is_kdbus(DBusConnection *connection)
+{
+	const char* address = _dbus_connection_get_address(connection);
+
+	if(address == strstr(address, "kdbus:path="))
+		return TRUE;
+	else
+		return FALSE;
 }
