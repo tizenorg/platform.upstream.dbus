@@ -1249,7 +1249,7 @@ dbus_bus_request_name (DBusConnection *connection,
 	}
 	else
 	{
-		if(!bus_register_kdbus_policy(name, connection, error))  //todo should it be here?
+		if(!bus_register_kdbus_policy(name, connection, error))  //todo check what to do with policy if program doesn't use dbus_bus_request_name
 			return -1;
 
 		result = bus_request_name_kdbus(connection, name, flags, error);
@@ -1612,32 +1612,37 @@ dbus_bus_add_match (DBusConnection *connection,
                     const char     *rule,
                     DBusError      *error)
 {
-  DBusMessage *msg;
+	_dbus_return_if_fail (rule != NULL);
 
-  _dbus_return_if_fail (rule != NULL);
+	if(!dbus_transport_is_kdbus(connection))
+	{
+		DBusMessage *msg;
 
-  msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+		msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
                                       DBUS_PATH_DBUS,
                                       DBUS_INTERFACE_DBUS,
                                       "AddMatch");
 
-  if (msg == NULL)
-    {
-      _DBUS_SET_OOM (error);
-      return;
-    }
+	  if (msg == NULL)
+		{
+		  _DBUS_SET_OOM (error);
+		  return;
+		}
 
-  if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
-                                 DBUS_TYPE_INVALID))
-    {
-      dbus_message_unref (msg);
-      _DBUS_SET_OOM (error);
-      return;
-    }
+	  if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
+									 DBUS_TYPE_INVALID))
+		{
+		  dbus_message_unref (msg);
+		  _DBUS_SET_OOM (error);
+		  return;
+		}
 
-  send_no_return_values (connection, msg, error);
+	  send_no_return_values (connection, msg, error);
 
-  dbus_message_unref (msg);
+	  dbus_message_unref (msg);
+	}
+	else
+		dbus_bus_add_match_kdbus(connection, rule, error);
 }
 
 /**

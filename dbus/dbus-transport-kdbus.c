@@ -1603,9 +1603,12 @@ uint64_t bus_request_name_kdbus(DBusConnection *connection, const char *name, co
 
 	_dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
 
+	_DBUS_ASSERT_ERROR_IS_CLEAR (error);
 	if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name))
 	{
 		dbus_set_error(error,_dbus_error_from_errno (errno), "error acquiring name: %s", _dbus_strerror (errno));
+		if(errno == EEXIST)
+			return DBUS_REQUEST_NAME_REPLY_EXISTS;
 		return FALSE;
 	}
 
@@ -1615,7 +1618,7 @@ uint64_t bus_request_name_kdbus(DBusConnection *connection, const char *name, co
 		return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
 	else
 		return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
-	//todo now 2 codes are never returned - DBUS_REQUEST_NAME_REPLY_EXISTS and DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
+	//todo now 1 codes are never returned -  DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
 }
 
 /**
@@ -1632,4 +1635,30 @@ dbus_bool_t dbus_transport_is_kdbus(DBusConnection *connection)
 		return TRUE;
 	else
 		return FALSE;
+}
+
+void dbus_bus_add_match_kdbus (DBusConnection *connection, const char *rule, DBusError *error)
+{
+	struct kdbus_cmd_match cmd_match;
+	int fd;
+
+	memset(&cmd_match, 0, sizeof(cmd_match));
+
+	if(!dbus_connection_get_socket(connection, &fd))
+	{
+		dbus_set_error (error, "failed to get fd for add match", NULL);
+		return;
+	}
+
+	cmd_match.size = sizeof(cmd_match);
+
+	//todo add matching rules from *rule when it will be docuemnted in kdbus
+
+
+	cmd_match.src_id = KDBUS_MATCH_SRC_ID_ANY;
+
+	if (ioctl(fd, KDBUS_CMD_MATCH_ADD, &cmd_match))
+		dbus_set_error(error,_dbus_error_from_errno (errno), "error adding match: %s", _dbus_strerror (errno));
+
+	_dbus_verbose("Finished adding match bus rule %s             !!!!!!!!!\n", rule);
 }
