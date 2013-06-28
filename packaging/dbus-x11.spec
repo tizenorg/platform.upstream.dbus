@@ -31,6 +31,7 @@ Source3:        dbus_at_console.ck
 Source4:        baselibs.conf
 Source5:        dbus-user.service
 Source6:        dbus-user.socket
+Source1001: 	dbus-x11.manifest
 BuildRequires:  libcap-ng-devel
 # COMMON1-END
 # COMMON1-END
@@ -43,6 +44,7 @@ in this separate package so server systems need not install X.
 # COMMON2-BEGIN
 # COMMON2-BEGIN
 %setup -n dbus-%{version} -q
+cp %{SOURCE1001} .
 
 %build
 autoreconf -fi
@@ -85,6 +87,7 @@ rm -rf $tdir
 %{__rm} -rf %{buildroot}
 
 %files
+%manifest %{name}.manifest
 %defattr(-,root,root)
 %{_bindir}/dbus-launch
 %{_mandir}/man1/dbus-launch.1*
