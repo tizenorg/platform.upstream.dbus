@@ -3002,6 +3002,24 @@ dbus_connection_get_is_authenticated (DBusConnection *connection)
 }
 
 /**
+ * Sets authenticated status for connection. Needed for kdbus, where authentication is
+ * made in different manner.
+ *
+ * @param connection the connection
+ */
+dbus_bool_t
+dbus_connection_set_is_authenticated (DBusConnection *connection)
+{
+  _dbus_return_val_if_fail (connection != NULL, FALSE);
+
+  CONNECTION_LOCK (connection);
+  connection->transport->authenticated = TRUE;
+  CONNECTION_UNLOCK (connection);
+
+  return TRUE;
+}
+
+/**
  * Gets whether the connection is not authenticated as a specific
  * user.  If the connection is not authenticated, this function
  * returns #TRUE, and if it is authenticated but as an anonymous user,
@@ -4246,7 +4264,7 @@ static DBusDispatchStatus
 _dbus_connection_get_dispatch_status_unlocked (DBusConnection *connection)
 {
   HAVE_LOCK_CHECK (connection);
-  
+
   if (connection->n_incoming > 0)
     return DBUS_DISPATCH_DATA_REMAINS;
   else if (!_dbus_transport_queue_messages (connection->transport))
@@ -4255,7 +4273,7 @@ _dbus_connection_get_dispatch_status_unlocked (DBusConnection *connection)
     {
       DBusDispatchStatus status;
       dbus_bool_t is_connected;
-      
+
       status = _dbus_transport_get_dispatch_status (connection->transport);
       is_connected = _dbus_transport_get_is_connected (connection->transport);
 

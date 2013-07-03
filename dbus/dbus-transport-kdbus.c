@@ -16,6 +16,7 @@
 #include <kdbus.h>
 #include "dbus-watch.h"
 #include "dbus-errors.h"
+#include "dbus-bus.h"
 #include <fcntl.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -24,10 +25,19 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-
+#include <sys/mman.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
+#define KDBUS_PART_HEADER_SIZE offsetof(struct kdbus_item, data)
+#define KDBUS_ITEM_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
 
+#define KDBUS_PART_NEXT(part) \
+	(typeof(part))(((uint8_t *)part) + KDBUS_ALIGN8((part)->size))
+#define KDBUS_PART_FOREACH(part, head, first)				\
+	for (part = (head)->first;					\
+	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
+	     part = KDBUS_PART_NEXT(part))
+#define POOL_SIZE (16 * 1024LU * 1024LU)
 
 /*struct and type below copied from dbus_transport_socket.c
  * needed for _dbus_transport_new_for_socket_kdbus and kdbus_vtable(?)
@@ -66,7 +76,6 @@ struct DBusTransportSocket
 };
 
 
-
 //prototypes of local functions, needed for compiler
 int _dbus_connect_kdbus (const char *path, DBusError *error);
 DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError *error);
@@ -74,10 +83,125 @@ DBusTransport* _dbus_transport_new_for_socket_kdbus (int fd, const DBusString *s
 struct kdbus_policy *make_policy_name(const char *name);
 struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id);
 void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size);
+int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd);
 
-/* Functions from dbus_transport_socket - to be modified or reused
- *
- */
+static dbus_bool_t
+socket_get_socket_fd (DBusTransport *transport,
+                      int           *fd_p)
+{
+  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+
+  *fd_p = socket_transport->fd;
+
+  return TRUE;
+}
+
+int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
+{
+	struct kdbus_msg *msg;
+	struct kdbus_item *item;
+	uint64_t size;
+	const char *name;
+	uint64_t dst_id = KDBUS_DST_ID_BROADCAST;
+    const DBusString *header;
+    const DBusString *body;
+    uint64_t ret_size;
+
+    if((name = dbus_message_get_destination(message)))
+    {
+    	_dbus_verbose ("do writing destination: %s\n", name); //todo can be removed at the end
+    	if((name[0] == '1') && (name[1] == ':'))
+    	{
+    		dst_id = strtoll(&name[2], NULL, 10);
+    		_dbus_verbose ("do writing uniqe id: %lu\n", dst_id); //todo can be removed at the end
+    		name = NULL;
+    	}
+    }
+
+    _dbus_message_get_network_data (message, &header, &body);
+    ret_size = (uint64_t)_dbus_string_get_length(header);
+
+    _dbus_verbose("padding bytes for header: %lu \n", KDBUS_ALIGN8(ret_size) - ret_size);
+
+    size = sizeof(struct kdbus_msg);
+	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+	if(KDBUS_ALIGN8(ret_size) - ret_size)  //if padding needed
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //additional structure for padding null bytes
+	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+
+	if (dst_id == KDBUS_DST_ID_BROADCAST)
+		size += KDBUS_PART_HEADER_SIZE + 64;
+
+	if (name)
+		size += KDBUS_ITEM_SIZE(strlen(name) + 1);
+
+	msg = malloc(size);
+	if (!msg)
+	{
+		_dbus_verbose("Error allocating memory for: %s,%s\n", _dbus_strerror (errno), _dbus_error_from_errno (errno));
+		return -1;
+	}
+
+	memset(msg, 0, size);
+	msg->size = size;
+	msg->src_id = strtoll(dbus_bus_get_unique_name(connection), NULL , 10);
+	_dbus_verbose("sending msg, src_id=%llu\n", msg->src_id);
+	msg->dst_id = name ? 0 : dst_id;
+	msg->cookie = dbus_message_get_serial(message);
+	msg->payload_type = KDBUS_PAYLOAD_DBUS1;
+
+	item = msg->items;
+
+	if (name)
+	{
+		item->type = KDBUS_MSG_DST_NAME;
+		item->size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
+		strcpy(item->str, name);
+		item = KDBUS_PART_NEXT(item);
+	}
+
+	item->type = KDBUS_MSG_PAYLOAD_VEC;
+	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
+	item->vec.address = (uint64_t)header;
+	item->vec.size = ret_size;
+	item = KDBUS_PART_NEXT(item);
+
+	if(KDBUS_ALIGN8(ret_size) - ret_size)
+	{
+		item->type = KDBUS_MSG_PAYLOAD_VEC;
+		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
+		item->vec.address = (uint64_t)NULL;
+		item->vec.size = KDBUS_ALIGN8(ret_size) - ret_size;
+		item = KDBUS_PART_NEXT(item);
+	}
+
+	item->type = KDBUS_MSG_PAYLOAD_VEC;
+	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
+	item->vec.address = (uint64_t)body;//&ref2;
+	item->vec.size = (uint64_t)_dbus_string_get_length(body);
+	ret_size += item->vec.size;
+	item = KDBUS_PART_NEXT(item);
+
+	if (dst_id == KDBUS_DST_ID_BROADCAST)
+	{
+		item->type = KDBUS_MSG_BLOOM;
+		item->size = KDBUS_PART_HEADER_SIZE + 64;
+	}
+
+	again:
+	if (ioctl(fd, KDBUS_CMD_MSG_SEND, msg))
+	{
+		if(errno == EINTR)
+			goto again;
+		_dbus_verbose("error sending message: err %d (%m)\n", errno);
+		return -1;
+	}
+
+	free(msg);
+
+	return ret_size;
+}
+
 static void
 free_watches (DBusTransport *transport)
 {
@@ -536,8 +660,8 @@ do_writing (DBusTransport *transport)
       DBusMessage *message;
       const DBusString *header;
       const DBusString *body;
-      int header_len, body_len;
       int total_bytes_to_write;
+
 
       if (total > socket_transport->max_bytes_written_per_iteration)
         {
@@ -550,19 +674,18 @@ do_writing (DBusTransport *transport)
       _dbus_assert (message != NULL);
       dbus_message_lock (message);
 
+      _dbus_message_get_network_data (message, &header, &body);
+      total_bytes_to_write = _dbus_string_get_length(header) + _dbus_string_get_length(body);
+
 #if 0
       _dbus_verbose ("writing message %p\n", message);
 #endif
 
-      _dbus_message_get_network_data (message,
-                                      &header, &body);
+      bytes_written = kdbus_write_msg(transport->connection, message, socket_transport->fd);
 
-      header_len = _dbus_string_get_length (header);
-      body_len = _dbus_string_get_length (body);
-
-      if (_dbus_auth_needs_encoding (transport->auth))
+/*     if (_dbus_auth_needs_encoding (transport->auth))
         {
-          /* Does fd passing even make sense with encoded data? */
+          // Does fd passing even make sense with encoded data?
           _dbus_assert(!DBUS_TRANSPORT_CAN_SEND_UNIX_FD(transport));
 
           if (_dbus_string_get_length (&socket_transport->encoded_outgoing) == 0)
@@ -608,7 +731,7 @@ do_writing (DBusTransport *transport)
 #ifdef HAVE_UNIX_FD_PASSING
           if (socket_transport->message_bytes_written <= 0 && DBUS_TRANSPORT_CAN_SEND_UNIX_FD(transport))
             {
-              /* Send the fds along with the first byte of the message */
+              // Send the fds along with the first byte of the message
               const int *unix_fds;
               unsigned n;
 
@@ -651,7 +774,7 @@ do_writing (DBusTransport *transport)
                 }
             }
         }
-
+*/
       if (bytes_written < 0)
         {
           /* EINTR already handled for us */
@@ -1039,16 +1162,16 @@ socket_connection_set (DBusTransport *transport)
  * messages).
  */
 static  void
-socket_do_iteration (DBusTransport *transport,
+kdbus_do_iteration (DBusTransport *transport,
                    unsigned int   flags,
                    int            timeout_milliseconds)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
-  DBusPollFD poll_fd;
-  int poll_res;
-  int poll_timeout;
+	DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+	DBusPollFD poll_fd;
+	int poll_res;
+	int poll_timeout;
 
-  _dbus_verbose (" iteration flags = %s%s timeout = %d read_watch = %p write_watch = %p fd = %d\n",
+	_dbus_verbose (" iteration flags = %s%s timeout = %d read_watch = %p write_watch = %p fd = %d\n",
                  flags & DBUS_ITERATION_DO_READING ? "read" : "",
                  flags & DBUS_ITERATION_DO_WRITING ? "write" : "",
                  timeout_milliseconds,
@@ -1130,12 +1253,22 @@ socket_do_iteration (DBusTransport *transport,
           _dbus_verbose ("unlock pre poll\n");
           _dbus_connection_unlock (transport->connection);
         }
-
+ /*     _dbus_verbose ("poll_fd.events: %x\n", poll_fd.events);
+      _dbus_verbose ("timeout: %d\n", poll_timeout);
     again:
-      poll_res = _dbus_poll (&poll_fd, 1, poll_timeout);
+      poll_res = _dbus_poll (&poll_fd, 1, poll_timeout);  //todo stops on select
 
       if (poll_res < 0 && _dbus_get_is_errno_eintr ())
-	goto again;
+      {
+          _dbus_verbose ("Error from _dbus_poll(): %s\n",
+                         _dbus_strerror_from_errno ());
+    	  goto again;
+      }
+      _dbus_verbose ("poll_fd.revents: %x\n", poll_fd.revents);*/
+
+      poll_res = poll_timeout;			// todo temporary walkaround of above problem
+      poll_res = 1;							// todo temporary walkaround of above problem
+      poll_fd.revents = poll_fd.events;    // todo temporary walkaround of above problem
 
       if (flags & DBUS_ITERATION_BLOCK)
         {
@@ -1205,24 +1338,12 @@ socket_live_messages_changed (DBusTransport *transport)
   check_read_watch (transport);
 }
 
-
-static dbus_bool_t
-socket_get_socket_fd (DBusTransport *transport,
-                      int           *fd_p)
-{
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
-
-  *fd_p = socket_transport->fd;
-
-  return TRUE;
-}
-
 static const DBusTransportVTable kdbus_vtable = {
   socket_finalize,
   socket_handle_watch,
   socket_disconnect,
   socket_connection_set,
-  socket_do_iteration,
+  kdbus_do_iteration,
   socket_live_messages_changed,
   socket_get_socket_fd
 };
@@ -1548,7 +1669,7 @@ dbus_bool_t bus_register_kdbus(char** unique_name, DBusConnection *connection, D
 			   KDBUS_HELLO_ATTACH_SECLABEL |
 			   KDBUS_HELLO_ATTACH_AUDIT;
 	hello.size = sizeof(struct kdbus_cmd_hello);
-	hello.pool_size = (16 * 1024LU * 1024LU);  //todo was: #define POOL_SIZE
+	hello.pool_size = POOL_SIZE;
 
 	if(!dbus_connection_get_socket(connection, &fd))
 	{
@@ -1562,12 +1683,19 @@ dbus_bool_t bus_register_kdbus(char** unique_name, DBusConnection *connection, D
 	}
 
 	_dbus_verbose("-- Our peer ID is: %llu\n", (unsigned long long)hello.id);
-	sprintf(name, "%llx", (unsigned long long)hello.id);
+	sprintf(name, "%llu", (unsigned long long)hello.id);
 	*unique_name = _dbus_strdup(name);
 	if (*unique_name == NULL)
 	{
 	  _DBUS_SET_OOM (error);
 	  return FALSE;
+	}
+
+//	conn->buf = mmap(NULL, POOL_SIZE, PROT_READ, MAP_SHARED, fd, 0);
+	if (mmap(NULL, POOL_SIZE, PROT_READ, MAP_SHARED, fd, 0) == MAP_FAILED)  //todo WTF
+	{
+		_dbus_verbose("--- error mmap (%m)\n");
+		return FALSE;
 	}
 
 	return TRUE;

@@ -186,6 +186,8 @@ dbus_bool_t        dbus_connection_get_is_connected             (DBusConnection 
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_authenticated         (DBusConnection             *connection);
 DBUS_EXPORT
+dbus_bool_t        dbus_connection_set_is_authenticated         (DBusConnection             *connection);
+DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_anonymous             (DBusConnection             *connection);
 DBUS_EXPORT
 char*              dbus_connection_get_server_id                (DBusConnection             *connection);

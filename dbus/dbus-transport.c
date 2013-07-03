@@ -119,7 +119,19 @@ _dbus_transport_init_base (DBusTransport             *transport,
   if (server_guid)
     auth = _dbus_auth_server_new (server_guid);
   else
-    auth = _dbus_auth_client_new ();
+  {
+	  _dbus_assert (address != NULL);
+	  if (!_dbus_string_copy_data (address, &address_copy))
+        {
+          _dbus_message_loader_unref (loader);
+          return FALSE;
+        }
+      if(address_copy == strstr(address_copy, "kdbus:path="))
+      	  auth = _dbus_auth_client_new_kdbus();
+	  else
+		  auth = _dbus_auth_client_new ();
+  }
+
   if (auth == NULL)
     {
       _dbus_message_loader_unref (loader);
@@ -150,8 +162,8 @@ _dbus_transport_init_base (DBusTransport             *transport,
     }
   else
     {
-      _dbus_assert (address != NULL);
-
+      _dbus_assert (address != NULL);  /*TODO duplicated above in that function because of kdbus
+      maybe to be optimized when final kdbus authorization will be done */
       if (!_dbus_string_copy_data (address, &address_copy))
         {
           _dbus_credentials_unref (creds);
@@ -992,7 +1004,7 @@ recover_unused_bytes (DBusTransport *transport)
       const DBusString *encoded;
       DBusString *buffer;
       int orig_len;
-      
+
       if (!_dbus_string_init (&plaintext))
         goto nomem;
       
@@ -1005,12 +1017,12 @@ recover_unused_bytes (DBusTransport *transport)
           _dbus_string_free (&plaintext);
           goto nomem;
         }
-      
+
       _dbus_message_loader_get_buffer (transport->loader,
                                        &buffer);
       
       orig_len = _dbus_string_get_length (buffer);
-      
+
       if (!_dbus_string_move (&plaintext, 0, buffer,
                               orig_len))
         {
@@ -1042,7 +1054,7 @@ recover_unused_bytes (DBusTransport *transport)
                                        &buffer);
                 
       orig_len = _dbus_string_get_length (buffer);
-                
+
       _dbus_auth_get_unused_bytes (transport->auth,
                                    &bytes);
 
