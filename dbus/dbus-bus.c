@@ -1195,7 +1195,7 @@ dbus_bus_request_name (DBusConnection *connection,
 	}
 	else
 	{
-		if(!bus_register_kdbus_policy(name, connection, error))  //todo check what to do with policy if program doesn't use dbus_bus_request_name
+		if(!bus_register_policy_kdbus(name, connection, error))  //todo check what to do with policy if program doesn't use dbus_bus_request_name
 			return -1;
 		dbus_connection_set_is_authenticated(connection);
 

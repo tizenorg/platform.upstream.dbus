@@ -45,6 +45,7 @@
 #include "dbus-bus.h"
 #include "dbus-marshal-basic.h"
 #include "dbus-transport-kdbus.h"
+#include <stdlib.h>
 
 #ifdef DBUS_DISABLE_CHECKS
 #define TOOK_LOCK_CHECK(connection)
@@ -2058,6 +2059,23 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
   _dbus_verbose ("Message %p serial is %u\n",
                  message, dbus_message_get_serial (message));
   
+  if(dbus_transport_is_kdbus(connection))
+  {
+	  const char* name;
+	  char* sender;
+
+	  name = dbus_bus_get_unique_name(connection);
+	  sender = malloc (strlen(name) + 4);
+	  if(sender)
+	  {
+		  strcpy(sender,":1.");
+		  strcpy(&sender[3], name);
+		  _dbus_verbose ("Message sender: %s\n", sender);
+		  dbus_message_set_sender(message, sender);
+		  free((void*)sender);
+	  }
+  }
+
   dbus_message_lock (message);
 
   /* Now we need to run an iteration to hopefully just write the messages

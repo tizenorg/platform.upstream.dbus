@@ -553,7 +553,7 @@ do_writing (DBusTransport *transport)
       header_len = _dbus_string_get_length (header);
       body_len = _dbus_string_get_length (body);
 
-  /*    fprintf (stderr, "\nheader:\n");  //todo for test - to remove
+  /*    fprintf (stderr, "\nheader:\n");  //todo for test - to remove together wit int i declaration above
       for(i=0; i < header_len; i++)
       {
       	fprintf (stderr, "%02x", _dbus_string_get_byte(header,i));

@@ -113,14 +113,15 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
     const DBusString *body;
     uint64_t ret_size;
 
-    uint64_t i;
+//    uint64_t i;
 
     if((name = dbus_message_get_destination(message)))
     {
     	_dbus_verbose ("do writing destination: %s\n", name); //todo can be removed at the end
-    	if((name[0] == '1') && (name[1] == ':'))
+    	dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
+    	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))
     	{
-    		dst_id = strtoll(&name[2], NULL, 10);
+    		dst_id = strtoll(&name[3], NULL, 10);
     		_dbus_verbose ("do writing uniqe id: %lu\n", dst_id); //todo can be removed at the end
     		name = NULL;
     	}
@@ -129,19 +130,19 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
     _dbus_message_get_network_data (message, &header, &body);
     ret_size = (uint64_t)_dbus_string_get_length(header);
 
-    fprintf (stderr, "\nheader:\n");
+  /*  fprintf (stderr, "\nheader:\n");
     for(i=0; i < ret_size; i++)
     {
     	fprintf (stderr, "%02x", _dbus_string_get_byte(header,i));
     }
-    fprintf (stderr, "\nret size: %lu, i: %lu\n", ret_size, i);
+    fprintf (stderr, "\nret size: %lu, i: %lu\n", ret_size, i);*/
 
-    _dbus_verbose("padding bytes for header: %lu \n", KDBUS_ALIGN8(ret_size) - ret_size);
+//    _dbus_verbose("padding bytes for header: %lu \n", KDBUS_ALIGN8(ret_size) - ret_size);
 
     size = sizeof(struct kdbus_msg);
 	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-	if(KDBUS_ALIGN8(ret_size) - ret_size)  //if padding needed
-		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //additional structure for padding null bytes
+//	if(KDBUS_ALIGN8(ret_size) - ret_size)  //if padding needed
+//		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //additional structure for padding null bytes
 	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
 
 	if (dst_id == KDBUS_DST_ID_BROADCAST)
@@ -181,16 +182,14 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
 	item->vec.size = ret_size;
 	item = KDBUS_PART_NEXT(item);
 
-
-
-	if(KDBUS_ALIGN8(ret_size) - ret_size)
+/*	if(KDBUS_ALIGN8(ret_size) - ret_size)
 	{
 		item->type = KDBUS_MSG_PAYLOAD_VEC;
 		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
 		item->vec.address = (uint64_t)NULL;
 		item->vec.size = KDBUS_ALIGN8(ret_size) - ret_size;
 		item = KDBUS_PART_NEXT(item);
-	}
+	}*/
 
 	item->type = KDBUS_MSG_PAYLOAD_VEC;
 	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
@@ -198,12 +197,12 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
 	item->vec.size = (uint64_t)_dbus_string_get_length(body);
 	ret_size += item->vec.size;
 
-    fprintf (stderr, "\nbody:\n");
+  /*  fprintf (stderr, "\nbody:\n");
     for(i=0; i < item->vec.size; i++)
     {
     	fprintf (stderr, "%02x", _dbus_string_get_byte(body,i));
     }
-    fprintf (stderr, "\nitem->vec.size: %llu, i: %lu\n", item->vec.size, i);
+    fprintf (stderr, "\nitem->vec.size: %llu, i: %lu\n", item->vec.size, i);*/
 
 
 	item = KDBUS_PART_NEXT(item);
@@ -1945,7 +1944,7 @@ void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *pol
 	free(policy);
 }
 
-dbus_bool_t bus_register_kdbus_policy(const char* name, DBusConnection *connection, DBusError *error)
+dbus_bool_t bus_register_policy_kdbus(const char* name, DBusConnection *connection, DBusError *error)
 {
 	struct kdbus_cmd_policy *cmd_policy;
 	struct kdbus_policy *policy;
