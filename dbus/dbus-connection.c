@@ -1845,21 +1845,6 @@ connection_try_from_address_entry (DBusAddressEntry *entry,
   _dbus_assert (!connection->have_connection_lock);
 #endif
 
-  /* kdbus add-on [RP] - bus register for kdbus
-   * Function checks if the method is kdbus. If yes - it registers on the bus, if no - does nothing and returns TRUE
-   * Must be invoked before dbus_bus_register because in kdbus it's realized in different manner
-   * and dbus_bus_register can not be used for that.
-   * It does not collide with dbus_bus_register because dbus_bus_register at the beginning checks
-   * whether unique_name has already been assigned and doesn't try to do it again.
-   */
-
-  if(!dbus_bus_register_kdbus(entry, connection, error))
-  {
-	  _dbus_connection_close_possibly_shared (connection);
-      dbus_connection_unref (connection);
-      connection = NULL;
-  }
-
   return connection;
 }
 
@@ -6317,7 +6302,6 @@ dbus_connection_get_outgoing_unix_fds (DBusConnection *connection)
   return res;
 }
 
-//#ifdef DBUS_BUILD_TESTS
 /**
  * Returns the address of the transport object of this connection
  *
@@ -6329,6 +6313,14 @@ _dbus_connection_get_address (DBusConnection *connection)
 {
   return _dbus_transport_get_address (connection->transport);
 }
-//#endif
+
+DBusTransport*
+dbus_connection_get_transport(DBusConnection *connection)
+{
+	_dbus_return_val_if_fail (connection != NULL, NULL);
+
+	return connection->transport;
+}
+
 
 /** @} */

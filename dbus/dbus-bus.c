@@ -602,70 +602,6 @@ dbus_bus_get_private (DBusBusType  type,
   return internal_bus_get (type, TRUE, error);
 }
 
-/* kdbus add-on [RP] - bus register for kdbus
- * Function checks if the method is kdbus. If yes - it registers on the bus, if no - does nothing and returns TRUE
- * Must be invoked before dbus_bus_register because in kdbus it's realized in different manner
- * and dbus_bus_register can not be used for that.
- * It does not collide with dbus_bus_register because dbus_bus_register at the beginning checks
- * whether unique_name has already been assigned and doesn't try to do it again.
- */
-dbus_bool_t dbus_bus_register_kdbus(DBusAddressEntry *entry, DBusConnection *connection, DBusError *error)
-{
-	dbus_bool_t retval = TRUE;
-	const char *method;
-
-	method = dbus_address_entry_get_method (entry);
-	_dbus_assert (method != NULL);
-
-	if (strcmp (method, "kdbus") == 0)
-    {
-		BusData *bd;
-
-		_dbus_return_val_if_fail (connection != NULL, FALSE);
-		_dbus_return_val_if_error_is_set (error, FALSE);
-
-		retval = FALSE;
-
-		if (!_DBUS_LOCK (bus_datas))
-		{
-		  _DBUS_SET_OOM (error);
-		  /* do not "goto out", that would try to unlock */
-		  return FALSE;
-		}
-
-		bd = ensure_bus_data (connection);
-		if (bd == NULL)
-		{
-		  _DBUS_SET_OOM (error);
-		  goto out;
-		}
-
-		if (bd->unique_name != NULL)
-		{
-		  _dbus_verbose ("Ignoring attempt to register the same DBusConnection %s with the kdbus message bus a second time.\n",
-						 bd->unique_name);
-		  /* Success! */
-		  retval = TRUE;
-		  goto out;
-		}
-
-		if(!bus_register_kdbus(&bd->unique_name, connection, error))
-			goto out;
-
-//		if(!bus_register_kdbus_policy(bd->unique_name, connection, error))   //todo should it be here?
-//			goto out;
-
-		retval = TRUE;
-
-		out:
-		_DBUS_UNLOCK (bus_datas);
-
-		if (!retval)
-		_DBUS_ASSERT_ERROR_IS_SET (error);
-    }
-	return retval;
-}
-
 /**
  * Registers a connection with the bus. This must be the first
  * thing an application does when connecting to the message bus.
@@ -753,28 +689,38 @@ dbus_bus_register (DBusConnection *connection,
       retval = TRUE;
       goto out;
     }
-  
-  message = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
-                                          DBUS_PATH_DBUS,
-                                          DBUS_INTERFACE_DBUS,
-                                          "Hello"); 
+  if(dbus_transport_is_kdbus(connection))
+  {
+	  if(!bus_register_kdbus(name, connection, error))
+		  goto out;
 
-  if (!message)
-    {
-      _DBUS_SET_OOM (error);
-      goto out;
-    }
-  
-  reply = dbus_connection_send_with_reply_and_block (connection, message, -1, error);
+/*	  if(!bus_register_kdbus_policy(bd->unique_name, connection, error))   //todo should it be here?
+		goto out;*/
+  }
+  else
+  {
+	  message = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+											  DBUS_PATH_DBUS,
+											  DBUS_INTERFACE_DBUS,
+											  "Hello");
 
-  if (reply == NULL)
-    goto out;
-  else if (dbus_set_error_from_message (error, reply))
-    goto out;
-  else if (!dbus_message_get_args (reply, error,
-                                   DBUS_TYPE_STRING, &name,
-                                   DBUS_TYPE_INVALID))
-    goto out;
+	  if (!message)
+		{
+		  _DBUS_SET_OOM (error);
+		  goto out;
+		}
+
+	  reply = dbus_connection_send_with_reply_and_block (connection, message, -1, error);
+
+	  if (reply == NULL)
+		goto out;
+	  else if (dbus_set_error_from_message (error, reply))
+		goto out;
+	  else if (!dbus_message_get_args (reply, error,
+									   DBUS_TYPE_STRING, &name,
+									   DBUS_TYPE_INVALID))
+		goto out;
+  }
 
   bd->unique_name = _dbus_strdup (name);
   if (bd->unique_name == NULL)
@@ -782,7 +728,7 @@ dbus_bus_register (DBusConnection *connection,
       _DBUS_SET_OOM (error);
       goto out;
     }
-  
+  //_dbus_verbose("-- Our uniqe name is: %s\n", bd->unique_name);
   retval = TRUE;
   
  out:
