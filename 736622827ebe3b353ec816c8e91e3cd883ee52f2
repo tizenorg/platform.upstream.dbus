@@ -1,0 +1,8 @@
+Change-Id: I736622827ebe3b353ec816c8e91e3cd883ee52f2
+Code-Review+2: Ryan Ware <ware@linux.intel.com>
+Verified+1: Ryan Ware <ware@linux.intel.com>
+Submitted-by: Ryan Ware <ware@linux.intel.com>
+Submitted-at: Mon, 08 Jul 2013 09:40:57 -0700
+Reviewed-on: https://review.tizen.org/gerrit/4718
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
