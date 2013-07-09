@@ -119,7 +119,7 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
     {
     	_dbus_verbose ("do writing destination: %s\n", name); //todo can be removed at the end
     	dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
-    	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))
+    	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.')) //if name starts with :1. it is a unique name and should be send as number
     	{
     		dst_id = strtoll(&name[3], NULL, 10);
     		_dbus_verbose ("do writing uniqe id: %lu\n", dst_id); //todo can be removed at the end
