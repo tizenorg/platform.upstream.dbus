@@ -141,8 +141,6 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
 
     size = sizeof(struct kdbus_msg);
 	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-//	if(KDBUS_ALIGN8(ret_size) - ret_size)  //if padding needed
-//		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //additional structure for padding null bytes
 	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
 
 	if (dst_id == KDBUS_DST_ID_BROADCAST)
@@ -182,15 +180,6 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
 	item->vec.size = ret_size;
 	item = KDBUS_PART_NEXT(item);
 
-/*	if(KDBUS_ALIGN8(ret_size) - ret_size)
-	{
-		item->type = KDBUS_MSG_PAYLOAD_VEC;
-		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-		item->vec.address = (uint64_t)NULL;
-		item->vec.size = KDBUS_ALIGN8(ret_size) - ret_size;
-		item = KDBUS_PART_NEXT(item);
-	}*/
-
 	item->type = KDBUS_MSG_PAYLOAD_VEC;
 	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
 	item->vec.address = (uint64_t)_dbus_string_get_const_data(body);
@@ -204,10 +193,7 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
     }
     fprintf (stderr, "\nitem->vec.size: %llu, i: %lu\n", item->vec.size, i);*/
 
-
 	item = KDBUS_PART_NEXT(item);
-
-
 
 	if (dst_id == KDBUS_DST_ID_BROADCAST)
 	{
@@ -379,8 +365,19 @@ LOOKUP(PAYLOAD);
 int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
 {
 	const struct kdbus_item *item = msg->items;
-	char buf[32];
+	char buf[32];  //todo to be removed after development
 	int ret_size = 0;
+	DBusMessage *message = NULL;
+	DBusMessageIter args;
+	char* pStringMallocked = NULL;
+	const char* dbus = "org.freedesktop.DBus";
+	const char* emptyString = "";
+    const DBusString *header;
+    const DBusString *body;
+    int size;
+    const char* pString = NULL;
+
+//    uint64_t i;
 
 	_dbus_verbose("MESSAGE: %s (%llu bytes) flags=0x%llx, %s → %s, cookie=%llu, timeout=%llu\n",
 		enum_PAYLOAD(msg->payload_type), (unsigned long long) msg->size,
@@ -390,7 +387,8 @@ int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
 
 	KDBUS_PART_FOREACH(item, msg, items)
 	{
-		if (item->size <= KDBUS_PART_HEADER_SIZE) {
+		if (item->size <= KDBUS_PART_HEADER_SIZE)
+		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
 			break;  //todo to be discovered and rewritten
 		}
@@ -531,26 +529,319 @@ int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
 					   (unsigned long long)item->timestamp.monotonic_ns);
 				break;
 
-			case KDBUS_MSG_REPLY_TIMEOUT:
+			case KDBUS_MSG_REPLY_TIMEOUT:  //todo translate to kdbus message
 				_dbus_verbose("  +%s (%llu bytes) cookie=%llu\n",
 					   enum_MSG(item->type), item->size, msg->cookie_reply);
 				break;
 
 			case KDBUS_MSG_NAME_ADD:
+				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
+					enum_MSG(item->type), (unsigned long long) item->size,
+					item->name_change.name, item->name_change.old_id,
+					item->name_change.new_id, item->name_change.flags);
+
+				pStringMallocked = malloc (sizeof(item->name_change.new_id)*2.5 + 4);
+				if(pStringMallocked)
+				{
+					strcpy(pStringMallocked,":1.");
+					sprintf(&pStringMallocked[3],"%llu",item->name_change.new_id);
+					_dbus_verbose ("Name added for id: %s\n", pStringMallocked);  //todo to be removed
+				}
+				else
+					return -1;
+
+				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
+				            dbus, // interface name of the signal
+				            "NameOwnerChanged"); // name of the signal
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+				pString = item->name_change.name;
+				_dbus_verbose ("Name added: %s\n", pString);
+			    dbus_message_iter_init_append(message, &args);
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING,&pString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &emptyString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+
+				dbus_message_set_sender(message, dbus);
+				dbus_message_set_serial(message, 1);
+
+			    dbus_message_lock (message);
+			    _dbus_message_get_network_data (message, &header, &body);
+			    size = _dbus_string_get_length(header);
+				memcpy(data, _dbus_string_get_const_data(header), size);
+				data += size;
+				ret_size += size;
+				size = _dbus_string_get_length(body);
+				memcpy(data, _dbus_string_get_const_data(body), size);
+				data += size;
+				ret_size += size;
+			break;
+
 			case KDBUS_MSG_NAME_REMOVE:
+				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
+					enum_MSG(item->type), (unsigned long long) item->size,
+					item->name_change.name, item->name_change.old_id,
+					item->name_change.new_id, item->name_change.flags);
+
+				pStringMallocked = malloc (sizeof(item->name_change.old_id)*2.5 + 4);
+				if(pStringMallocked)
+				{
+					strcpy(pStringMallocked,":1.");
+					sprintf(&pStringMallocked[3],"%llu",item->name_change.old_id);
+					_dbus_verbose ("Name removed for id: %s\n", pStringMallocked);  //todo to be removed
+				}
+				else
+					return -1;
+
+				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
+				            dbus, // interface name of the signal
+				            "NameOwnerChanged"); // name of the signal
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+				pString = item->name_change.name;
+				_dbus_verbose ("Name removed: %s\n", pString);
+			    dbus_message_iter_init_append(message, &args);
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING,&pString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &emptyString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+
+				dbus_message_set_sender(message, dbus);
+				dbus_message_set_serial(message, 1);
+
+			    dbus_message_lock (message);
+			    _dbus_message_get_network_data (message, &header, &body);
+			    size = _dbus_string_get_length(header);
+				memcpy(data, _dbus_string_get_const_data(header), size);
+				data += size;
+				ret_size += size;
+				size = _dbus_string_get_length(body);
+				memcpy(data, _dbus_string_get_const_data(body), size);
+				data += size;
+				ret_size += size;
+
+			/*		fprintf (stderr, "\nheader: %llu\n", _dbus_string_get_length(header));
+				    for(i=0; i < _dbus_string_get_length(header); i++)
+				    {
+				    	fprintf (stderr, "%02x", (int)_dbus_string_get_byte(header,i));
+				    }
+					fprintf (stderr, "\nbody: %llu\n", _dbus_string_get_length(body));
+				    for(i=0; i < _dbus_string_get_length(body); i++)
+				    {
+				    	fprintf (stderr, "%02x", (int)_dbus_string_get_byte(body,i));
+				    }
+					fprintf (stderr, "\ndata: %llu\n", retsize);
+				    for(i=0; i < _dbus_string_get_length(body); i++)
+				    {
+				    	fprintf (stderr, "%02x", (int)_dbus_string_get_byte(body,i));
+				    }*/
+
+			break;
+
 			case KDBUS_MSG_NAME_CHANGE:
 				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
 					enum_MSG(item->type), (unsigned long long) item->size,
 					item->name_change.name, item->name_change.old_id,
 					item->name_change.new_id, item->name_change.flags);
+
+				pStringMallocked = malloc (sizeof(item->name_change.new_id)*2.5 + 4);
+				if(pStringMallocked)
+				{
+					strcpy(pStringMallocked,":1.");
+					sprintf(&pStringMallocked[3],"%llu",item->name_change.old_id);
+					_dbus_verbose ("Old id: %s\n", pStringMallocked);  //todo to be removed
+				}
+				else
+					return -1;
+
+				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
+				            dbus, // interface name of the signal
+				            "NameOwnerChanged"); // name of the signal
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+				pString = item->name_change.name;
+				_dbus_verbose ("Name changed: %s\n", pString);
+			    dbus_message_iter_init_append(message, &args);
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING,&pString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    sprintf(&pStringMallocked[3],"%llu",item->name_change.new_id);
+			    _dbus_verbose ("New id: %s\n", pStringMallocked);  //todo to be removed
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+
+				dbus_message_set_sender(message, dbus);
+				dbus_message_set_serial(message, 1);
+
+			    dbus_message_lock (message);
+			    _dbus_message_get_network_data (message, &header, &body);
+			    size = _dbus_string_get_length(header);
+				memcpy(data, _dbus_string_get_const_data(header), size);
+				data += size;
+				ret_size += size;
+				size = _dbus_string_get_length(body);
+				memcpy(data, _dbus_string_get_const_data(body), size);
+				data += size;
+				ret_size += size;
 			break;
 
 			case KDBUS_MSG_ID_ADD:
+				_dbus_verbose("  +%s (%llu bytes) id=%llu flags=%llu\n",
+					   enum_MSG(item->type), (unsigned long long) item->size,
+					   (unsigned long long) item->id_change.id,
+					   (unsigned long long) item->id_change.flags);
+
+				pStringMallocked = malloc (sizeof(item->id_change.id)*2.5 + 4);
+				if(pStringMallocked)
+				{
+					strcpy(pStringMallocked,":1.");
+					sprintf(&pStringMallocked[3],"%llu",item->id_change.id);
+					_dbus_verbose ("Id added: %s\n", pStringMallocked);  //todo to be removed
+				}
+				else
+					return -1;
+
+				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
+				            dbus, // interface name of the signal
+				            "NameOwnerChanged"); // name of the signal
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+			    dbus_message_iter_init_append(message, &args);
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &emptyString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+
+				dbus_message_set_sender(message, dbus);
+				dbus_message_set_serial(message, 1);
+
+			    dbus_message_lock (message);
+			    _dbus_message_get_network_data (message, &header, &body);
+			    size = _dbus_string_get_length(header);
+				memcpy(data, _dbus_string_get_const_data(header), size);
+				data += size;
+				ret_size += size;
+				size = _dbus_string_get_length(body);
+				memcpy(data, _dbus_string_get_const_data(body), size);
+				data += size;
+				ret_size += size;
+			break;
+
 			case KDBUS_MSG_ID_REMOVE:
 				_dbus_verbose("  +%s (%llu bytes) id=%llu flags=%llu\n",
 					   enum_MSG(item->type), (unsigned long long) item->size,
 					   (unsigned long long) item->id_change.id,
 					   (unsigned long long) item->id_change.flags);
+
+				pStringMallocked = malloc (sizeof(item->id_change.id)*2.5 + 4);
+				if(pStringMallocked)
+				{
+					strcpy(pStringMallocked,":1.");
+					sprintf(&pStringMallocked[3],"%llu",item->id_change.id);
+					_dbus_verbose ("Id removed: %s\n", pStringMallocked);  //todo to be removed
+				}
+				else
+					return -1;
+
+				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
+				            dbus, // interface name of the signal
+				            "NameOwnerChanged"); // name of the signal
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+			    dbus_message_iter_init_append(message, &args);
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pStringMallocked))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &emptyString))
+				{
+					ret_size = -1;
+			    	goto out;
+				}
+
+				dbus_message_set_sender(message, dbus);
+				dbus_message_set_serial(message, 1);
+
+			    dbus_message_lock (message);
+			    _dbus_message_get_network_data (message, &header, &body);
+			    size = _dbus_string_get_length(header);
+				memcpy(data, _dbus_string_get_const_data(header), size);
+				data += size;
+				ret_size += size;
+				size = _dbus_string_get_length(body);
+				memcpy(data, _dbus_string_get_const_data(body), size);
+				data += size;
+				ret_size += size;
 			break;
 
 			default:
@@ -562,6 +853,11 @@ int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
 	if ((char *)item - ((char *)msg + msg->size) >= 8)
 		_dbus_verbose("invalid padding at end of message\n");
 
+out:
+	if(message)
+		dbus_message_unref(message);
+	if(pStringMallocked)
+		free((void*)pStringMallocked);
 	return ret_size;
 }
 
@@ -576,7 +872,6 @@ int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer
 
 //	int i;
 
-	//todo this block maybe can be removed
 	_dbus_assert (socket_transport->max_bytes_read_per_iteration >= 0);
 	start = _dbus_string_get_length (buffer);
 	if (!_dbus_string_lengthen (buffer, socket_transport->max_bytes_read_per_iteration))
@@ -593,13 +888,13 @@ int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer
 		if(errno == EINTR)
 			goto again;
 		_dbus_verbose("kdbus error receiving message: %d (%m)\n", ret);
-		_dbus_string_set_length (buffer, start);  //todo probably to remove
+		_dbus_string_set_length (buffer, start);
 		return -1;
 	}
 
 	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
 
-	ret_size = kdbus_decode_msg(msg, data, socket_transport->kdbus_mmap_ptr); //todo data to be replaced by buffer
+	ret_size = kdbus_decode_msg(msg, data, socket_transport->kdbus_mmap_ptr);
 /*	fprintf (stderr, "\nmessage! start: %u, ret_size: %u\n", start, ret_size);
     for(i=0; i < ret_size; i++)
     {
@@ -1214,17 +1509,19 @@ do_reading (DBusTransport *transport)
   if (!dbus_watch_get_enabled (socket_transport->read_watch))
     return TRUE;
 
-  if (_dbus_auth_needs_decoding (transport->auth))  //todo
+  if (_dbus_auth_needs_decoding (transport->auth))
     {
       /* Does fd passing even make sense with encoded data? */
-      _dbus_assert(!DBUS_TRANSPORT_CAN_SEND_UNIX_FD(transport));
+    /*  _dbus_assert(!DBUS_TRANSPORT_CAN_SEND_UNIX_FD(transport));
 
       if (_dbus_string_get_length (&socket_transport->encoded_incoming) > 0)
         bytes_read = _dbus_string_get_length (&socket_transport->encoded_incoming);
       else
         bytes_read = _dbus_read_socket (socket_transport->fd,
                                         &socket_transport->encoded_incoming,
-                                        socket_transport->max_bytes_read_per_iteration);
+                                        socket_transport->max_bytes_read_per_iteration);*/
+
+	  bytes_read = kdbus_read_message(socket_transport,  &socket_transport->encoded_incoming);
 
       _dbus_assert (_dbus_string_get_length (&socket_transport->encoded_incoming) ==
                     bytes_read);
@@ -1294,7 +1591,7 @@ do_reading (DBusTransport *transport)
   else if (bytes_read == 0)
     {
       _dbus_verbose ("Disconnected from remote app\n");
-//      do_io_error (transport);  todo temporarily commented out for tests
+      do_io_error (transport);
       goto out;
     }
   else
@@ -2083,7 +2380,6 @@ dbus_bool_t dbus_transport_is_kdbus(DBusConnection *connection)
 {
 	const char* address = _dbus_connection_get_address(connection);
 
-	//todo maybe assert here if address == NULL
 	if(address == strstr(address, "kdbus:path="))
 		return TRUE;
 	else
