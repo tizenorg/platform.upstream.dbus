@@ -78,19 +78,6 @@ struct DBusTransportSocket
 };
 
 
-//prototypes of local functions, needed for compiler
-int _dbus_connect_kdbus (const char *path, DBusError *error);
-DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError *error);
-DBusTransport* _dbus_transport_new_for_socket_kdbus (int fd, const DBusString *server_guid, const DBusString *address);
-struct kdbus_policy *make_policy_name(const char *name);
-struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id);
-void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size);
-int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd);
-int kdbus_write_msg_encoded(DBusMessage *message, DBusTransportSocket *socket_transport);
-dbus_bool_t kdbus_mmap(DBusTransport* transport);
-int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer);
-int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr);
-
 static dbus_bool_t
 socket_get_socket_fd (DBusTransport *transport,
                       int           *fd_p)
@@ -102,7 +89,7 @@ socket_get_socket_fd (DBusTransport *transport,
   return TRUE;
 }
 
-int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
+static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
 {
 	struct kdbus_msg *msg;
 	struct kdbus_item *item;
@@ -215,7 +202,7 @@ int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
 	return ret_size;
 }
 
-int kdbus_write_msg_encoded(DBusMessage *message, DBusTransportSocket *socket_transport)
+static int kdbus_write_msg_encoded(DBusMessage *message, DBusTransportSocket *socket_transport)
 {
 	struct kdbus_msg *msg;
 	struct kdbus_item *item;
@@ -362,7 +349,7 @@ TABLE(PAYLOAD) = {
 LOOKUP(PAYLOAD);
 
   //todo handling of all msg items
-int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
+static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
 {
 	const struct kdbus_item *item = msg->items;
 	char buf[32];  //todo to be removed after development
@@ -861,7 +848,7 @@ out:
 	return ret_size;
 }
 
-int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer)
+static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer)
 {
 	int ret_size;
 	uint64_t offset;
@@ -1976,7 +1963,7 @@ static const DBusTransportVTable kdbus_vtable = {
  * @param address the transport's address
  * @returns the new transport, or #NULL if no memory.
  */
-DBusTransport*
+static DBusTransport*
 _dbus_transport_new_for_socket_kdbus (int	fd,
                                 	  const DBusString *server_guid,
                                 	  const DBusString *address)
@@ -2052,7 +2039,7 @@ _dbus_transport_new_for_socket_kdbus (int	fd,
  * @param error return location for error code
  * @returns connection file descriptor or -1 on error
  */
-int _dbus_connect_kdbus (const char *path, DBusError *error)
+static int _dbus_connect_kdbus (const char *path, DBusError *error)
 {
 	int fd;
 
@@ -2077,7 +2064,7 @@ int _dbus_connect_kdbus (const char *path, DBusError *error)
 	return fd;
 }
 
-dbus_bool_t kdbus_mmap(DBusTransport* transport)
+static dbus_bool_t kdbus_mmap(DBusTransport* transport)
 {
 	DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
 
@@ -2096,7 +2083,7 @@ dbus_bool_t kdbus_mmap(DBusTransport* transport)
  * @param error address where an error can be returned.
  * @returns a new transport, or #NULL on failure.
  */
-DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError *error)
+static DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError *error)
 {
 	int fd;
 	DBusTransport *transport;
@@ -2193,7 +2180,7 @@ DBusTransportOpenResult _dbus_transport_open_kdbus(DBusAddressEntry  *entry,
     }
 }
 
-struct kdbus_policy *make_policy_name(const char *name)
+static struct kdbus_policy *make_policy_name(const char *name)
 {
 	struct kdbus_policy *p;
 	__u64 size;
@@ -2210,7 +2197,7 @@ struct kdbus_policy *make_policy_name(const char *name)
 	return p;
 }
 
-struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
+static struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
 {
 	struct kdbus_policy *p;
 	__u64 size = sizeof(*p);
@@ -2229,7 +2216,7 @@ struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
 	return p;
 }
 
-void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
+static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
 {
 	struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
 
