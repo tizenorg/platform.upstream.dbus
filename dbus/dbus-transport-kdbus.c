@@ -17,6 +17,7 @@
 #include "dbus-watch.h"
 #include "dbus-errors.h"
 #include "dbus-bus.h"
+#include <linux/types.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -26,7 +27,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <linux/types.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
 #define KDBUS_PART_HEADER_SIZE offsetof(struct kdbus_item, data)
@@ -78,6 +78,7 @@ struct DBusTransportSocket
 };
 
 
+
 static dbus_bool_t
 socket_get_socket_fd (DBusTransport *transport,
                       int           *fd_p)
@@ -89,7 +90,29 @@ socket_get_socket_fd (DBusTransport *transport,
   return TRUE;
 }
 
-static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int fd)
+/*
+ * Adds locally generated message to received messages queue
+ *
+ */
+static dbus_bool_t add_message_to_received(DBusMessage *message, DBusTransport *transport)
+{
+	DBusList *message_link;
+
+	message_link = _dbus_list_alloc_link (message);
+	if (message_link == NULL)
+	{
+		/* it's OK to unref this, nothing that could have attached a callback
+		 * has ever seen it */
+		dbus_message_unref (message);
+		return FALSE;
+	}
+
+	_dbus_connection_queue_synthesized_message_link(transport->connection, message_link);
+
+	return TRUE;
+}
+
+static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int fd)
 {
 	struct kdbus_msg *msg;
 	struct kdbus_item *item;
@@ -109,7 +132,6 @@ static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int
     	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.')) //if name starts with :1. it is a unique name and should be send as number
     	{
     		dst_id = strtoll(&name[3], NULL, 10);
-    		_dbus_verbose ("do writing uniqe id: %lu\n", dst_id); //todo can be removed at the end
     		name = NULL;
     	}
     }
@@ -123,8 +145,6 @@ static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int
     	fprintf (stderr, "%02x", _dbus_string_get_byte(header,i));
     }
     fprintf (stderr, "\nret size: %lu, i: %lu\n", ret_size, i);*/
-
-//    _dbus_verbose("padding bytes for header: %lu \n", KDBUS_ALIGN8(ret_size) - ret_size);
 
     size = sizeof(struct kdbus_msg);
 	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
@@ -145,7 +165,7 @@ static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int
 
 	memset(msg, 0, size);
 	msg->size = size;
-	msg->src_id = strtoll(dbus_bus_get_unique_name(connection), NULL , 10);
+	msg->src_id = strtoll(dbus_bus_get_unique_name(transport->connection), NULL , 10);
 	_dbus_verbose("sending msg, src_id=%llu\n", msg->src_id);
 	msg->dst_id = name ? 0 : dst_id;
 	msg->cookie = dbus_message_get_serial(message);
@@ -163,14 +183,14 @@ static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int
 
 	item->type = KDBUS_MSG_PAYLOAD_VEC;
 	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-	item->vec.address = (uint64_t)_dbus_string_get_const_data(header);
+	item->vec.address = (unsigned long) _dbus_string_get_const_data(header);
 	item->vec.size = ret_size;
 	item = KDBUS_PART_NEXT(item);
 
 	item->type = KDBUS_MSG_PAYLOAD_VEC;
 	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-	item->vec.address = (uint64_t)_dbus_string_get_const_data(body);
-	item->vec.size = (uint64_t)_dbus_string_get_length(body);
+	item->vec.address = (unsigned long) _dbus_string_get_const_data(body);
+	item->vec.size = _dbus_string_get_length(body);
 	ret_size += item->vec.size;
 
   /*  fprintf (stderr, "\nbody:\n");
@@ -193,12 +213,25 @@ static int kdbus_write_msg(DBusConnection *connection, DBusMessage *message, int
 	{
 		if(errno == EINTR)
 			goto again;
+		if(errno == ENXIO)  //when recipient is not available on the bus
+		{
+			DBusMessage *errMessage = NULL;
+
+			errMessage = generate_local_error_message(msg->cookie, "org.freedesktop.DBus.Error.ServiceUnknown", NULL);
+			if(errMessage == NULL)
+				return -1;
+			dbus_message_set_reply_serial(errMessage, dbus_message_get_reply_serial(message));
+			if (!add_message_to_received(errMessage, transport))
+				return -1;
+			else
+				goto out;
+		}
 		_dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
 		return -1;
 	}
 
+out:
 	free(msg);
-
 	return ret_size;
 }
 
@@ -214,10 +247,10 @@ static int kdbus_write_msg_encoded(DBusMessage *message, DBusTransportSocket *so
     if((name = dbus_message_get_destination(message)))
     {
     	_dbus_verbose ("do writing encoded message destination: %s\n", name); //todo can be removed at the end
-    	if((name[0] == '1') && (name[1] == ':'))
+    	dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
+    	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))
     	{
     		dst_id = strtoll(&name[2], NULL, 10);
-    		_dbus_verbose ("do writing encoded message uniqe id form name: %lu\n", dst_id); //todo can be removed at the end
     		name = NULL;
     	}
     }
@@ -258,7 +291,7 @@ static int kdbus_write_msg_encoded(DBusMessage *message, DBusTransportSocket *so
 
 	item->type = KDBUS_MSG_PAYLOAD_VEC;
 	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-	item->vec.address = (uint64_t)&socket_transport->encoded_outgoing;
+	item->vec.address = (unsigned long) &socket_transport->encoded_outgoing;
 	item->vec.size = _dbus_string_get_length (&socket_transport->encoded_outgoing);
 	item = KDBUS_PART_NEXT(item);
 
@@ -273,12 +306,25 @@ static int kdbus_write_msg_encoded(DBusMessage *message, DBusTransportSocket *so
 	{
 		if(errno == EINTR)
 			goto again;
+		if(errno == ENXIO)  //when recipient is not available on the bus
+		{
+			DBusMessage *errMessage = NULL;
+
+			errMessage = generate_local_error_message(msg->cookie, "org.freedesktop.DBus.Error.ServiceUnknown", NULL);
+			if(errMessage == NULL)
+				return -1;
+			dbus_message_set_reply_serial(errMessage, dbus_message_get_reply_serial(message));
+			if (!add_message_to_received(errMessage, &socket_transport->base))
+				return -1;
+			else
+				goto out;
+		}
 		_dbus_verbose("error sending encoded message: err %d (%m)\n", errno);
 		return -1;
 	}
 
+out:
 	free(msg);
-
 	return ret_size;
 }
 
@@ -516,10 +562,28 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_
 					   (unsigned long long)item->timestamp.monotonic_ns);
 				break;
 
-			case KDBUS_MSG_REPLY_TIMEOUT:  //todo translate to kdbus message
+			case KDBUS_MSG_REPLY_TIMEOUT:
 				_dbus_verbose("  +%s (%llu bytes) cookie=%llu\n",
 					   enum_MSG(item->type), item->size, msg->cookie_reply);
-				break;
+
+				message = generate_local_error_message(msg->cookie_reply, "org.freedesktop.DBus.Error.NoReply", NULL);
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+			    dbus_message_lock (message);
+			    _dbus_message_get_network_data (message, &header, &body);
+			    size = _dbus_string_get_length(header);
+				memcpy(data, _dbus_string_get_const_data(header), size);
+				data += size;
+				ret_size += size;
+				size = _dbus_string_get_length(body);
+				memcpy(data, _dbus_string_get_const_data(body), size);
+				data += size;
+				ret_size += size;
+			break;
 
 			case KDBUS_MSG_NAME_ADD:
 				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
@@ -1404,7 +1468,7 @@ do_writing (DBusTransport *transport)
 		else
 		{
 			total_bytes_to_write = _dbus_string_get_length(header) + _dbus_string_get_length(body);
-			bytes_written = kdbus_write_msg(transport->connection, message, socket_transport->fd);
+			bytes_written = kdbus_write_msg(transport, message, socket_transport->fd);
 		}
 
 		if (bytes_written < 0)

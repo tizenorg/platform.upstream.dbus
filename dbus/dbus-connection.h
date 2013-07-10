@@ -169,6 +169,11 @@ typedef void (* DBusPendingCallNotifyFunction) (DBusPendingCall *pending,
 typedef DBusHandlerResult (* DBusHandleMessageFunction) (DBusConnection     *connection,
                                                          DBusMessage        *message,
                                                          void               *user_data);
+
+DBUS_EXPORT
+DBusMessage *	   generate_local_error_message 				(dbus_uint32_t serial,
+                              	  	  	  	  	  	  	  	  	 char *error_name,
+                              	  	  	  	  	  	  	  	  	 char *error_msg);
 DBUS_EXPORT
 DBusConnection*    dbus_connection_open                         (const char                 *address,
                                                                  DBusError                  *error);

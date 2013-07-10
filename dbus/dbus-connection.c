@@ -2209,7 +2209,7 @@ _dbus_memory_pause_based_on_timeout (int timeout_milliseconds)
     _dbus_sleep_milliseconds (1000);
 }
 
-static DBusMessage *
+DBusMessage *
 generate_local_error_message (dbus_uint32_t serial, 
                               char *error_name, 
                               char *error_msg)
