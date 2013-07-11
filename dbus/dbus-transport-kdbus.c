@@ -38,13 +38,7 @@
 	for (part = (head)->first;					\
 	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
 	     part = KDBUS_PART_NEXT(part))
-#define POOL_SIZE (16 * 1024LU * 1024LU)
-
-/*struct and type below copied from dbus_transport_socket.c
- * needed for _dbus_transport_new_for_socket_kdbus and kdbus_vtable(?)
- * todo maybe DBusTransportSocket and _dbus_transport_new_for_socket_kdbus not needed here -
- * maybe only static const DBusTransportVTable implementation will be enough
- */
+#define POOL_SIZE (16 * 1024LU * 1024LU)  //todo pool size to be decided
 
 /**
  * Opaque object representing a socket file descriptor transport.
@@ -122,6 +116,7 @@ static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int f
     const DBusString *header;
     const DBusString *body;
     uint64_t ret_size;
+    uint64_t body_size;
 
 //    uint64_t i;
 
@@ -137,7 +132,8 @@ static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int f
     }
 
     _dbus_message_get_network_data (message, &header, &body);
-    ret_size = (uint64_t)_dbus_string_get_length(header);
+    ret_size = _dbus_string_get_length(header);
+    body_size = _dbus_string_get_length(body);
 
   /*  fprintf (stderr, "\nheader:\n");
     for(i=0; i < ret_size; i++)
@@ -148,7 +144,8 @@ static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int f
 
     size = sizeof(struct kdbus_msg);
 	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-	size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+	if(body_size) //body can be empty
+		size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
 
 	if (dst_id == KDBUS_DST_ID_BROADCAST)
 		size += KDBUS_PART_HEADER_SIZE + 64;
@@ -166,7 +163,6 @@ static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int f
 	memset(msg, 0, size);
 	msg->size = size;
 	msg->src_id = strtoll(dbus_bus_get_unique_name(transport->connection), NULL , 10);
-	_dbus_verbose("sending msg, src_id=%llu\n", msg->src_id);
 	msg->dst_id = name ? 0 : dst_id;
 	msg->cookie = dbus_message_get_serial(message);
 	msg->payload_type = KDBUS_PAYLOAD_DBUS1;
@@ -185,13 +181,16 @@ static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int f
 	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
 	item->vec.address = (unsigned long) _dbus_string_get_const_data(header);
 	item->vec.size = ret_size;
-	item = KDBUS_PART_NEXT(item);
 
-	item->type = KDBUS_MSG_PAYLOAD_VEC;
-	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-	item->vec.address = (unsigned long) _dbus_string_get_const_data(body);
-	item->vec.size = _dbus_string_get_length(body);
-	ret_size += item->vec.size;
+	if(body_size)
+	{
+		item = KDBUS_PART_NEXT(item);
+		item->type = KDBUS_MSG_PAYLOAD_VEC;
+		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
+		item->vec.address = (unsigned long) _dbus_string_get_const_data(body);
+		item->vec.size = body_size;
+		ret_size += body_size;
+	}
 
   /*  fprintf (stderr, "\nbody:\n");
     for(i=0; i < item->vec.size; i++)
@@ -200,10 +199,9 @@ static int kdbus_write_msg(DBusTransport *transport, DBusMessage *message, int f
     }
     fprintf (stderr, "\nitem->vec.size: %llu, i: %lu\n", item->vec.size, i);*/
 
-	item = KDBUS_PART_NEXT(item);
-
 	if (dst_id == KDBUS_DST_ID_BROADCAST)
 	{
+		item = KDBUS_PART_NEXT(item);
 		item->type = KDBUS_MSG_BLOOM;
 		item->size = KDBUS_PART_HEADER_SIZE + 64;
 	}
@@ -394,7 +392,6 @@ TABLE(PAYLOAD) = {
 };
 LOOKUP(PAYLOAD);
 
-  //todo handling of all msg items
 static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_ptr)
 {
 	const struct kdbus_item *item = msg->items;
@@ -701,23 +698,6 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, void* mmap_
 				memcpy(data, _dbus_string_get_const_data(body), size);
 				data += size;
 				ret_size += size;
-
-			/*		fprintf (stderr, "\nheader: %llu\n", _dbus_string_get_length(header));
-				    for(i=0; i < _dbus_string_get_length(header); i++)
-				    {
-				    	fprintf (stderr, "%02x", (int)_dbus_string_get_byte(header,i));
-				    }
-					fprintf (stderr, "\nbody: %llu\n", _dbus_string_get_length(body));
-				    for(i=0; i < _dbus_string_get_length(body); i++)
-				    {
-				    	fprintf (stderr, "%02x", (int)_dbus_string_get_byte(body,i));
-				    }
-					fprintf (stderr, "\ndata: %llu\n", retsize);
-				    for(i=0; i < _dbus_string_get_length(body); i++)
-				    {
-				    	fprintf (stderr, "%02x", (int)_dbus_string_get_byte(body,i));
-				    }*/
-
 			break;
 
 			case KDBUS_MSG_NAME_CHANGE:
@@ -921,8 +901,6 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 	int start;
 	char *data;
 
-//	int i;
-
 	_dbus_assert (socket_transport->max_bytes_read_per_iteration >= 0);
 	start = _dbus_string_get_length (buffer);
 	if (!_dbus_string_lengthen (buffer, socket_transport->max_bytes_read_per_iteration))
@@ -946,12 +924,7 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
 
 	ret_size = kdbus_decode_msg(msg, data, socket_transport->kdbus_mmap_ptr);
-/*	fprintf (stderr, "\nmessage! start: %u, ret_size: %u\n", start, ret_size);
-    for(i=0; i < ret_size; i++)
-    {
-    	fprintf (stderr, "%02x", (int)data[i]);
-    }
-    fprintf (stderr, "\nret size: %u, i: %u\n", ret_size, i);*/
+
 	_dbus_string_set_length (buffer, start + ret_size);
 
 	again2:
@@ -1935,10 +1908,6 @@ kdbus_do_iteration (DBusTransport *transport,
       }
       _dbus_verbose ("poll_fd.revents: %x\n", poll_fd.revents);
 
-    /*  poll_res = poll_timeout;			// todo temporary walkaround of above problem
-      poll_res = 1;							// todo temporary walkaround of above problem
-      poll_fd.revents = poll_fd.events;    // todo temporary walkaround of above problem*/
-
       if (flags & DBUS_ITERATION_BLOCK)
         {
           _dbus_verbose ("lock post poll\n");
@@ -2460,5 +2429,5 @@ void dbus_bus_add_match_kdbus (DBusConnection *connection, const char *rule, DBu
 	if (ioctl(fd, KDBUS_CMD_MATCH_ADD, &cmd_match))
 		dbus_set_error(error,_dbus_error_from_errno (errno), "error adding match: %s", _dbus_strerror (errno));
 
-	_dbus_verbose("Finished adding match bus rule %s             !!!!!!!!!\n", rule);
+	_dbus_verbose("Finished adding match bus rule %s\n", rule);
 }
