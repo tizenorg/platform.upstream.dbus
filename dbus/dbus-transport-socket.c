@@ -844,7 +844,7 @@ do_reading (DBusTransport *transport)
                                           buffer,
                                           bytes_read < 0 ? 0 : bytes_read);
     }
-  
+
   if (bytes_read < 0)
     {
       /* EINTR already handled for us */

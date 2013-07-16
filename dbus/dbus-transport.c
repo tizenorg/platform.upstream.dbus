@@ -160,19 +160,6 @@ _dbus_transport_init_base (DBusTransport             *transport,
       _dbus_assert (address == NULL);
       address_copy = NULL;
     }
-  else
-    {
-      _dbus_assert (address != NULL);  /*TODO duplicated above in that function because of kdbus
-      maybe to be optimized when final kdbus authorization will be done */
-      if (!_dbus_string_copy_data (address, &address_copy))
-        {
-          _dbus_credentials_unref (creds);
-          _dbus_counter_unref (counter);
-          _dbus_auth_unref (auth);
-          _dbus_message_loader_unref (loader);
-          return FALSE;
-        }
-    }
   
   transport->refcount = 1;
   transport->vtable = vtable;
