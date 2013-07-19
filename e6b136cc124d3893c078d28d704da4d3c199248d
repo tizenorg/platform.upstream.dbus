@@ -1,0 +1,8 @@
+Verified+1: Ryan Ware <ware@linux.intel.com>
+Code-Review+2: Auke Kok <auke-jan.h.kok@intel.com>
+Code-Review+1: Michael Demeter <michael.demeter@intel.com>
+Submitted-by: Ryan Ware <ware@linux.intel.com>
+Submitted-at: Fri, 19 Jul 2013 15:24:01 -0700
+Reviewed-on: https://review.tizen.org/gerrit/5608
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
