@@ -1201,8 +1201,6 @@ dbus_bus_request_name (DBusConnection *connection,
 			return -1;
 
 		result = bus_request_name_kdbus(connection, name, flags, error);
-		if(dbus_error_is_set(error))
-			return -1;
 	}
   
 	return result;
