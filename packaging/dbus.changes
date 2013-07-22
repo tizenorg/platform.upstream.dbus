@@ -1,3 +1,8 @@
+* Mon Jul 22 2013 Michael Leibowitz <michael.leibowitz@intel.com> accepted/tizen/20130710.220936@43a3a39
+- Enforce smack policy from conf file
+- Enable checking of smack context from DBus interface
+- resetting manifest requested domain to floor
+
 * Thu Jun 20 2013 Anas Nashif <anas.nashif@intel.com> dbus-1.6.12@46d2277
 - Update to dbus 1.6.12
 
