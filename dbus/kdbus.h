@@ -20,11 +20,11 @@
 #include <linux/types.h>
 #endif
 
-/* todo #define KDBUS_MSG_MAX_SIZE		SZ_8K	- maximum size of message header and items
+/* todo #define KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE		SZ_8M	- maximum size of message header and items
  * taken from internal.h of kdbus
  * finally it should be placed higher - e.g. kdbus.h of kdbus kernel module
  */
-#define KDBUS_MSG_MAX_SIZE		0x00002000		/* maximum size of message header and items */
+#define KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE		0x00800000		/* maximum size of message header and items */
 
 #define KDBUS_IOC_MAGIC			0x95
 #define KDBUS_SRC_ID_KERNEL		(0)
