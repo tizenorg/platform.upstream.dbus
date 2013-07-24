@@ -11,3 +11,4 @@ dbus_bool_t bus_register_kdbus(char* name, DBusConnection *connection, DBusError
 dbus_bool_t bus_register_policy_kdbus(const char* name, DBusConnection *connection, DBusError *error);
 int bus_request_name_kdbus(DBusConnection *connection, const char *name, const uint64_t flags, DBusError *error);
 void dbus_bus_add_match_kdbus (DBusConnection *connection, const char *rule, DBusError *error);
+void dbus_bus_remove_match_kdbus (DBusConnection *connection, const char *rule, DBusError *error);

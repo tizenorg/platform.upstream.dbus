@@ -1613,26 +1613,31 @@ dbus_bus_remove_match (DBusConnection *connection,
                        const char     *rule,
                        DBusError      *error)
 {
-  DBusMessage *msg;
+	if(!dbus_transport_is_kdbus(connection))
+	{
+		DBusMessage *msg;
 
-  _dbus_return_if_fail (rule != NULL);
-  
-  msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
-                                      DBUS_PATH_DBUS,
-                                      DBUS_INTERFACE_DBUS,
-                                      "RemoveMatch");
+	  _dbus_return_if_fail (rule != NULL);
 
-  if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
-                                 DBUS_TYPE_INVALID))
-    {
-      dbus_message_unref (msg);
-      _DBUS_SET_OOM (error);
-      return;
-    }
+	  msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+										  DBUS_PATH_DBUS,
+										  DBUS_INTERFACE_DBUS,
+										  "RemoveMatch");
 
-  send_no_return_values (connection, msg, error);
+	  if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
+									 DBUS_TYPE_INVALID))
+		{
+		  dbus_message_unref (msg);
+		  _DBUS_SET_OOM (error);
+		  return;
+		}
 
-  dbus_message_unref (msg);
+	  send_no_return_values (connection, msg, error);
+
+	  dbus_message_unref (msg);
+	}
+	else
+		dbus_bus_remove_match_kdbus(connection, rule, error);
 }
 
 /** @} */
