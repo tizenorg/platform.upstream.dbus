@@ -38,7 +38,9 @@
 	for (part = (head)->first;					\
 	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
 	     part = KDBUS_PART_NEXT(part))
-#define POOL_SIZE (16 * 1024LU * 1024LU)  //todo pool size to be decided
+
+#define RECEIVE_POOL_SIZE (2 * 1024LU * 1024LU)  //todo pool size to be decided
+#define MEMFD_POOL_SIZE	DBUS_MAXIMUM_MESSAGE_LENGTH
 #define MEMFD_SIZE_THRESHOLD (10 * 1024LU) // over this memfd is used
 
 #define KDBUS_DECODE_DEBUG 1
@@ -166,7 +168,7 @@ static int kdbus_init_memfdbuf(DBusTransportSocket* socket_transport)
 			return -1;
      		}
 
- 		buf = mmap(NULL, POOL_SIZE, PROT_WRITE | PROT_READ, MAP_SHARED, socket_transport->memfd, 0);
+ 		buf = mmap(NULL, MEMFD_POOL_SIZE, PROT_WRITE | PROT_READ, MAP_SHARED, socket_transport->memfd, 0);
      		if (buf == MAP_FAILED) 
      		{
      		     _dbus_verbose("mmap() fd=%i failed:%m", socket_transport->memfd);
@@ -249,15 +251,17 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     uint64_t header_size = 0;
     int ret;
     dbus_bool_t use_memfd;
+    const int *unix_fds;
+    unsigned fds_count;
+
+    _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);  //todo or to remove
 
     // determine name and destination id
     if((name = dbus_message_get_destination(message)))
     {
     	dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
 	
-	/* if name starts with ":1." it is 
-         * a unique name and should be send as number */
-    	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.')) 
+	   	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
     	{
     		dst_id = strtoll(&name[3], NULL, 10);
     		name = NULL;
@@ -281,7 +285,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     if(use_memfd) kdbus_init_memfd(transport);
     
     // init basic message fields
-    msg = kdbus_init_msg(transport, name, dst_id, body_size);
+    msg = kdbus_init_msg(transport, name, dst_id, body_size);   //todo add fds
     msg->cookie = dbus_message_get_serial(message);
     
     // build message contents
@@ -372,6 +376,11 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
         	item->vec.address = (unsigned long) _dbus_string_get_const_data(body);
         	item->vec.size = body_size;
         }
+    }
+
+    if(fds_count)  //todo
+    {
+
     }
 
 	if (name)
@@ -663,7 +672,7 @@ static int put_message_into_data(DBusMessage *message, char* data)
 static void kdbus_reset_memfd(DBusTransportSocket* socket_transport)
 {
     if(socket_transport->memfd_buf != NULL) {
-	munmap(socket_transport->memfd_buf, POOL_SIZE);
+	munmap(socket_transport->memfd_buf, MEMFD_POOL_SIZE);
 	socket_transport->memfd_buf = NULL;
         close(socket_transport->memfd);
         socket_transport->memfd = -1;
@@ -750,12 +759,12 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 				char *buf;
 				uint64_t size;
 
-                                size = item->memfd.size;
+                 size = item->memfd.size;
 
 				_dbus_verbose("memfd.size : %llu\n", (unsigned long long)size);
 				
 
-				buf = mmap(NULL, POOL_SIZE, PROT_READ | PROT_WRITE , MAP_SHARED, item->memfd.fd, 0);
+				buf = mmap(NULL, MEMFD_POOL_SIZE, PROT_READ | PROT_WRITE , MAP_SHARED, item->memfd.fd, 0);
 				if (buf == MAP_FAILED) 
 				{
 					_dbus_verbose("mmap() fd=%i failed:%m", item->memfd.fd);
@@ -1084,7 +1093,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 	}
 
 #if KDBUS_DECODE_DEBUG == 1
-//	sleep(5);
+
 	if ((char *)item - ((char *)msg + msg->size) >= 8)
 		_dbus_verbose("invalid padding at end of message\n");
 #endif
@@ -1100,18 +1109,15 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 	int ret_size;
 	uint64_t offset;
 	struct kdbus_msg *msg;
-//	int start;
 	char *data;
 
 	_dbus_assert (socket_transport->max_bytes_read_per_iteration >= 0);
-//	start = _dbus_string_get_length (buffer);
-//	_dbus_verbose("read start: %d                          !!!!!!!!!!!!!!!   \n", start);
 	if (!_dbus_string_lengthen (buffer, socket_transport->max_bytes_read_per_iteration))
 	{
 		errno = ENOMEM;
 	    return -1;
 	}
-	data = _dbus_string_get_data_len (buffer, /*start*/0, socket_transport->max_bytes_read_per_iteration);
+	data = _dbus_string_get_data_len (buffer, 0, socket_transport->max_bytes_read_per_iteration);
 
 	again:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RECV, &offset) < 0)
@@ -1119,14 +1125,14 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 		if(errno == EINTR)
 			goto again;
 		_dbus_verbose("kdbus error receiving message: %d (%m)\n", errno);
-		_dbus_string_set_length (buffer, /*start*/0);
+		_dbus_string_set_length (buffer, 0);
 		return -1;
 	}
 
 	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
 
 	ret_size = kdbus_decode_msg(msg, data, socket_transport);
-	_dbus_string_set_length (buffer, /*start +*/ ret_size);
+	_dbus_string_set_length (buffer, ret_size);
 
 	again2:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RELEASE, &offset) < 0)
@@ -1625,9 +1631,6 @@ do_writing (DBusTransport *transport)
 		}
 		if (_dbus_auth_needs_encoding (transport->auth))
         {
-			// Does fd passing even make sense with encoded data?
-			_dbus_assert(!DBUS_TRANSPORT_CAN_SEND_UNIX_FD(transport));   //todo
-
 			if (_dbus_string_get_length (&socket_transport->encoded_outgoing) == 0)
             {
 				if (!_dbus_auth_encode_data (transport->auth,
@@ -1751,16 +1754,6 @@ do_reading (DBusTransport *transport)
 
   if (_dbus_auth_needs_decoding (transport->auth))
   {
-      /* Does fd passing even make sense with encoded data? */
-    /*  _dbus_assert(!DBUS_TRANSPORT_CAN_SEND_UNIX_FD(transport));
-
-      if (_dbus_string_get_length (&socket_transport->encoded_incoming) > 0)
-        bytes_read = _dbus_string_get_length (&socket_transport->encoded_incoming);
-      else
-        bytes_read = _dbus_read_socket (socket_transport->fd,
-                                        &socket_transport->encoded_incoming,
-                                        socket_transport->max_bytes_read_per_iteration);*/
-
 	  bytes_read = kdbus_read_message(socket_transport,  &socket_transport->encoded_incoming);
 
       _dbus_assert (_dbus_string_get_length (&socket_transport->encoded_incoming) ==
@@ -2248,8 +2241,8 @@ _dbus_transport_new_for_socket_kdbus (int	fd,
   socket_transport->message_bytes_written = 0;
 
   /* These values should probably be tunable or something. */
-  socket_transport->max_bytes_read_per_iteration = POOL_SIZE;
-  socket_transport->max_bytes_written_per_iteration = KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
+  socket_transport->max_bytes_read_per_iteration = RECEIVE_POOL_SIZE;
+  socket_transport->max_bytes_written_per_iteration = MEMFD_POOL_SIZE;
 
   socket_transport->kdbus_mmap_ptr = NULL;
   socket_transport->memfd = -1;
@@ -2301,7 +2294,7 @@ static dbus_bool_t kdbus_mmap(DBusTransport* transport)
 {
 	DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
 
-	socket_transport->kdbus_mmap_ptr = mmap(NULL, POOL_SIZE, PROT_READ, MAP_SHARED, socket_transport->fd, 0);
+	socket_transport->kdbus_mmap_ptr = mmap(NULL, RECEIVE_POOL_SIZE, PROT_READ, MAP_SHARED, socket_transport->fd, 0);
 	if (socket_transport->kdbus_mmap_ptr == MAP_FAILED)
 		return FALSE;
 
@@ -2517,7 +2510,7 @@ dbus_bool_t bus_register_kdbus(char* name, DBusConnection *connection, DBusError
 			   KDBUS_HELLO_ATTACH_SECLABEL |
 			   KDBUS_HELLO_ATTACH_AUDIT;
 	hello.size = sizeof(struct kdbus_cmd_hello);
-	hello.pool_size = POOL_SIZE;
+	hello.pool_size = RECEIVE_POOL_SIZE;
 
 	if(!dbus_connection_get_socket(connection, &fd))
 	{

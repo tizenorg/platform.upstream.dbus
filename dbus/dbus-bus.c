@@ -32,7 +32,7 @@
 #include "dbus-connection-internal.h"
 #include "dbus-string.h"
 #include "dbus-transport-kdbus.h"
-
+#include <stdlib.h>
 
 /**
  * @defgroup DBusBus Message bus APIs
@@ -656,7 +656,7 @@ dbus_bus_register (DBusConnection *connection,
                    DBusError      *error)
 {
   DBusMessage *message, *reply;
-  char name[18];
+  char *name = NULL;
   BusData *bd;
   dbus_bool_t retval;
 
@@ -691,6 +691,7 @@ dbus_bus_register (DBusConnection *connection,
     }
   if(dbus_transport_is_kdbus(connection))
   {
+	  name = malloc(18);
 	  if(!bus_register_kdbus(name, connection, error))
 		  goto out;
 
@@ -705,7 +706,6 @@ dbus_bus_register (DBusConnection *connection,
 											  DBUS_PATH_DBUS,
 											  DBUS_INTERFACE_DBUS,
 											  "Hello");
-
 	  if (!message)
 		{
 		  _DBUS_SET_OOM (error);
@@ -738,6 +738,8 @@ dbus_bus_register (DBusConnection *connection,
 
   if (message)
     dbus_message_unref (message);
+  else if (name)
+	  free(name);
 
   if (reply)
     dbus_message_unref (reply);
