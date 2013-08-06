@@ -1007,7 +1007,7 @@ out:
 static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer)
 {
 	int ret_size;
-	uint64_t offset;
+	uint64_t __attribute__ ((__aligned__(8))) offset;
 	struct kdbus_msg *msg;
 	char *data;
 
@@ -2395,7 +2395,7 @@ dbus_bool_t bus_register_policy_kdbus(const char* name, DBusConnection *connecti
 
 dbus_bool_t bus_register_kdbus(char* name, DBusConnection *connection, DBusError *error)
 {
-	struct kdbus_cmd_hello hello;
+	struct kdbus_cmd_hello __attribute__ ((__aligned__(8))) hello;
 	int fd;
 
 	memset(&hello, 0, sizeof(hello));
@@ -2659,7 +2659,7 @@ out:
 
 void dbus_bus_remove_match_kdbus (DBusConnection *connection, const char *rule, DBusError *error)
 {
-	struct kdbus_cmd_match cmd;
+	struct kdbus_cmd_match __attribute__ ((__aligned__(8))) cmd;
 	int fd;
 
 	dbus_connection_get_socket(connection, &fd);
