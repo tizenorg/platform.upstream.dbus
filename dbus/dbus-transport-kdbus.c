@@ -38,8 +38,7 @@
 	for (part = (head)->first;					\
 	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
 	     part = KDBUS_PART_NEXT(part))
-#define RECEIVE_POOL_SIZE (50 * 1024LU * 1024LU)  //todo pool size to be decided
-#define MEMFD_POOL_SIZE	DBUS_MAXIMUM_MESSAGE_LENGTH
+#define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU)
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
 
 #define KDBUS_DECODE_DEBUG 1
@@ -149,7 +148,7 @@ static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
 	return 0;
 }
 
-static struct kdbus_msg* kdbus_init_msg(DBusTransportSocket *socket_transport, const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd)
+static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd, int fds_count)
 {
     struct kdbus_msg* msg;
     uint64_t msg_size;
@@ -157,13 +156,15 @@ static struct kdbus_msg* kdbus_init_msg(DBusTransportSocket *socket_transport, c
     msg_size = sizeof(struct kdbus_msg);
 
     if(use_memfd == TRUE)  // bulk data - memfd - encoded and plain
-    {
         msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
-    } else {
+    else {
         msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
     	if(body_size)
     		msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
     }
+
+    if(fds_count)
+    	msg_size += KDBUS_ITEM_SIZE(sizeof(int)*fds_count);
 
     if (name)
     	msg_size += KDBUS_ITEM_SIZE(strlen(name) + 1);
@@ -179,18 +180,12 @@ static struct kdbus_msg* kdbus_init_msg(DBusTransportSocket *socket_transport, c
 
     memset(msg, 0, msg_size);
     msg->size = msg_size;
-    msg->src_id = strtoll(dbus_bus_get_unique_name(socket_transport->base.connection), NULL , 10);
     msg->payload_type = KDBUS_PAYLOAD_DBUS1;
     msg->dst_id = name ? 0 : dst_id;
 
     return msg;
 }
 
-/*
- * 
- *
- * 
- */
 static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message, dbus_bool_t encoded)
 {
     struct kdbus_msg *msg;
@@ -207,8 +202,6 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     const int *unix_fds;
     unsigned fds_count;
     char *buf;
-
-    _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);  //todo or to remove
 
     // determine name and destination id
     if((name = dbus_message_get_destination(message)))
@@ -235,12 +228,14 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 
     // check if message size is big enough to use memfd kdbus transport
     use_memfd = ret_size > MEMFD_SIZE_THRESHOLD ? TRUE : FALSE;
-
     if(use_memfd) kdbus_init_memfd(transport);
     
+    _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);
+
     // init basic message fields
-    msg = kdbus_init_msg(transport, name, dst_id, body_size, use_memfd); //todo add fds
+    msg = kdbus_init_msg(name, dst_id, body_size, use_memfd, fds_count);
     msg->cookie = dbus_message_get_serial(message);
+    msg->src_id = strtoll(dbus_bus_get_unique_name(transport->base.connection), NULL , 10);
     
     // build message contents
     item = msg->items;
@@ -251,39 +246,38 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 	    ret = ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 0);
 	    if (ret < 0) 
 	    {
-		_dbus_verbose("memfd sealing failed: \n");
-		goto out;
+			_dbus_verbose("memfd sealing failed: \n");
+			goto out;
 	    }
 
 	    buf = mmap(NULL, ret_size, PROT_WRITE, MAP_SHARED, transport->memfd, 0);
 	    if (buf == MAP_FAILED) 
 	    {
-		_dbus_verbose("mmap() fd=%i failed:%m", transport->memfd);
-		goto out;
+			_dbus_verbose("mmap() fd=%i failed:%m", transport->memfd);
+			goto out;
 	    }
 
-            if(encoded)                           
-		memcpy(buf, &transport->encoded_outgoing, ret_size);
-            else
-            {
-		memcpy(buf, _dbus_string_get_const_data(header), header_size);
-            	if(body_size) {
-			buf+=header_size;
-			memcpy(buf, _dbus_string_get_const_data(body),  body_size);
-			buf-=header_size;
+		if(encoded)
+			memcpy(buf, &transport->encoded_outgoing, ret_size);
+		else
+		{
+			memcpy(buf, _dbus_string_get_const_data(header), header_size);
+			if(body_size) {
+				buf+=header_size;
+				memcpy(buf, _dbus_string_get_const_data(body),  body_size);
+				buf-=header_size;
+			}
 		}
 
-            }
-           
-	    munmap(buf, ret_size);
+		munmap(buf, ret_size);
 
-            // seal data - kdbus module needs it
-     	    ret = ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 1);
-     	    if (ret < 0) {
-     	    	_dbus_verbose("memfd sealing failed: %d (%m)\n", errno);
-				ret_size = -1;
-				goto out;
-     	    }
+		// seal data - kdbus module needs it
+		ret = ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 1);
+		if (ret < 0) {
+			_dbus_verbose("memfd sealing failed: %d (%m)\n", errno);
+			ret_size = -1;
+			goto out;
+		}
 
 	    item->type = KDBUS_MSG_PAYLOAD_MEMFD;
 		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
@@ -309,7 +303,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 
         if(body_size)
         {
-                _dbus_verbose("body attaching\n");
+            _dbus_verbose("body attaching\n");
         	item = KDBUS_PART_NEXT(item);
         	item->type = KDBUS_MSG_PAYLOAD_VEC;
         	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
@@ -318,9 +312,12 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
         }
     }
 
-    if(fds_count)  //todo
+    if(fds_count)
     {
-
+    	item = KDBUS_PART_NEXT(item);
+    	item->type = KDBUS_MSG_FDS;
+    	item->size = KDBUS_PART_HEADER_SIZE + (sizeof(int) * fds_count);
+    	memcpy(item->fds, unix_fds, sizeof(int) * fds_count);
     }
 
 	if (name)
@@ -605,7 +602,7 @@ static int put_message_into_data(DBusMessage *message, char* data)
 	return ret_size;
 }
 
-static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTransportSocket* socket_transport)
+static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTransportSocket* socket_transport, int* fds, int* n_fds)
 {
 	const struct kdbus_item *item = msg->items;
 	int ret_size = 0;
@@ -615,8 +612,8 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 	const char* pDBusName = dbus_name;
 	const char* dbus = "org.freedesktop.DBus";
 	const char* emptyString = "";
-        const char* pString = NULL;
-        void* mmap_ptr;
+    const char* pString = NULL;
+    void* mmap_ptr;
 #if KDBUS_DECODE_DEBUG == 1
 	char buf[32];
 #endif
@@ -629,14 +626,15 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 		(unsigned long long) msg->cookie, (unsigned long long) msg->timeout_ns);
 #endif
 
-        mmap_ptr = socket_transport->kdbus_mmap_ptr;
+	*n_fds = 0;
+	mmap_ptr = socket_transport->kdbus_mmap_ptr;
 
 	KDBUS_PART_FOREACH(item, msg, items)
 	{
 		if (item->size <= KDBUS_PART_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
-			continue;  //todo to be discovered and rewritten
+			continue;  //todo ??? continue (because dbus will find error if it is in important part) or break
 		}
 
 		switch (item->type)
@@ -665,7 +663,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 				_dbus_verbose("memfd.size : %llu\n", (unsigned long long)size);
 				
-				buf = mmap(NULL, MEMFD_POOL_SIZE, PROT_READ , MAP_SHARED, item->memfd.fd, 0);
+				buf = mmap(NULL, size, PROT_READ , MAP_SHARED, item->memfd.fd, 0);
 
 				if (buf == MAP_FAILED) 
 				{
@@ -677,14 +675,26 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 				data += size;
 				ret_size += size;
 
-				munmap(buf, MEMFD_POOL_SIZE);
+				munmap(buf, size);
 
-                                _dbus_verbose("  +%s (%llu bytes) off=%llu size=%llu\n",
+                _dbus_verbose("  +%s (%llu bytes) off=%llu size=%llu\n",
 					   enum_MSG(item->type), item->size,
 					   (unsigned long long)item->vec.offset,
 					   (unsigned long long)item->vec.size);
 			break;
 			}
+
+			case KDBUS_MSG_FDS:
+			{
+				int i;
+
+				*n_fds = (item->size - KDBUS_PART_HEADER_SIZE) / sizeof(int);
+				memcpy(fds, item->fds, *n_fds * sizeof(int));
+	            for (i = 0; i < *n_fds; i++)
+	              _dbus_fd_set_close_on_exec(fds[i]);
+			break;
+			}
+
 #if KDBUS_DECODE_DEBUG == 1
 			case KDBUS_MSG_SRC_CREDS:
 				_dbus_verbose("  +%s (%llu bytes) uid=%lld, gid=%lld, pid=%lld, tid=%lld, starttime=%lld\n",
@@ -894,7 +904,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    	goto out;
 				}
 			    sprintf(&dbus_name[3],"%llu",item->name_change.new_id);
-			    _dbus_verbose ("New id: %s\n", pDBusName);  //todo to be removed
+			    _dbus_verbose ("New id: %s\n", pDBusName);
 			    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pDBusName))
 				{
 					ret_size = -1;
@@ -1004,7 +1014,7 @@ out:
 	return ret_size;
 }
 
-static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer)
+static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer, int* fds, int* n_fds)
 {
 	int ret_size;
 	uint64_t __attribute__ ((__aligned__(8))) offset;
@@ -1031,7 +1041,7 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 
 	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
 
-	ret_size = kdbus_decode_msg(msg, data, socket_transport);
+	ret_size = kdbus_decode_msg(msg, data, socket_transport, fds, n_fds);
 	_dbus_string_set_length (buffer, ret_size);
 
 	again2:
@@ -1217,6 +1227,7 @@ do_io_error (DBusTransport *transport)
   _dbus_transport_unref (transport);
 }
 
+#ifdef DBUS_AUTHENTICATION
 /* return value is whether we successfully read any new data. */
 static dbus_bool_t
 read_data_into_auth (DBusTransport *transport,
@@ -1400,7 +1411,6 @@ do_authentication (DBusTransport *transport,
     {
       if (!exchange_credentials (transport, do_reading, do_writing))
         {
-          /* OOM */
           oom = TRUE;
           goto out;
         }
@@ -1464,6 +1474,7 @@ do_authentication (DBusTransport *transport,
   else
     return TRUE;
 }
+#endif
 
 /* returns false on oom */
 static dbus_bool_t
@@ -1551,14 +1562,14 @@ do_writing (DBusTransport *transport)
 
 			total_bytes_to_write = _dbus_string_get_length (&socket_transport->encoded_outgoing);
 			if(total_bytes_to_write > socket_transport->max_bytes_written_per_iteration)
-				return -E2BIG;  //todo to be changed because large messages are now sent through memfd
+				return -E2BIG;
 
 			bytes_written = kdbus_write_msg(socket_transport, message, TRUE);
         }
 		else
 		{
 			if(total_bytes_to_write > socket_transport->max_bytes_written_per_iteration)
-				return -E2BIG;   //todo to be changed because large messages are now sent through memfd
+				return -E2BIG;
 
 			bytes_written = kdbus_write_msg(socket_transport, message, FALSE);
 		}
@@ -1618,8 +1629,8 @@ do_reading (DBusTransport *transport)
   DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
   DBusString *buffer;
   int bytes_read;
-//  int total;
   dbus_bool_t oom;
+  int *fds, n_fds;
 
   _dbus_verbose ("fd = %d\n",socket_transport->fd);
 
@@ -1629,19 +1640,10 @@ do_reading (DBusTransport *transport)
 
   oom = FALSE;
 
-//  total = 0;
-
  again:
 
   /* See if we've exceeded max messages and need to disable reading */
   check_read_watch (transport);
-
-/*  if (total > socket_transport->max_bytes_read_per_iteration)
-    {
-      _dbus_verbose ("%d bytes exceeds %d bytes read per iteration, returning\n",
-                     total, socket_transport->max_bytes_read_per_iteration);
-      goto out;
-    }*/
 
   _dbus_assert (socket_transport->read_watch != NULL ||
                 transport->disconnected);
@@ -1652,7 +1654,50 @@ do_reading (DBusTransport *transport)
   if (!dbus_watch_get_enabled (socket_transport->read_watch))
     return TRUE;
 
+  if (!_dbus_message_loader_get_unix_fds(transport->loader, &fds, &n_fds))
+  {
+      _dbus_verbose ("Out of memory reading file descriptors\n");
+      oom = TRUE;
+      goto out;
+  }
+  _dbus_message_loader_get_buffer (transport->loader, &buffer);
+
   if (_dbus_auth_needs_decoding (transport->auth))
+  {
+	  bytes_read = kdbus_read_message(socket_transport,  &socket_transport->encoded_incoming, fds, &n_fds);
+
+      _dbus_assert (_dbus_string_get_length (&socket_transport->encoded_incoming) == bytes_read);
+
+      if (bytes_read > 0)
+      {
+          if (!_dbus_auth_decode_data (transport->auth,
+                                       &socket_transport->encoded_incoming,
+                                       buffer))
+          {
+              _dbus_verbose ("Out of memory decoding incoming data\n");
+              _dbus_message_loader_return_buffer (transport->loader,
+                                              buffer,
+                                              _dbus_string_get_length (buffer));
+              oom = TRUE;
+              goto out;
+          }
+
+          _dbus_string_set_length (&socket_transport->encoded_incoming, 0);
+          _dbus_string_compact (&socket_transport->encoded_incoming, 2048);
+      }
+  }
+  else
+	  bytes_read = kdbus_read_message(socket_transport, buffer, fds, &n_fds);
+
+  if (bytes_read >= 0 && n_fds > 0)
+    _dbus_verbose("Read %i unix fds\n", n_fds);
+
+  _dbus_message_loader_return_buffer (transport->loader,
+                                      buffer,
+                                      bytes_read < 0 ? 0 : _dbus_string_get_length (buffer));
+  _dbus_message_loader_return_unix_fds(transport->loader, fds, bytes_read < 0 ? 0 : n_fds);
+
+ /* if (_dbus_auth_needs_decoding (transport->auth))
   {
 	  bytes_read = kdbus_read_message(socket_transport,  &socket_transport->encoded_incoming);
 
@@ -1686,13 +1731,27 @@ do_reading (DBusTransport *transport)
   }
   else
   {
-      _dbus_message_loader_get_buffer (transport->loader,
-                                       &buffer);
-      bytes_read = kdbus_read_message(socket_transport, buffer);
+      int *fds, n_fds;
+
+      if (!_dbus_message_loader_get_unix_fds(transport->loader, &fds, &n_fds))
+      {
+          _dbus_verbose ("Out of memory reading file descriptors\n");
+          _dbus_message_loader_return_buffer (transport->loader, buffer, 0);
+          oom = TRUE;
+          goto out;
+      }
+	  _dbus_message_loader_get_buffer (transport->loader, &buffer);
+
+      bytes_read = kdbus_read_message(socket_transport, buffer, fds, &n_fds);
+
+      if (bytes_read >= 0 && n_fds > 0)
+        _dbus_verbose("Read %i unix fds\n", n_fds);
+
+      _dbus_message_loader_return_unix_fds(transport->loader, fds, bytes_read < 0 ? 0 : n_fds);
       _dbus_message_loader_return_buffer (transport->loader,
                                           buffer,
                                           bytes_read < 0 ? 0 : bytes_read);
-  }
+  }*/
 
   if (bytes_read < 0)
     {
@@ -1791,11 +1850,14 @@ socket_handle_watch (DBusTransport *transport,
   if (watch == socket_transport->read_watch &&
       (flags & DBUS_WATCH_READABLE))
     {
+#ifdef DBUS_AUTHENTICATION
       dbus_bool_t auth_finished;
+#endif
 #if 1
       _dbus_verbose ("handling read watch %p flags = %x\n",
                      watch, flags);
 #endif
+#ifdef DBUS_AUTHENTICATION
       if (!do_authentication (transport, TRUE, FALSE, &auth_finished))
         return FALSE;
 
@@ -1807,16 +1869,19 @@ socket_handle_watch (DBusTransport *transport,
        */
       if (!auth_finished)
 	{
+#endif
 	  if (!do_reading (transport))
 	    {
 	      _dbus_verbose ("no memory to read\n");
 	      return FALSE;
 	    }
+#ifdef DBUS_AUTHENTICATION
 	}
       else
         {
           _dbus_verbose ("Not reading anything since we just completed the authentication\n");
         }
+#endif
     }
   else if (watch == socket_transport->write_watch &&
            (flags & DBUS_WATCH_WRITABLE))
@@ -1825,9 +1890,10 @@ socket_handle_watch (DBusTransport *transport,
       _dbus_verbose ("handling write watch, have_outgoing_messages = %d\n",
                      _dbus_connection_has_messages_to_send_unlocked (transport->connection));
 #endif
+#ifdef DBUS_AUTHENTICATION
       if (!do_authentication (transport, FALSE, TRUE, NULL))
         return FALSE;
-
+#endif
       if (!do_writing (transport))
         {
           _dbus_verbose ("no memory to write\n");
@@ -2029,17 +2095,20 @@ kdbus_do_iteration (DBusTransport *transport,
             {
               dbus_bool_t need_read = (poll_fd.revents & _DBUS_POLLIN) > 0;
               dbus_bool_t need_write = (poll_fd.revents & _DBUS_POLLOUT) > 0;
-	      dbus_bool_t authentication_completed;
+#ifdef DBUS_AUTHENTICATION
+              dbus_bool_t authentication_completed;
+#endif
 
               _dbus_verbose ("in iteration, need_read=%d need_write=%d\n",
                              need_read, need_write);
+#ifdef DBUS_AUTHENTICATION
               do_authentication (transport, need_read, need_write,
 				 &authentication_completed);
 
 	      /* See comment in socket_handle_watch. */
 	      if (authentication_completed)
                 goto out;
-
+#endif
               if (need_read && (flags & DBUS_ITERATION_DO_READING))
                 do_reading (transport);
               if (need_write && (flags & DBUS_ITERATION_DO_WRITING))
@@ -2142,7 +2211,7 @@ _dbus_transport_new_for_socket_kdbus (int	fd,
 
   /* These values should probably be tunable or something. */
   socket_transport->max_bytes_read_per_iteration = RECEIVE_POOL_SIZE;
-  socket_transport->max_bytes_written_per_iteration = MEMFD_POOL_SIZE;
+  socket_transport->max_bytes_written_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
 
   socket_transport->kdbus_mmap_ptr = NULL;
   socket_transport->memfd = -1;

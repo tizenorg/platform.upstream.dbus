@@ -691,7 +691,7 @@ dbus_bus_register (DBusConnection *connection,
     }
   if(dbus_transport_is_kdbus(connection))
   {
-	  name = malloc(18);
+	  name = malloc(sizeof(unsigned long long)*2.5 + 1);
 	  if(!bus_register_kdbus(name, connection, error))
 		  goto out;
 

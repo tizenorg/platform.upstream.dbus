@@ -2349,7 +2349,7 @@ _dbus_auth_client_new_kdbus (void)
 
   auth->side = auth_side_client;
   auth->state = &common_state_authenticated;
-  auth->unix_fd_negotiated = FALSE;
+  auth->unix_fd_negotiated = TRUE;
 
   /* Start the auth conversation by sending AUTH for our default
    * mechanism */
