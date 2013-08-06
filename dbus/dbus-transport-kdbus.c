@@ -38,10 +38,9 @@
 	for (part = (head)->first;					\
 	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
 	     part = KDBUS_PART_NEXT(part))
-
-#define RECEIVE_POOL_SIZE (2 * 1024LU * 1024LU)  //todo pool size to be decided
+#define RECEIVE_POOL_SIZE (50 * 1024LU * 1024LU)  //todo pool size to be decided
 #define MEMFD_POOL_SIZE	DBUS_MAXIMUM_MESSAGE_LENGTH
-#define MEMFD_SIZE_THRESHOLD (10 * 1024LU) // over this memfd is used
+#define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
 
 #define KDBUS_DECODE_DEBUG 1
 
@@ -77,9 +76,6 @@ struct DBusTransportSocket
   void* kdbus_mmap_ptr;
   int memfd;                            /*   File descriptor to memory
                                          *   pool from Kdbus kernel module */
-  char* memfd_buf;                      /*   Mapped memory pool for
-                                         *   Kdbus MEMFD functionality */
-  dbus_bool_t memfd_started;
 };
 
 
@@ -147,65 +143,23 @@ static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
 		}
 
 		socket_transport->memfd = memfd;
-                socket_transport->memfd_started = TRUE;
 		_dbus_verbose("kdbus_init_memfd: %d!!\n", socket_transport->memfd);
 
 	}
 	return 0;
 }
 
-static int kdbus_init_memfdbuf(DBusTransportSocket* socket_transport)
-{
-	char* buf;
-	int ret;
-
-	if(socket_transport->memfd_buf == NULL) 
-	{ 
-		// needed to mmap. not sure if seal is actally set though
-		ret = ioctl(socket_transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 0);
-     		if (ret < 0) {
-			_dbus_verbose("memfd sealing failed: %d (%m)\n", errno);
-			return -1;
-     		}
-
- 		buf = mmap(NULL, MEMFD_POOL_SIZE, PROT_WRITE | PROT_READ, MAP_SHARED, socket_transport->memfd, 0);
-     		if (buf == MAP_FAILED) 
-     		{
-     		     _dbus_verbose("mmap() fd=%i failed:%m", socket_transport->memfd);
-     		     return -1;
-     		}	
-		socket_transport->memfd_buf = buf;
-	}
-	return 0;
-}
-
-static uint64_t kdbus_get_msg_size_memfd(DBusTransportSocket *socket_transport)
-{
-    uint64_t msg_size = 0;
-
-    if(socket_transport->memfd_buf == NULL)   // memfd - initial message - encoded & not encoded
-    {
-        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
-
-    } else {                                  // memfd - regular data - encoded & not encoded
-        _dbus_verbose("create message - memfd regular vector data"); 
-        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-    }
-
-    return msg_size;
-}
-
-static struct kdbus_msg* kdbus_init_msg(DBusTransportSocket *socket_transport, const char* name, __u64 dst_id, uint64_t body_size)
+static struct kdbus_msg* kdbus_init_msg(DBusTransportSocket *socket_transport, const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd)
 {
     struct kdbus_msg* msg;
     uint64_t msg_size;
 
     msg_size = sizeof(struct kdbus_msg);
 
-    if(TRUE == socket_transport->memfd_started)  // bulk data - memfd - encoded and plain
-        msg_size += kdbus_get_msg_size_memfd(socket_transport);
-    else
+    if(use_memfd == TRUE)  // bulk data - memfd - encoded and plain
     {
+        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
+    } else {
         msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
     	if(body_size)
     		msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
@@ -233,9 +187,9 @@ static struct kdbus_msg* kdbus_init_msg(DBusTransportSocket *socket_transport, c
 }
 
 /*
- * once memfd is switched, it is used for all future data
+ * 
  *
- * TODO memfd works for 1-to-1 communication, breaks when there are 2 clients
+ * 
  */
 static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message, dbus_bool_t encoded)
 {
@@ -246,13 +200,13 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     const DBusString *header;
     const DBusString *body;
     uint64_t ret_size = 0;
-    char ret_size_str[50]; // 50 digit number max
     uint64_t body_size = 0;
     uint64_t header_size = 0;
     int ret;
     dbus_bool_t use_memfd;
     const int *unix_fds;
     unsigned fds_count;
+    char *buf;
 
     _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);  //todo or to remove
 
@@ -279,44 +233,49 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
         ret_size = header_size + body_size;
     }
 
-	// check if message size is big enough to use memfd kdbus transport
-	use_memfd = ret_size > MEMFD_SIZE_THRESHOLD ? TRUE : FALSE;
+    // check if message size is big enough to use memfd kdbus transport
+    use_memfd = ret_size > MEMFD_SIZE_THRESHOLD ? TRUE : FALSE;
 
     if(use_memfd) kdbus_init_memfd(transport);
     
     // init basic message fields
-    msg = kdbus_init_msg(transport, name, dst_id, body_size);   //todo add fds
+    msg = kdbus_init_msg(transport, name, dst_id, body_size, use_memfd); //todo add fds
     msg->cookie = dbus_message_get_serial(message);
     
     // build message contents
     item = msg->items;
 
     // case 1 - bulk data transfer - memfd - encoded and plain
-    if(TRUE == transport->memfd_started)          
+    if(use_memfd)          
     {
-        // initial memfd message
-        if(transport->memfd_buf == NULL)          
-        {
-            item->type = KDBUS_MSG_PAYLOAD_MEMFD;
-			item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
-			item->memfd.size = ret_size;
-			item->memfd.fd = transport->memfd;
+	    ret = ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 0);
+	    if (ret < 0) 
+	    {
+		_dbus_verbose("memfd sealing failed: \n");
+		goto out;
+	    }
 
-			// we still need to send normal data with memfd
+	    buf = mmap(NULL, ret_size, PROT_WRITE, MAP_SHARED, transport->memfd, 0);
+	    if (buf == MAP_FAILED) 
+	    {
+		_dbus_verbose("mmap() fd=%i failed:%m", transport->memfd);
+		goto out;
+	    }
+
             if(encoded)                           
-            	ret = write(transport->memfd, &transport->encoded_outgoing, ret_size);
+		memcpy(buf, &transport->encoded_outgoing, ret_size);
             else
             {
-            	ret = write(transport->memfd, _dbus_string_get_const_data(header), header_size);
-            	if(body_size)
-            		ret = write(transport->memfd, _dbus_string_get_const_data(body), body_size);
+		memcpy(buf, _dbus_string_get_const_data(header), header_size);
+            	if(body_size) {
+			buf+=header_size;
+			memcpy(buf, _dbus_string_get_const_data(body),  body_size);
+			buf-=header_size;
+		}
+
             }
            
-            if (ret < 0) {
-            	_dbus_verbose("writing data failed: %d (%m)\n", errno);
-				ret_size = -1;
-				goto out;
-     	    }
+	    munmap(buf, ret_size);
 
             // seal data - kdbus module needs it
      	    ret = ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 1);
@@ -325,30 +284,11 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 				ret_size = -1;
 				goto out;
      	    }
-        // just data
-        } else {                                 
-            _dbus_verbose("memfd - just data\n");
 
-            if(encoded) 
-                memcpy(transport->memfd_buf, &transport->encoded_outgoing, ret_size);
-            else {
-                memcpy(transport->memfd_buf, _dbus_string_get_const_data(header), header_size);
-                if(body_size)
-                {
-                	transport->memfd_buf += header_size;
-                	memcpy(transport->memfd_buf, _dbus_string_get_const_data(body), body_size);
-                	transport->memfd_buf -= header_size;
-                }
-            }
-            
-            item->type = KDBUS_MSG_PAYLOAD_VEC;
-            item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-            // send information about size of data
-            sprintf(ret_size_str, "%llu", (unsigned long long)ret_size); 
-            item->vec.address = (uint64_t) ret_size_str;
-            item->vec.size = 50; // size of the string above
-        }
-
+	    item->type = KDBUS_MSG_PAYLOAD_MEMFD;
+		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
+		item->memfd.size = ret_size;
+		item->memfd.fd = transport->memfd;
     // case 2 - small encoded - don't use memfd
     } else if(encoded) { 
         _dbus_verbose("sending encoded data\n");
@@ -360,7 +300,6 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 
     // case 3 - small not encoded - don't use memfd
     } else { 
-
         _dbus_verbose("sending normal vector data\n");
 
         item->type = KDBUS_MSG_PAYLOAD_VEC;
@@ -370,6 +309,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 
         if(body_size)
         {
+                _dbus_verbose("body attaching\n");
         	item = KDBUS_PART_NEXT(item);
         	item->type = KDBUS_MSG_PAYLOAD_VEC;
         	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
@@ -424,10 +364,6 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 		_dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
 		ret_size = -1;
 	}
-
-    // memfd - mmap after initial seal&send memfd
-    if(use_memfd) kdbus_init_memfdbuf(transport);
-
 out:
     free(msg);
 
@@ -669,17 +605,6 @@ static int put_message_into_data(DBusMessage *message, char* data)
 	return ret_size;
 }
 
-static void kdbus_reset_memfd(DBusTransportSocket* socket_transport)
-{
-    if(socket_transport->memfd_buf != NULL) {
-	munmap(socket_transport->memfd_buf, MEMFD_POOL_SIZE);
-	socket_transport->memfd_buf = NULL;
-        close(socket_transport->memfd);
-        socket_transport->memfd = -1;
-        socket_transport->memfd_started = FALSE;
-    }
-}
-
 static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTransportSocket* socket_transport)
 {
 	const struct kdbus_item *item = msg->items;
@@ -718,36 +643,13 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 		{
 			case KDBUS_MSG_PAYLOAD_OFF:
 			{
-				char *s;
 				uint64_t size = item->vec.size;
 
-				retry:
-				if(socket_transport->memfd_buf == NULL) // not memfd data
-				{
-					_dbus_verbose("memfd_buf == null\n");
-					memcpy(data, (char *)mmap_ptr + item->vec.offset, item->vec.size);
-					data += item->vec.size;
-					ret_size += item->vec.size;
-					size = item->vec.size;
-				} else { // memfd data
-					_dbus_verbose("memfd_buf != null\n");
-					s = (char *)mmap_ptr + item->vec.offset;
+				memcpy(data, (char *)mmap_ptr + item->vec.offset, item->vec.size);
+				data += item->vec.size;
+				ret_size += item->vec.size;			
 
-					size = atoi(s);
-					_dbus_verbose("data size : %llu\n", (unsigned long long)size);
-
-					if(size == 0)                            /* likely? non-memfd message sent from new peer */
-					{
-						kdbus_reset_memfd(socket_transport);
-						goto retry;
-					}
-
-					memcpy(data, socket_transport->memfd_buf, size);
-					data += size;
-					ret_size += size;
-				}
-
-			_dbus_verbose("  +%s (%llu bytes) off=%llu size=%llu\n",
+				_dbus_verbose("  +%s (%llu bytes) off=%llu size=%llu\n",
 					enum_MSG(item->type), item->size,
 					(unsigned long long)item->vec.offset,
 					(unsigned long long)size);
@@ -763,27 +665,25 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 				_dbus_verbose("memfd.size : %llu\n", (unsigned long long)size);
 				
+				buf = mmap(NULL, MEMFD_POOL_SIZE, PROT_READ , MAP_SHARED, item->memfd.fd, 0);
 
-				buf = mmap(NULL, MEMFD_POOL_SIZE, PROT_READ | PROT_WRITE , MAP_SHARED, item->memfd.fd, 0);
 				if (buf == MAP_FAILED) 
 				{
 					_dbus_verbose("mmap() fd=%i failed:%m", item->memfd.fd);
 					return -1;
 				}
-				
-				socket_transport->memfd_buf = buf; // save for unmapping before send reply
-				socket_transport->memfd = item->memfd.fd; // save for sending reply
-                                socket_transport->memfd_started = TRUE;
 
-				memcpy(data, buf, size); // TODO set internal buffer to this mmaped buf to save copy
+				memcpy(data, buf, size); 
 				data += size;
 				ret_size += size;
+
+				munmap(buf, MEMFD_POOL_SIZE);
 
                                 _dbus_verbose("  +%s (%llu bytes) off=%llu size=%llu\n",
 					   enum_MSG(item->type), item->size,
 					   (unsigned long long)item->vec.offset,
 					   (unsigned long long)item->vec.size);
-				break;
+			break;
 			}
 #if KDBUS_DECODE_DEBUG == 1
 			case KDBUS_MSG_SRC_CREDS:
@@ -2246,9 +2146,7 @@ _dbus_transport_new_for_socket_kdbus (int	fd,
 
   socket_transport->kdbus_mmap_ptr = NULL;
   socket_transport->memfd = -1;
-  socket_transport->memfd_buf = NULL;
-  socket_transport->memfd_started = FALSE;
-
+  
   return (DBusTransport*) socket_transport;
 
  failed_4:
