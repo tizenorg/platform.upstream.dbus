@@ -7,8 +7,6 @@ License:        GPL-2.0+ or AFL-2.1
 Group:          Base/IPC
 # COMMON1-BEGIN
 
-# We can't enable this right now, because it will create a build cycle between
-# dbus-1 and systemd. Fun!
 %define with_systemd 1
 
 BuildRequires:  doxygen
@@ -34,19 +32,7 @@ BuildRequires:  libcap-ng-devel
 # COMMON1-END
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 
-Provides:	dbus-1
 
-%package -n libdbus
-Summary:        Library package for D-Bus
-Group:          Base/IPC
-
-%package devel
-
-Summary:        Developer package for D-Bus
-Group:          Development/Libraries
-Requires:       libdbus = %{version}
-Requires:       dbus
-Requires:       glibc-devel
 
 %package devel-doc
 
@@ -56,22 +42,6 @@ Requires:       %{name} = %{version}
 BuildArch:      noarch
 
 %description
-D-Bus is a message bus system, a simple way for applications to talk to
-one another. D-Bus supplies both a system daemon and a
-per-user-login-session daemon. Also, the message bus is built on top of
-a general one-to-one message passing framework, which can be used by
-any two apps to communicate directly (without going through the message
-bus daemon).
-
-%description -n libdbus
-D-Bus is a message bus system, a simple way for applications to talk to
-one another. D-Bus supplies both a system daemon and a
-per-user-login-session daemon. Also, the message bus is built on top of
-a general one-to-one message passing framework, which can be used by
-any two apps to communicate directly (without going through the message
-bus daemon).
-
-%description devel
 D-Bus is a message bus system, a simple way for applications to talk to
 one another. D-Bus supplies both a system daemon and a
 per-user-login-session daemon. Also, the message bus is built on top of
@@ -126,10 +96,7 @@ mkdir -p %{buildroot}/%{_libdir}/pkgconfig
 mkdir -p %{buildroot}/lib/dbus-1/system-services
 mkdir -p %{buildroot}/%{_datadir}/dbus-1/system-services
 mkdir -p %{buildroot}/%{_datadir}/dbus-1/interfaces
-rm -f %{buildroot}/%{_libdir}/*.la
 #
-rm -f %{buildroot}/%{_bindir}/dbus-launch
-rm -f %{buildroot}/%{_mandir}/man1/dbus-launch.1*
 chmod a-x AUTHORS COPYING HACKING NEWS README doc/*.txt doc/file-boilerplate.c doc/TODO
 #
 install -d %{buildroot}%{_sysconfdir}/ConsoleKit/run-session.d
@@ -140,6 +107,15 @@ touch %{buildroot}/%{_localstatedir}/lib/dbus/machine-id
 mkdir -p %{buildroot}%{_unitdir_user}
 install -m0644 %{SOURCE5} %{buildroot}%{_unitdir_user}/dbus.service
 install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
+# File packaged by libdbus and dbus-devel
+rm -rf %{buildroot}/%{_includedir}/*
+rm -rf %{buildroot}/%{_libdir}/*.la
+rm -rf %{buildroot}/%{_libdir}/libdbus-1.so
+rm -rf %{buildroot}/%{_libdir}/libdbus-1.so.*
+rm -rf %{buildroot}/%{_libdir}/dbus-1.0/include
+rm -rf %{buildroot}/%{_libdir}/pkgconfig/dbus-1.pc
+rm -rf %{buildroot}/%{_mandir}/man1/dbus-launch.1*
+rm -rf %{buildroot}/%{_bindir}/dbus-launch
 
 
 %pre
@@ -147,10 +123,6 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 /usr/sbin/groupadd -r -g %{dbus_user_uid} dbus 2>/dev/null || :
 /usr/sbin/useradd -c 'System message bus' -u %{dbus_user_uid} -g %{dbus_user_uid} \
         -s /sbin/nologin -r -d '/' dbus 2> /dev/null || :
-
-%post -n libdbus -p /sbin/ldconfig
-
-%postun -n libdbus -p /sbin/ldconfig
 
 %docs_package
 
@@ -184,27 +156,6 @@ install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
 %{_unitdir}/multi-user.target.wants/dbus.service
 %dir %{_unitdir}/sockets.target.wants
 %{_unitdir}/sockets.target.wants/dbus.socket
-
-%files -n libdbus
-%defattr(-, root, root)
-%{_libdir}/libdbus-1.so.*
-# Own those directories in the library instead of dbus-1, since dbus users
-# often ship files there
-%dir %{_sysconfdir}/dbus-1
-%dir %{_sysconfdir}/dbus-1/session.d
-%dir %{_sysconfdir}/dbus-1/system.d
-%dir %{_datadir}/dbus-1
-%dir %{_datadir}/dbus-1/interfaces
-%dir %{_datadir}/dbus-1/services
-%dir %{_datadir}/dbus-1/system-services
-
-%files devel
-%defattr(-,root,root)
-%{_includedir}/*
-%{_libdir}/libdbus-1.so
-%dir %{_libdir}/dbus-1.0
-%{_libdir}/dbus-1.0/include
-%{_libdir}/pkgconfig/dbus-1.pc
 
 %files devel-doc
 %defattr(-,root,root)
