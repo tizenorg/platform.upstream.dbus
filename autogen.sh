@@ -100,8 +100,9 @@ else
   run_configure=false
 fi
 
+#--enable-developer
 if $run_configure; then
-    $srcdir/configure  --config-cache "$@" || exit $?
+    $srcdir/configure  --enable-developer --config-cache "$@" || exit $?
     echo 
     echo "Now type 'make' to compile $PROJECT."
 else

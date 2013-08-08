@@ -33,6 +33,8 @@
 #include "dbus-string.h"
 #include "dbus-transport-kdbus.h"
 #include <stdlib.h>
+#include <limits.h>
+#include <stdio.h>
 
 /**
  * @defgroup DBusBus Message bus APIs
@@ -691,7 +693,7 @@ dbus_bus_register (DBusConnection *connection,
     }
   if(dbus_transport_is_kdbus(connection))
   {
-	  name = malloc(sizeof(unsigned long long)*2.5 + 1);
+	  name = malloc(snprintf(name, 0, "%llu", ULLONG_MAX) + 1);
 	  if(!bus_register_kdbus(name, connection, error))
 		  goto out;
 

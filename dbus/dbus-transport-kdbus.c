@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <limits.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
 #define KDBUS_PART_HEADER_SIZE offsetof(struct kdbus_item, data)
@@ -41,7 +42,7 @@
 #define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU)
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
 
-#define KDBUS_DECODE_DEBUG 1
+#define KDBUS_MSG_DECODE_DEBUG 0
 
 
 /**
@@ -345,7 +346,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 			DBusMessage *errMessage = NULL;
 			dbus_uint32_t replySerial;
 
-			errMessage = generate_local_error_message(msg->cookie, DBUS_ERROR_SERVICE_UNKNOWN, NULL);
+			errMessage = generate_local_error_message(msg->cookie, DBUS_ERROR_SERVICE_UNKNOWN, (char*)dbus_message_get_destination(message));
 			if(errMessage == NULL)
 			{
 				ret_size = -1;
@@ -423,7 +424,7 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 		{
 			DBusMessage *reply;
 			DBusMessageIter args;
-			char unique_name[(unsigned int)(sizeof(ret)*2.5 + 4)];
+			char unique_name[(unsigned int)(snprintf(name, 0, "%llu", ULLONG_MAX) + 4)]; //+3 prefix ":1." and +1 closing NULL
 			const char* pString = unique_name;
 
 			sprintf(unique_name, ":1.%lld", (long long int)ret);
@@ -431,6 +432,7 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 			reply = dbus_message_new_method_return(message);
 			if(reply == NULL)
 				return FALSE;
+			dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
 		    dbus_message_iter_init_append(reply, &args);
 		    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pString))
 		    	return FALSE;
@@ -442,7 +444,7 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 			DBusMessage *errMessage;
 			dbus_uint32_t replySerial;
 
-			errMessage = generate_local_error_message(1, DBUS_ERROR_NAME_HAS_NO_OWNER, NULL);
+			errMessage = generate_local_error_message(1, DBUS_ERROR_NAME_HAS_NO_OWNER, name);
 			if(errMessage == NULL)
 				return FALSE;
 			replySerial = dbus_message_get_reply_serial(message);
@@ -470,11 +472,75 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 		reply = dbus_message_new_method_return(message);
 		if(reply == NULL)
 			return FALSE;
+		dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
 		dbus_message_iter_init_append(reply, &args);
 		if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_BOOLEAN, &result))
 			return FALSE;
 		if(add_message_to_received(reply, transport))
 		   	return TRUE;
+	}
+	else if(!strcmp(dbus_message_get_member(message), "ListNames"))
+	{
+		struct kdbus_cmd_names* pCmd;
+		uint64_t cmd_size;
+
+		cmd_size = sizeof(struct kdbus_cmd_names) + KDBUS_ITEM_SIZE(1);
+		pCmd = malloc(cmd_size);
+		if(pCmd == NULL)
+			goto out;
+		pCmd->size = cmd_size;
+
+  again:
+		cmd_size = 0;
+		if(ioctl(fd, KDBUS_CMD_NAME_LIST, pCmd))
+		{
+			if(errno == EINTR)
+				goto again;
+			if(errno == ENOBUFS)
+				cmd_size = pCmd->size;
+			else
+			{
+				_dbus_verbose("kdbus error asking for name list: err %d (%m)\n",errno);
+				goto out;
+			}
+		}
+		if(cmd_size)
+		{
+			pCmd = realloc(pCmd, cmd_size);
+			if(pCmd == NULL)
+				return FALSE;
+			goto again;
+		}
+		else
+		{
+			DBusMessage *reply;
+			DBusMessageIter args;
+			struct kdbus_cmd_name* pCmd_name;
+			char* pName;
+
+			reply = dbus_message_new_method_return(message);
+			if(reply == NULL)
+				goto out;
+			dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
+			dbus_message_iter_init_append(reply, &args);
+
+			for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
+			{
+				pName = pCmd_name->name;
+				if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pName))
+			    	goto out;
+			}
+
+			if(add_message_to_received(reply, transport))
+			{
+				free(pCmd);
+				return TRUE;
+			}
+		}
+
+out:
+		if(pCmd)
+			free(pCmd);
 	}
 	else  //temporarily we send that info but methods below should be implemented
 	{
@@ -490,11 +556,7 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 		if(add_message_to_received(reply, transport))
 		   	return TRUE;
 	}
-	/*else if(!strcmp(dbus_message_get_member(message), "ListNames"))
-	{
-		//todo
-	}
-	else if(!strcmp(dbus_message_get_member(message), "ListActivatableNames"))
+/*	else if(!strcmp(dbus_message_get_member(message), "ListActivatableNames"))
 	{
 		//todo
 	}
@@ -518,7 +580,7 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 	return FALSE;
 }
 
-#if KDBUS_DECODE_DEBUG == 1
+#if KDBUS_MSG_DECODE_DEBUG == 1
 static char *msg_id(uint64_t id, char *buf)
 {
 	if (id == 0)
@@ -608,17 +670,16 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 	int ret_size = 0;
 	DBusMessage *message = NULL;
 	DBusMessageIter args;
-	char dbus_name[(unsigned int)(sizeof(item->name_change.new_id)*2.5 + 4)];
-	const char* pDBusName = dbus_name;
-	const char* dbus = "org.freedesktop.DBus";
 	const char* emptyString = "";
     const char* pString = NULL;
+	char dbus_name[(unsigned int)(snprintf((char*)pString, 0, "%llu", ULLONG_MAX) + 4)];  //+3 prefix ":1." and +1 closing NULL
+	const char* pDBusName = dbus_name;
     void* mmap_ptr;
-#if KDBUS_DECODE_DEBUG == 1
+#if KDBUS_MSG_DECODE_DEBUG == 1
 	char buf[32];
 #endif
 
-#if KDBUS_DECODE_DEBUG == 1
+#if KDBUS_MSG_DECODE_DEBUG == 1
 	_dbus_verbose("MESSAGE: %s (%llu bytes) flags=0x%llx, %s → %s, cookie=%llu, timeout=%llu\n",
 		enum_PAYLOAD(msg->payload_type), (unsigned long long) msg->size,
 		(unsigned long long) msg->flags,
@@ -634,7 +695,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 		if (item->size <= KDBUS_PART_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
-			continue;  //todo ??? continue (because dbus will find error if it is in important part) or break
+			break;  //??? continue (because dbus will find error) or break
 		}
 
 		switch (item->type)
@@ -695,7 +756,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			break;
 			}
 
-#if KDBUS_DECODE_DEBUG == 1
+#if KDBUS_MSG_DECODE_DEBUG == 1
 			case KDBUS_MSG_SRC_CREDS:
 				_dbus_verbose("  +%s (%llu bytes) uid=%lld, gid=%lld, pid=%lld, tid=%lld, starttime=%lld\n",
 					enum_MSG(item->type), item->size,
@@ -716,7 +777,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 			case KDBUS_MSG_SRC_CMDLINE:
 			case KDBUS_MSG_SRC_NAMES: {
-				size_t size = item->size - KDBUS_PART_HEADER_SIZE;
+				__u64 size = item->size - KDBUS_PART_HEADER_SIZE;
 				const char *str = item->str;
 				int count = 0;
 
@@ -799,7 +860,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 					item->name_change.new_id, item->name_change.flags);
 
 				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
-				            dbus, // interface name of the signal
+				            DBUS_INTERFACE_DBUS, // interface name of the signal
 				            "NameOwnerChanged"); // name of the signal
 				if(message == NULL)
 				{
@@ -827,7 +888,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    	goto out;
 				}
 
-				dbus_message_set_sender(message, dbus);
+				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
 				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
@@ -840,7 +901,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 					item->name_change.new_id, item->name_change.flags);
 
 				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
-				            dbus, // interface name of the signal
+				            DBUS_INTERFACE_DBUS, // interface name of the signal
 				            "NameOwnerChanged"); // name of the signal
 				if(message == NULL)
 				{
@@ -868,7 +929,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    	goto out;
 				}
 
-				dbus_message_set_sender(message, dbus);
+				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
 				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
@@ -881,7 +942,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 					item->name_change.new_id, item->name_change.flags);
 
 				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
-				            dbus, // interface name of the signal
+				            DBUS_INTERFACE_DBUS, // interface name of the signal
 				            "NameOwnerChanged"); // name of the signal
 				if(message == NULL)
 				{
@@ -911,7 +972,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    	goto out;
 				}
 
-				dbus_message_set_sender(message, dbus);
+				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
 				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
@@ -924,7 +985,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 					   (unsigned long long) item->id_change.flags);
 
 				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
-				            dbus, // interface name of the signal
+				            DBUS_INTERFACE_DBUS, // interface name of the signal
 				            "NameOwnerChanged"); // name of the signal
 				if(message == NULL)
 				{
@@ -950,7 +1011,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    	goto out;
 				}
 
-				dbus_message_set_sender(message, dbus);
+				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
 				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
@@ -963,7 +1024,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 					   (unsigned long long) item->id_change.flags);
 
 				message = dbus_message_new_signal("/org/freedesktop/DBus", // object name of the signal
-				            dbus, // interface name of the signal
+				            DBUS_INTERFACE_DBUS, // interface name of the signal
 				            "NameOwnerChanged"); // name of the signal
 				if(message == NULL)
 				{
@@ -989,12 +1050,12 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    	goto out;
 				}
 
-				dbus_message_set_sender(message, dbus);
+				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
 				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
 			break;
-#if KDBUS_DECODE_DEBUG == 1
+#if KDBUS_MSG_DECODE_DEBUG == 1
 			default:
 				_dbus_verbose("  +%s (%llu bytes)\n", enum_MSG(item->type), item->size);
 			break;
@@ -1002,7 +1063,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 		}
 	}
 
-#if KDBUS_DECODE_DEBUG == 1
+#if KDBUS_MSG_DECODE_DEBUG == 1
 
 	if ((char *)item - ((char *)msg + msg->size) >= 8)
 		_dbus_verbose("invalid padding at end of message\n");
@@ -2468,14 +2529,14 @@ dbus_bool_t bus_register_kdbus(char* name, DBusConnection *connection, DBusError
 	int fd;
 
 	memset(&hello, 0, sizeof(hello));
-	hello.conn_flags = KDBUS_HELLO_ACCEPT_FD |
+	hello.conn_flags = KDBUS_HELLO_ACCEPT_FD/* |
 			   KDBUS_HELLO_ATTACH_COMM |
 			   KDBUS_HELLO_ATTACH_EXE |
 			   KDBUS_HELLO_ATTACH_CMDLINE |
 			   KDBUS_HELLO_ATTACH_CAPS |
 			   KDBUS_HELLO_ATTACH_CGROUP |
 			   KDBUS_HELLO_ATTACH_SECLABEL |
-			   KDBUS_HELLO_ATTACH_AUDIT;
+			   KDBUS_HELLO_ATTACH_AUDIT*/;
 	hello.size = sizeof(struct kdbus_cmd_hello);
 	hello.pool_size = RECEIVE_POOL_SIZE;
 
@@ -2585,7 +2646,7 @@ static int parse_match_key(const char *rule, const char* key, char** pValue)
 			{
 				if(strcmp(*pValue, "org.freedesktop.DBus") == 0)
 					value_length = -1;
-				_dbus_verbose ("founf for key: %s value:'%s'\n", key, *pValue);
+				_dbus_verbose ("found for key: %s value:'%s'\n", key, *pValue);
 			}
 		}
 	}
