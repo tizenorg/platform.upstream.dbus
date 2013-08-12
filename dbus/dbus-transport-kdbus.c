@@ -2219,7 +2219,7 @@ _dbus_transport_new_for_socket_kdbus (int	fd,
   socket_transport->message_bytes_written = 0;
 
   /* These values should probably be tunable or something. */
-  socket_transport->max_bytes_read_per_iteration = RECEIVE_POOL_SIZE;
+  socket_transport->max_bytes_read_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
   socket_transport->max_bytes_written_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
 
   socket_transport->kdbus_mmap_ptr = NULL;
