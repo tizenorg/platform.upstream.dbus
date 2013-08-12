@@ -1641,7 +1641,7 @@ dbus_bus_remove_match (DBusConnection *connection,
 	  dbus_message_unref (msg);
 	}
 	else
-		dbus_bus_remove_match_kdbus(connection, rule, error);
+		dbus_bus_remove_match_kdbus(connection, error);
 }
 
 /** @} */
