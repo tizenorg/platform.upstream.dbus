@@ -73,9 +73,14 @@ struct DBusTransportSocket
   DBusString encoded_incoming;          /**< Encoded version of current
                                          *   incoming data.
                                          */
-  void* kdbus_mmap_ptr;
-  int memfd;                            /*   File descriptor to memory
-                                         *   pool from Kdbus kernel module */
+  void* kdbus_mmap_ptr;	                /**< Mapped memory where Kdbus
+                                         *   writes messages.
+                                         */
+  int memfd;                            /**< File descriptor to special 
+                                         *   memory pool for bulk data
+                                         *   transfer. Retrieved from 
+                                         *   Kdbus kernel module. 
+                                         */
   __u64 bloom_size;						/*  bloom filter field size */
 };
 
@@ -117,19 +122,12 @@ static dbus_bool_t add_message_to_received(DBusMessage *message, DBusTransport *
 	return TRUE;
 }
 
-/*static void kdbus_debug_print_bytes(struct DBusString *data, int size)
-{
-    uint64_t i;
-
-    fprintf (stderr, "\ndata:\n");
-    for(i=0; i < size; i++)
-    {
-        fprintf (stderr, "%02x", _dbus_string_get_byte(data,i));
-    }
-    fprintf (stderr, "\nsize: %d, i: %lu\n", size, i);
-    
-}*/
-
+/**
+ * Retrieves file descriptor to memory pool from kdbus module.
+ * It is then used for bulk data sending.
+ * Triggered when message payload is over MEMFD_SIZE_THRESHOLD
+ * 
+ */
 static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
 {
 	int memfd;
@@ -150,6 +148,17 @@ static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
 	return 0;
 }
 
+/**
+ * Initiates Kdbus message structure. 
+ * Calculates it's size depending on whether MEMFD is triggered 
+ * or FDS are used or none of the above.
+ * @param name Well-known name or NULL
+ * @param dst_id Numeric id of recepient
+ * @param body_size size of message body if present
+ * @param use_memfd flag to build memfd message
+ * @param fds_count number of file descriptors used
+ * @return kdbus message initiatied
+ */
 static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd, int fds_count, DBusTransportSocket *transport)
 {
     struct kdbus_msg* msg;
@@ -188,6 +197,20 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
     return msg;
 }
 
+/**
+ * Main Kdbus function. 
+ * Builds Kdbus message using Dbus message body and header. 
+ * Parses destination name. Handles writing to Memfd memory pool 
+ * and Unix fds. Handles broadcasts and unicast messages.
+ * Does error handling.
+ * TODO refactor to be more compact
+ * @param name Well-known name or NULL
+ * @param dst_id Numeric id of recepient
+ * @param body_size size of message body if present
+ * @param use_memfd flag to build memfd message
+ * @param fds_count number of file descriptors used
+ * @return size of sent data
+ */
 static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message, dbus_bool_t encoded)
 {
     struct kdbus_msg *msg;
