@@ -26,11 +26,6 @@
  */
 #define KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE		0x00800000		/* maximum size of message header and items */
 
-/*todo must be te same as used to create bus in struct kdbus_bus.bloom_size
- * maybe it should be placed in one common header file*/
-#define KDBUS_BLOOM_SIZE_BYTES	64
-
-
 #define KDBUS_IOC_MAGIC			0x95
 #define KDBUS_SRC_ID_KERNEL		(0)
 #define KDBUS_DST_ID_WELL_KNOWN_NAME	(0)
