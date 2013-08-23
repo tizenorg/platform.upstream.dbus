@@ -176,8 +176,6 @@ static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
 {
 	int memfd;
 	
-	if(socket_transport->memfd == -1) 
-	{
 		if (ioctl(socket_transport->fd, KDBUS_CMD_MEMFD_NEW, &memfd) < 0) {
 			_dbus_verbose("KDBUS_CMD_MEMFD_NEW failed: \n");
 			return -1;
@@ -185,7 +183,6 @@ static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
 
 		socket_transport->memfd = memfd;
 		_dbus_verbose("kdbus_init_memfd: %d!!\n", socket_transport->memfd);
-	}
 	return 0;
 }
 
@@ -419,6 +416,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 	}
 out:
     free(msg);
+    close(transport->memfd);
 
     return ret_size;
 }
@@ -1153,14 +1151,18 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 	uint64_t __attribute__ ((__aligned__(8))) offset;
 	struct kdbus_msg *msg;
 	char *data;
+	int start;
+
+	start = _dbus_string_get_length (buffer);
 
 	_dbus_assert (socket_transport->max_bytes_read_per_iteration >= 0);
+
 	if (!_dbus_string_lengthen (buffer, socket_transport->max_bytes_read_per_iteration))
 	{
 		errno = ENOMEM;
 	    return -1;
 	}
-	data = _dbus_string_get_data_len (buffer, 0, socket_transport->max_bytes_read_per_iteration);
+	data = _dbus_string_get_data_len (buffer, start, socket_transport->max_bytes_read_per_iteration);
 
 	again:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RECV, &offset) < 0)
@@ -1168,15 +1170,22 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 		if(errno == EINTR)
 			goto again;
 		_dbus_verbose("kdbus error receiving message: %d (%m)\n", errno);
-		_dbus_string_set_length (buffer, 0);
+		_dbus_string_set_length (buffer, start);
 		return -1;
 	}
 
 	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
 
 	ret_size = kdbus_decode_msg(msg, data, socket_transport, fds, n_fds);
-	_dbus_string_set_length (buffer, ret_size);
 
+	if(ret_size == -1)
+	{ /* error */
+		_dbus_string_set_length (buffer, start);
+		return -1;
+	} else {
+		_dbus_string_set_length (buffer, start + ret_size);
+	}
+	
 	again2:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RELEASE, &offset) < 0)
 	{
@@ -1825,7 +1834,7 @@ do_reading (DBusTransport *transport)
 
   _dbus_message_loader_return_buffer (transport->loader,
                                       buffer,
-                                      bytes_read < 0 ? 0 : _dbus_string_get_length (buffer));
+                                      bytes_read < 0 ? 0 : bytes_read);
   _dbus_message_loader_return_unix_fds(transport->loader, fds, bytes_read < 0 ? 0 : n_fds);
 
   if (bytes_read < 0)
