@@ -28,6 +28,8 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <limits.h>
+#include <sys/stat.h>
+#include <openssl/md5.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
 #define KDBUS_PART_HEADER_SIZE offsetof(struct kdbus_item, data)
@@ -119,6 +121,49 @@ static dbus_bool_t add_message_to_received(DBusMessage *message, DBusConnection*
 	_dbus_connection_queue_synthesized_message_link(connection, message_link);
 
 	return TRUE;
+}
+
+static dbus_bool_t reply_with_error(char* error_type, const char* template, const char* object, DBusMessage *message, DBusConnection* connection)
+{
+	DBusMessage *errMessage;
+	char* error_msg = "";
+
+	if(template)
+	{
+		error_msg = alloca(strlen(template) + strlen(object));
+		sprintf(error_msg, template, object);
+	}
+	else if(object)
+		error_msg = (char*)object;
+
+	errMessage = generate_local_error_message(dbus_message_get_serial(message), error_type, error_msg);
+	if(errMessage == NULL)
+		return FALSE;
+	if (add_message_to_received(errMessage, connection))
+		return TRUE;
+
+	return FALSE;
+}
+
+static dbus_bool_t reply_1_data(DBusMessage *message, int data_type, void* pData, DBusConnection* connection)
+{
+	DBusMessageIter args;
+	DBusMessage *reply;
+
+	reply = dbus_message_new_method_return(message);
+	if(reply == NULL)
+		return FALSE;
+	dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
+    dbus_message_iter_init_append(reply, &args);
+    if (!dbus_message_iter_append_basic(&args, data_type, pData))
+    {
+    	dbus_message_unref(reply);
+        return FALSE;
+    }
+    if(add_message_to_received(reply, connection))
+    	return TRUE;
+
+    return FALSE;
 }
 
 /**
@@ -358,21 +403,16 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 			goto again;
 		if((errno == ESRCH) || (errno == ENXIO))  //when recipient is not available on the bus
 		{
-			DBusMessage *errMessage = NULL;
-			dbus_uint32_t replySerial;
-
-			errMessage = generate_local_error_message(msg->cookie, DBUS_ERROR_SERVICE_UNKNOWN, (char*)dbus_message_get_destination(message));
-			if(errMessage == NULL)
+			if (dbus_message_get_auto_start (message))
 			{
-				ret_size = -1;
-				goto out;
+				//todo start service here, otherwise
+				if(reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
+					goto out;
 			}
-			replySerial = dbus_message_get_reply_serial(message);
-			if(replySerial)
-				dbus_message_set_reply_serial(errMessage, replySerial);
-			if (!add_message_to_received(errMessage, transport->base.connection))
-				ret_size = -1;
-			goto out;
+			else
+				if(reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+					goto out;
+
 		}
 		_dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
 		ret_size = -1;
@@ -477,67 +517,42 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		_dbus_verbose ("Name to discover: %s   !!!!             !!!!\n", name);
 		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
 		if(ret == 0) //unique id of the name
 		{
-			DBusMessage *reply;
-			DBusMessageIter args;
 			char unique_name[(unsigned int)(snprintf(name, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
 			const char* pString = unique_name;
 
 			sprintf(unique_name, ":1.%llu", (unsigned long long int)info.uniqueId);
-			_dbus_verbose("Unique name discovered:%s!!!                       !!!!\n", unique_name);
-			reply = dbus_message_new_method_return(message);
-			if(reply == NULL)
-				return FALSE;
-			dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
-		    dbus_message_iter_init_append(reply, &args);
-		    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pString))
-		    	return FALSE;
-		    if(add_message_to_received(reply, transport->connection))
-		    	return TRUE;
+			_dbus_verbose("Unique name discovered:%s\n", unique_name);
+			return reply_1_data(message, DBUS_TYPE_STRING, &pString, transport->connection);
 		}
 		else if(ret == -ENOENT)  //name has no owner
-		{
-			DBusMessage *errMessage;
-			dbus_uint32_t replySerial;
-
-			errMessage = generate_local_error_message(1, DBUS_ERROR_NAME_HAS_NO_OWNER, name);
-			if(errMessage == NULL)
-				return FALSE;
-			replySerial = dbus_message_get_reply_serial(message);
-			if(replySerial)
-				dbus_message_set_reply_serial(errMessage, replySerial);
-			if (add_message_to_received(errMessage, transport->connection))
-				return TRUE;
-		}
+			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get owner of name '%s': no such name", name, message, transport->connection);
 		else
+		{
 			_dbus_verbose("kdbus error sending name query: err %d (%m)\n", errno);
+			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine unique name for '%s'", name, message, transport->connection);
+		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "NameHasOwner"))   //returns if name is currently registered on the bus
 	{
 		char* name = NULL;
-		DBusMessage *reply;
-		DBusMessageIter args;
 		dbus_bool_t result;
 		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		_dbus_verbose ("Name to discover: %s   !!!!             !!!!\n", name);
 		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
-		result = (ret == 0) ? TRUE : FALSE;
-		_dbus_verbose("Discovery: %d !!!                       !!!!\n", (int)result);
-
-		reply = dbus_message_new_method_return(message);
-		if(reply == NULL)
-			return FALSE;
-		dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
-		dbus_message_iter_init_append(reply, &args);
-		if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_BOOLEAN, &result))
-			return FALSE;
-		if(add_message_to_received(reply, transport->connection))
-		   	return TRUE;
+		if((ret == 0) || (ret == -ENOENT))
+		{
+			result = (ret == 0) ? TRUE : FALSE;
+			return reply_1_data(message, DBUS_TYPE_BOOLEAN, &result, transport->connection);
+		}
+		else
+		{
+			_dbus_verbose("kdbus error checking if name exists: err %d (%m)\n", errno);
+			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine whether name '%s' exists", name, message, transport->connection);
+		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "GetConnectionUnixUser"))
 	{
@@ -545,45 +560,19 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		_dbus_verbose ("Name to discover: %s   !!!!             !!!!\n", name);
 		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
 		if(ret == 0) //name found
 		{
-			DBusMessage *reply;
-			DBusMessageIter args;
-
-			_dbus_verbose("User id:%llu!!!                       !!!!\n", (unsigned long long) info.userId);
-			reply = dbus_message_new_method_return(message);
-			if(reply == NULL)
-				return FALSE;
-			dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
-		    dbus_message_iter_init_append(reply, &args);
-		    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_UINT32, &info.userId))
-		    	return FALSE;
-		    if(add_message_to_received(reply, transport->connection))
-		    	return TRUE;
+			_dbus_verbose("User id:%llu\n", (unsigned long long) info.userId);
+			return reply_1_data(message, DBUS_TYPE_UINT32, &info.userId, transport->connection);
 		}
 		else if(ret == -ENOENT)  //name has no owner
-		{
-			DBusMessage *errMessage;
-			dbus_uint32_t replySerial;
-			char* error_msg = NULL;
-
-			error_msg = alloca(sizeof("Could not determine UID for ''") + strlen(name));
-			if(error_msg == NULL)
-				return FALSE;
-			sprintf(error_msg, "Could not determine UID for '%s'", name);
-			errMessage = generate_local_error_message(1, DBUS_ERROR_FAILED, error_msg);
-			if(errMessage == NULL)
-				return FALSE;
-			replySerial = dbus_message_get_reply_serial(message);
-			if(replySerial)
-				dbus_message_set_reply_serial(errMessage, replySerial);
-			if (add_message_to_received(errMessage, transport->connection))
-				return TRUE;
-		}
+			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get UID of name '%s': no such name", name, message, transport->connection);
 		else
-			_dbus_verbose("kdbus error querying ConnectionUnixUserID: err %d (%m)\n", errno);
+		{
+			_dbus_verbose("kdbus error determining UID: err %d (%m)\n", errno);
+			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name, message, transport->connection);
+		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "GetConnectionUnixProcessID"))
 	{
@@ -591,40 +580,16 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		_dbus_verbose ("Name to discover: %s   !!!!             !!!!\n", name);
 		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
 		if(ret == 0) //name found
-		{
-			DBusMessage *reply;
-			DBusMessageIter args;
-
-			_dbus_verbose("Process id:%llu!!!                       !!!!\n", (unsigned long long) info.processId);
-			reply = dbus_message_new_method_return(message);
-			if(reply == NULL)
-				return FALSE;
-			dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
-		    dbus_message_iter_init_append(reply, &args);
-		    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_UINT32, &info.processId))
-		    	return FALSE;
-		    if(add_message_to_received(reply, transport->connection))
-		    	return TRUE;
-		}
+			return reply_1_data(message, DBUS_TYPE_UINT32, &info.processId, transport->connection);
 		else if(ret == -ENOENT)  //name has no owner
-		{
-			DBusMessage *errMessage;
-			dbus_uint32_t replySerial;
-
-			errMessage = generate_local_error_message(1, DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN, name);
-			if(errMessage == NULL)
-				return FALSE;
-			replySerial = dbus_message_get_reply_serial(message);
-			if(replySerial)
-				dbus_message_set_reply_serial(errMessage, replySerial);
-			if (add_message_to_received(errMessage, transport->connection))
-				return TRUE;
-		}
+			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get PID of name '%s': no such name", name, message, transport->connection);
 		else
-			_dbus_verbose("kdbus error querying ConnectionUnixUserID: err %d (%m)\n", errno);
+		{
+			_dbus_verbose("kdbus error determining PID: err %d (%m)\n", errno);
+			return reply_with_error(DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,"Could not determine PID for '%s'", name, message, transport->connection);
+		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "ListNames"))  //return all well known names on he bus
 	{
@@ -675,7 +640,10 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 			{
 				pName = pCmd_name->name;
 				if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pName))
-			    	goto out;
+				{
+					dbus_message_unref(reply);
+					goto out;
+				}
 			}
 
 			if(add_message_to_received(reply, transport->connection))
@@ -689,20 +657,43 @@ out:
 		if(pCmd)
 			free(pCmd);
 	}
-	else  //temporarily we send that info but methods below should be implemented if possible
+	else if(!strcmp(dbus_message_get_member(message), "GetId"))
 	{
-		DBusMessage *reply;
-		dbus_uint32_t replySerial;
+		char* path;
+		char uuid[DBUS_UUID_LENGTH_BYTES];
+		struct stat stats;
+		MD5_CTX md5;
+		DBusString binary, encoded;
+		int ret = FALSE;
 
-		reply = generate_local_error_message(1, DBUS_ERROR_UNKNOWN_METHOD, NULL);
-		if(reply == NULL)
-			return FALSE;
-		replySerial = dbus_message_get_reply_serial(message);
-		if(replySerial)
-			dbus_message_set_reply_serial(reply, replySerial);
-		if(add_message_to_received(reply, transport->connection))
-		   	return TRUE;
+		path = &transport->address[11]; //start of kdbus bus path
+		if(stat(path, &stats) < -1)
+		{
+			_dbus_verbose("kdbus error reading stats of bus: err %d (%m)\n", errno);
+			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine bus '%s' uuid", path, message, transport->connection);
+		}
+
+		MD5_Init(&md5);
+        MD5_Update(&md5, path, strlen(path));
+        MD5_Update(&md5, &stats.st_ctim.tv_sec, sizeof(stats.st_ctim.tv_sec));
+		MD5_Final(uuid, &md5);
+
+		if(!_dbus_string_init (&encoded))
+			goto outgid;
+		_dbus_string_init_const_len (&binary, uuid, DBUS_UUID_LENGTH_BYTES);
+		if(!_dbus_string_hex_encode (&binary, 0, &encoded, _dbus_string_get_length (&encoded)))
+			goto outb;
+		path = (char*)_dbus_string_get_const_data (&encoded);
+		ret = reply_1_data(message, DBUS_TYPE_STRING, &path, transport->connection);
+
+	outb:
+		_dbus_string_free(&binary);
+		_dbus_string_free(&encoded);
+	outgid:
+		return ret;
 	}
+	else
+		return reply_with_error(DBUS_ERROR_UNKNOWN_METHOD, NULL, (char*)dbus_message_get_member(message), message, transport->connection);
 /*	else if(!strcmp(dbus_message_get_member(message), "ListActivatableNames"))  //todo
 	{
 
@@ -712,10 +703,6 @@ out:
 
 	}
 	else if(!strcmp(dbus_message_get_member(message), "UpdateActivationEnvironment"))
-	{
-
-	}
-	else if(!strcmp(dbus_message_get_member(message), "GetId"))
 	{
 
 	}*/
@@ -811,6 +798,7 @@ static int put_message_into_data(DBusMessage *message, char* data)
 	size = _dbus_string_get_length(body);
 	memcpy(data, _dbus_string_get_const_data(body), size);
 	ret_size += size;
+	dbus_message_unref(message);
 
 	return ret_size;
 }
@@ -1029,7 +1017,6 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    ITER_APPEND_STR(emptyString)
 			    ITER_APPEND_STR(pDBusName)
 				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
-				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
 			break;
@@ -1055,7 +1042,6 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    ITER_APPEND_STR(pDBusName)
 			    ITER_APPEND_STR(emptyString)
 				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
-				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
 			break;
@@ -1083,7 +1069,6 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    _dbus_verbose ("New id: %s\n", pDBusName);
 			    ITER_APPEND_STR(pDBusName)
 				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
-				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
 			break;
@@ -1107,7 +1092,6 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    ITER_APPEND_STR(emptyString)
 			    ITER_APPEND_STR(pDBusName)
 				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
-				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
 			break;
@@ -1131,7 +1115,6 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			    ITER_APPEND_STR(pDBusName)
 			    ITER_APPEND_STR(emptyString)
 				dbus_message_set_sender(message, DBUS_SERVICE_DBUS);
-				dbus_message_set_serial(message, 1);
 
 				ret_size = put_message_into_data(message, data);
 			break;
@@ -1767,8 +1750,7 @@ written:
 	out:
 	if (oom)
 		return FALSE;
-	else
-		return TRUE;
+	return TRUE;
 }
 
 /* returns false on out-of-memory */
@@ -1893,8 +1875,7 @@ do_reading (DBusTransport *transport)
  out:
   if (oom)
     return FALSE;
-  else
-    return TRUE;
+  return TRUE;
 }
 
 static dbus_bool_t
@@ -1904,7 +1885,7 @@ unix_error_with_read_to_come (DBusTransport *itransport,
 {
    DBusTransportSocket *transport = (DBusTransportSocket *) itransport;
 
-   if (!(flags & DBUS_WATCH_HANGUP || flags & DBUS_WATCH_ERROR))
+   if (!((flags & DBUS_WATCH_HANGUP) || (flags & DBUS_WATCH_ERROR)))
       return FALSE;
 
   /* If we have a read watch enabled ...
@@ -2692,10 +2673,10 @@ dbus_bool_t dbus_transport_is_kdbus(DBusConnection *connection)
 {
 	const char* address = _dbus_connection_get_address(connection);
 
-	if(address == strstr(address, "kdbus:path="))
-		return TRUE;
-	else
-		return FALSE;
+	if(address)
+		if(address == strstr(address, "kdbus:path="))
+				return TRUE;
+	return FALSE;
 }
 
 /**

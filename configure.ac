@@ -1270,9 +1270,18 @@ AC_DEFINE_UNQUOTED([DBUS_DEFAULT_MESSAGE_UNIX_FDS],
   [Default for dbus_connection_get_max_message_unix_fds()])
 AC_SUBST([DEFAULT_MESSAGE_UNIX_FDS])
 
+### kdbus related libs
+AC_CHECK_LIB(crypto, MD5_Init,
+             [ AC_CHECK_HEADERS(openssl/md5.h, [],
+                                [AC_MSG_ERROR([Could not find md5.h, check config.log for failed attempts])]) ],
+             [ AC_MSG_ERROR([Explicitly requested crypto but crypto not found]) ])
+KDBUS_LIBS="-lcrypto"
+#AC_SUBST([KDBUS_LIBS])             
+
 #### Set up final flags
-LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs"
+LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs $KDBUS_LIBS"
 AC_SUBST([LIBDBUS_LIBS])
+
 
 ### X11 detection
 DBUS_X_LIBS=
