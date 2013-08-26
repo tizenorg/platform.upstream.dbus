@@ -426,6 +426,8 @@ struct nameInfo
 	__u64 uniqueId;
 	__u64 userId;
 	__u64 processId;
+	__u32 sec_label_len;
+	char *sec_label;
 };
 
 /**
@@ -444,8 +446,11 @@ static int kdbus_NameQuery(char* name, int fd, struct nameInfo* pInfo)
 	int ret;
 	uint64_t item_size;
 
+	pInfo->sec_label_len = 0;
+	pInfo->sec_label = NULL;
+	
     item_size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
-	item_size = (item_size < 56) ? 56 : item_size;  //56 bytes are needed by kernel to place a lot of unnecessary info about name, otherwise error
+	item_size = (item_size < 56) ? 56 : item_size;  //at least 56 bytes are needed by kernel to place info about name, otherwise error
     size = sizeof(struct kdbus_cmd_name_info) + item_size;
 
 	msg = malloc(size);
@@ -468,10 +473,17 @@ static int kdbus_NameQuery(char* name, int fd, struct nameInfo* pInfo)
 	strcpy(item->str, name);
 
 	again:
-	if ((ret = ioctl(fd, KDBUS_CMD_NAME_QUERY, msg)))
+	ret = ioctl(fd, KDBUS_CMD_NAME_QUERY, msg);
+	if (ret < 0)
 	{
 		if(errno == EINTR)
 			goto again;
+		else if(ret == -ENOBUFS)
+		{
+			msg = realloc(msg, msg->size);  //prepare memory
+			if(msg != NULL)
+				goto again;
+		}
 		pInfo->uniqueId = 0;
 		ret = -errno;
 	}
@@ -480,6 +492,24 @@ static int kdbus_NameQuery(char* name, int fd, struct nameInfo* pInfo)
 		pInfo->uniqueId = msg->id;
 		pInfo->userId = msg->creds.uid;
 		pInfo->processId = msg->creds.pid;
+_dbus_verbose ("I'm alive 1\n");
+		item = msg->items;
+		while((uint8_t *)(item) < (uint8_t *)(msg) + msg->size)
+		{
+			if(item->type == KDBUS_NAME_INFO_ITEM_SECLABEL)
+			{
+				pInfo->sec_label_len = item->size - KDBUS_PART_HEADER_SIZE - 1;
+				if(pInfo->sec_label_len != 0)
+					pInfo->sec_label = malloc(pInfo->sec_label_len);
+				if(pInfo->sec_label == NULL)
+					ret = -1;
+				else
+					memcpy(pInfo->sec_label, item->data, pInfo->sec_label_len);
+					
+				break;
+			}
+			item = KDBUS_PART_NEXT(item);
+		}
 	}
 
 	free(msg);
@@ -507,86 +537,84 @@ static int kdbus_NameQuery(char* name, int fd, struct nameInfo* pInfo)
  */
 static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *message)
 {
-	int ret;
+	int inter_ret;
+	struct nameInfo info;
+	dbus_bool_t ret_value;
 
 	if(!strcmp(dbus_message_get_member(message), "GetNameOwner"))  //returns id of the well known name
 	{
 		char* name = NULL;
-		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
-		if(ret == 0) //unique id of the name
+		inter_ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
+		if(inter_ret == 0) //unique id of the name
 		{
 			char unique_name[(unsigned int)(snprintf(name, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
 			const char* pString = unique_name;
 
 			sprintf(unique_name, ":1.%llu", (unsigned long long int)info.uniqueId);
 			_dbus_verbose("Unique name discovered:%s\n", unique_name);
-			return reply_1_data(message, DBUS_TYPE_STRING, &pString, transport->connection);
+			ret_value = reply_1_data(message, DBUS_TYPE_STRING, &pString, transport->connection);
 		}
-		else if(ret == -ENOENT)  //name has no owner
+		else if(inter_ret == -ENOENT)  //name has no owner
 			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get owner of name '%s': no such name", name, message, transport->connection);
 		else
 		{
 			_dbus_verbose("kdbus error sending name query: err %d (%m)\n", errno);
-			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine unique name for '%s'", name, message, transport->connection);
+			ret_value = reply_with_error(DBUS_ERROR_FAILED, "Could not determine unique name for '%s'", name, message, transport->connection);
 		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "NameHasOwner"))   //returns if name is currently registered on the bus
 	{
 		char* name = NULL;
 		dbus_bool_t result;
-		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
-		if((ret == 0) || (ret == -ENOENT))
+		inter_ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
+		if((inter_ret == 0) || (inter_ret == -ENOENT))
 		{
-			result = (ret == 0) ? TRUE : FALSE;
-			return reply_1_data(message, DBUS_TYPE_BOOLEAN, &result, transport->connection);
+			result = (inter_ret == 0) ? TRUE : FALSE;
+			ret_value = reply_1_data(message, DBUS_TYPE_BOOLEAN, &result, transport->connection);
 		}
 		else
 		{
 			_dbus_verbose("kdbus error checking if name exists: err %d (%m)\n", errno);
-			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine whether name '%s' exists", name, message, transport->connection);
+			ret_value = reply_with_error(DBUS_ERROR_FAILED, "Could not determine whether name '%s' exists", name, message, transport->connection);
 		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "GetConnectionUnixUser"))
 	{
 		char* name = NULL;
-		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
-		if(ret == 0) //name found
+		inter_ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
+		if(inter_ret == 0) //name found
 		{
 			_dbus_verbose("User id:%llu\n", (unsigned long long) info.userId);
-			return reply_1_data(message, DBUS_TYPE_UINT32, &info.userId, transport->connection);
+			ret_value = reply_1_data(message, DBUS_TYPE_UINT32, &info.userId, transport->connection);
 		}
-		else if(ret == -ENOENT)  //name has no owner
+		else if(inter_ret == -ENOENT)  //name has no owner
 			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get UID of name '%s': no such name", name, message, transport->connection);
 		else
 		{
 			_dbus_verbose("kdbus error determining UID: err %d (%m)\n", errno);
-			return reply_with_error(DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name, message, transport->connection);
+			ret_value = reply_with_error(DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name, message, transport->connection);
 		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "GetConnectionUnixProcessID"))
 	{
 		char* name = NULL;
-		struct nameInfo info;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
-		ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
-		if(ret == 0) //name found
-			return reply_1_data(message, DBUS_TYPE_UINT32, &info.processId, transport->connection);
-		else if(ret == -ENOENT)  //name has no owner
+		inter_ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
+		if(inter_ret == 0) //name found
+			ret_value = reply_1_data(message, DBUS_TYPE_UINT32, &info.processId, transport->connection);
+		else if(inter_ret == -ENOENT)  //name has no owner
 			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get PID of name '%s': no such name", name, message, transport->connection);
 		else
 		{
 			_dbus_verbose("kdbus error determining PID: err %d (%m)\n", errno);
-			return reply_with_error(DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,"Could not determine PID for '%s'", name, message, transport->connection);
+			ret_value = reply_with_error(DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,"Could not determine PID for '%s'", name, message, transport->connection);
 		}
 	}
 	else if(!strcmp(dbus_message_get_member(message), "ListNames"))  //return all well known names on he bus
@@ -650,10 +678,10 @@ static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessa
 				return TRUE;
 			}
 		}
-
 out:
 		if(pCmd)
 			free(pCmd);
+		return FALSE;
 	}
 	else if(!strcmp(dbus_message_get_member(message), "GetId"))
 	{
@@ -662,8 +690,8 @@ out:
 		struct stat stats;
 		MD5_CTX md5;
 		DBusString binary, encoded;
-		int ret = FALSE;
 
+		ret_value = FALSE;
 		path = &transport->address[11]; //start of kdbus bus path
 		if(stat(path, &stats) < -1)
 		{
@@ -682,13 +710,46 @@ out:
 		if(!_dbus_string_hex_encode (&binary, 0, &encoded, _dbus_string_get_length (&encoded)))
 			goto outb;
 		path = (char*)_dbus_string_get_const_data (&encoded);
-		ret = reply_1_data(message, DBUS_TYPE_STRING, &path, transport->connection);
+		ret_value = reply_1_data(message, DBUS_TYPE_STRING, &path, transport->connection);
 
 	outb:
 		_dbus_string_free(&binary);
 		_dbus_string_free(&encoded);
 	outgid:
-		return ret;
+		return ret_value;
+	}
+	else if(!strcmp(dbus_message_get_member(message), "GetAdtAuditSessionData"))
+	{
+		char* name = NULL;
+
+		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
+		return reply_with_error(DBUS_ERROR_ADT_AUDIT_DATA_UNKNOWN, "Could not determine audit session data for '%s'", name, message, transport->connection);
+	}
+	else if(!strcmp(dbus_message_get_member(message), "GetConnectionSELinuxSecurityContext"))
+	{
+		char* name = NULL;
+
+		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
+		inter_ret = kdbus_NameQuery(name, ((DBusTransportSocket*)transport)->fd, &info);
+		if(inter_ret == -ENOENT)  //name has no owner
+			return reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Could not get security context of name '%s': no such name", name, message, transport->connection);
+		else if(inter_ret < 0)
+			return reply_with_error(DBUS_ERROR_SELINUX_SECURITY_CONTEXT_UNKNOWN, "Could not determine security context for '%s'", name, message, transport->connection);
+		else
+		{
+			DBusMessage *reply;
+
+			ret_value = FALSE;
+			reply = dbus_message_new_method_return(message);
+			if(reply != NULL)
+			{
+				dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
+				if (!dbus_message_append_args (reply, DBUS_TYPE_ARRAY, DBUS_TYPE_BYTE, &info.sec_label, info.sec_label_len, DBUS_TYPE_INVALID))
+					dbus_message_unref(reply);
+				else if(add_message_to_received(reply, transport->connection))
+					ret_value = TRUE;
+			}
+		}
 	}
 	else
 		return reply_with_error(DBUS_ERROR_UNKNOWN_METHOD, NULL, (char*)dbus_message_get_member(message), message, transport->connection);
@@ -703,9 +764,16 @@ out:
 	else if(!strcmp(dbus_message_get_member(message), "UpdateActivationEnvironment"))
 	{
 
-	}*/
+	}
+	else if(!strcmp(dbus_message_get_member(message), "ReloadConfig"))
+	{
 
-	return FALSE;
+	}
+	*/
+
+	if(info.sec_label)
+		free(info.sec_label);
+	return ret_value;
 }
 
 #if KDBUS_MSG_DECODE_DEBUG == 1
@@ -1154,9 +1222,6 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 	int start;
 
 	start = _dbus_string_get_length (buffer);
-
-	_dbus_assert (socket_transport->max_bytes_read_per_iteration >= 0);
-
 	if (!_dbus_string_lengthen (buffer, socket_transport->max_bytes_read_per_iteration))
 	{
 		errno = ENOMEM;
@@ -1178,14 +1243,15 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 
 	ret_size = kdbus_decode_msg(msg, data, socket_transport, fds, n_fds);
 
-	if(ret_size == -1)
-	{ /* error */
+	if(ret_size == -1) /* error */
+	{
 		_dbus_string_set_length (buffer, start);
 		return -1;
-	} else {
-		_dbus_string_set_length (buffer, start + ret_size);
 	}
+	else
+		_dbus_string_set_length (buffer, start + ret_size);
 	
+
 	again2:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RELEASE, &offset) < 0)
 	{

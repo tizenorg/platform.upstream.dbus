@@ -531,8 +531,6 @@ do_writing (DBusTransport *transport)
       int header_len, body_len;
       int total_bytes_to_write;
       
-//      int i;
-
       if (total > socket_transport->max_bytes_written_per_iteration)
         {
           _dbus_verbose ("%d bytes exceeds %d bytes written per iteration, returning\n",
@@ -553,32 +551,6 @@ do_writing (DBusTransport *transport)
 
       header_len = _dbus_string_get_length (header);
       body_len = _dbus_string_get_length (body);
-
-  /*    fprintf (stderr, "\nheader:\n");  //todo for test - to remove together wit int i declaration above
-      for(i=0; i < header_len; i++)
-      {
-      	fprintf (stderr, "%02x", _dbus_string_get_byte(header,i));
-      }
-      fprintf (stderr,"\n");
-      for(i=0; i < header_len; i++)
-      {
-      	fprintf (stderr, "%c", _dbus_string_get_byte(header,i));
-      }
-      fprintf (stderr, "\nret size: %u, i: %u\n", header_len, i);
-
-
-      fprintf (stderr, "\nbody:\n");
-      for(i=0; i < body_len; i++)
-      {
-      	fprintf (stderr, "%02x", _dbus_string_get_byte(body,i));
-      }
-      fprintf (stderr, "\nret size: %u, i: %u\n", body_len, i);
-      fprintf (stderr,"\n");
-      for(i=0; i < body_len; i++)
-      {
-      	fprintf (stderr, "%c", _dbus_string_get_byte(body,i));
-      }
-      fprintf (stderr, "\nret size: %u, i: %u\n", body_len, i);*/
 
       if (_dbus_auth_needs_encoding (transport->auth))
         {
