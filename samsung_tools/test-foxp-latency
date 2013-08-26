@@ -1,0 +1,135 @@
+#!/usr/bin/expect
+
+set TARGET_HOST "localhost"
+set ROOT_DIR "/home/mike/JJ"
+set NUM_PASSES 50
+set RESULT_FILE [clock format [clock seconds] -format "latency-results-%Y.%m.%d.%H.%M.%S.csv"]
+
+set INVOCATIONS [list \
+    { "TTV default" "DISPLAY=:0" } \
+    [list "Custom lib, kdbus transport" "LD_LIBRARY_PATH=$ROOT_DIR/libs DBUS_SESSION_BUS_ADDRESS='kdbus:path=/dev/kdbus/1000-testtest/bus'"] \
+]
+
+#    [list "Custom lib, dbus transport" "DISPLAY=:0 LD_LIBRARY_PATH=$ROOT_DIR/libs"] \
+
+#set PROBES { \
+#    1000   { 1000 } \
+#    2000   { 1000 2000 } \
+#    5000   { 1000 2000 5000 } \
+#    10000  { 1000 2000 5000 10000 } \
+#    20000  { 1000 2000 5000 10000 20000 } \
+#    50000  { 1000 2000 5000 10000 20000 50000 } \
+#    75000  { 1000 2000 5000 10000 20000 50000 75000 } \
+#    100000 { 1000 2000 5000 10000 20000 50000 75000 } \
+#    200000 { 1000 2000 5000 10000 20000 50000 75000 } \
+#    300000 { 1000 2000 5000 10000 20000 50000 75000 } \
+#}
+
+
+# ***************************************************************************************************************************************************
+
+
+proc run_server { invocation } {
+    global TARGET_HOST ROOT_DIR
+    spawn ssh -t $TARGET_HOST "cd $ROOT_DIR/ipc-test; $invocation ./ping-server"
+    expect {
+        "Waiting for clients"    { return $spawn_id }
+        default                 {
+            puts ">>> ERROR <<<"
+            puts $expect_out(buffer)
+            puts ">>> ----- <<<"
+            return 0
+        }
+    }
+}
+
+
+proc terminate_server { server_id } {
+    set spawn_id $server_id
+    send "\x03"
+    expect {
+        "closed."   { return 1 }
+        default     { return 0 }
+    }
+}
+
+
+proc run_client { invocation } {
+    global TARGET_HOST ROOT_DIR
+    spawn ssh -t $TARGET_HOST "$invocation $ROOT_DIR/ipc-test/ping-client"
+    set round_trip_time 0
+    expect  {
+        -timeout 60
+        -re {avg RTT: (\d+) us} {
+            set round_trip_time $expect_out(1,string)
+        }
+        timeout { puts "ctrl-C"; send "\x03" }
+    }
+    return $round_trip_time
+}
+
+
+proc log_result { data { new_file 0 } } {
+    global RESULT_FILE
+    if { $new_file } {
+        puts "Storing results into file $RESULT_FILE"
+    }
+    set pl [open $RESULT_FILE [expr {$new_file ? "w" : "a"}]]
+    puts $pl [join $data ","]
+    close $pl
+}
+
+# ***************************************************************************************************************************************************
+
+
+log_user 0
+
+log_result { {"Test environment"} {"Round Trip Time [us]"} } 1
+
+# iterate over different invocations
+foreach invocation $INVOCATIONS {
+    set test_env [lindex $invocation 0]
+    puts "Test environment: $test_env"
+    puts ""
+    puts -nonewline "Bringing up server... "
+    set server [run_server [lindex $invocation 1]]
+    if { $server == 0 } {
+        puts "failed!"
+        continue
+    }
+    puts "OK!"        
+        
+    flush stdout
+    # average several passes to get more stable figures
+    set total 0
+    set passes 0
+    for { set run 1 } { $run <= $NUM_PASSES } { incr run } {
+        set result [run_client [lindex $invocation 1]]
+        if { $result > 0 } {
+            #puts -nonewline "."
+	    puts "$result us"
+            incr total $result
+            incr passes
+        } else {
+            puts -nonewline "!"
+        }
+        flush stdout
+    }
+    if { $passes > 0 } {
+        set avg [expr $total / $passes]
+        puts " $avg us"
+        log_result [list "\"$test_env\"" $avg]
+    } else {
+        puts " no results!"
+    }
+    flush stdout
+        
+    
+    puts -nonewline "Terminating server... "
+    terminate_server $server
+    puts "OK!"
+    puts ""
+}
+
+log_user 1
+
