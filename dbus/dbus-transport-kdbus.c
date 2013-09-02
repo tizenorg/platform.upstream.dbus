@@ -262,6 +262,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     dbus_bool_t use_memfd;
     const int *unix_fds;
     unsigned fds_count;
+    dbus_bool_t autostart;
 
     // determine name and destination id
     if((name = dbus_message_get_destination(message)))
@@ -294,6 +295,9 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     // init basic message fields
     msg = kdbus_init_msg(name, dst_id, body_size, use_memfd, fds_count, transport);
     msg->cookie = dbus_message_get_serial(message);
+    autostart = dbus_message_get_auto_start (message);
+    if(!autostart)
+    	msg->flags |= KDBUS_MSG_FLAGS_NO_AUTO_START;
     
     // build message contents
     item = msg->items;
@@ -398,9 +402,9 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 	{
 		if(errno == EINTR)
 			goto again;
-		if((errno == ESRCH) || (errno == ENXIO))  //when recipient is not available on the bus
+		if((errno == ESRCH) || (errno == ENXIO) || (errno = EADDRNOTAVAIL))  //when recipient is not available on the bus
 		{
-			if (dbus_message_get_auto_start (message))
+			if(autostart)
 			{
 				//todo start service here, otherwise
 				if(reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
@@ -1048,11 +1052,24 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 #endif
 
 			case KDBUS_MSG_REPLY_TIMEOUT:
-			case KDBUS_MSG_REPLY_DEAD:
 				_dbus_verbose("  +%s (%llu bytes) cookie=%llu\n",
 					   enum_MSG(item->type), item->size, msg->cookie_reply);
 
 				message = generate_local_error_message(msg->cookie_reply, DBUS_ERROR_NO_REPLY, NULL);
+				if(message == NULL)
+				{
+					ret_size = -1;
+					goto out;
+				}
+
+				ret_size = put_message_into_data(message, data);
+			break;
+
+			case KDBUS_MSG_REPLY_DEAD:
+				_dbus_verbose("  +%s (%llu bytes) cookie=%llu\n",
+					   enum_MSG(item->type), item->size, msg->cookie_reply);
+
+				message = generate_local_error_message(msg->cookie_reply, DBUS_ERROR_NAME_HAS_NO_OWNER, NULL);
 				if(message == NULL)
 				{
 					ret_size = -1;
