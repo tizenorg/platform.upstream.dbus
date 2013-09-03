@@ -364,6 +364,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
         if(body_size)
         {
             _dbus_verbose("body attaching\n");
+	    item = KDBUS_PART_NEXT(item);
 	    MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(body), body_size);
         }
     }
