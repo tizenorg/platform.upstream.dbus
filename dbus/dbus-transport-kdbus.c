@@ -53,6 +53,12 @@ if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
 	goto out;  \
 }\
 
+#define MSG_ITEM_BUILD_VEC(data, datasize)                                    \
+	item->type = KDBUS_MSG_PAYLOAD_VEC;					\
+        item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);		\
+        item->vec.address = (unsigned long) data;       			\
+        item->vec.size = datasize;
+
 /**
  * Opaque object representing a socket file descriptor transport.
  */
@@ -348,29 +354,17 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     // case 2 - small encoded - don't use memfd
     } else if(encoded) { 
         _dbus_verbose("sending encoded data\n");
-
-        item->type = KDBUS_MSG_PAYLOAD_VEC;
-        item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-        item->vec.address = (unsigned long) &transport->encoded_outgoing;
-        item->vec.size = _dbus_string_get_length (&transport->encoded_outgoing);
+        MSG_ITEM_BUILD_VEC(&transport->encoded_outgoing, _dbus_string_get_length (&transport->encoded_outgoing));
 
     // case 3 - small not encoded - don't use memfd
     } else { 
         _dbus_verbose("sending normal vector data\n");
-
-        item->type = KDBUS_MSG_PAYLOAD_VEC;
-        item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-        item->vec.address = (unsigned long) _dbus_string_get_const_data(header);
-        item->vec.size = header_size;
+        MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(header), header_size);
 
         if(body_size)
         {
             _dbus_verbose("body attaching\n");
-        	item = KDBUS_PART_NEXT(item);
-        	item->type = KDBUS_MSG_PAYLOAD_VEC;
-        	item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);
-        	item->vec.address = (unsigned long) _dbus_string_get_const_data(body);
-        	item->vec.size = body_size;
+	    MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(body), body_size);
         }
     }
 
