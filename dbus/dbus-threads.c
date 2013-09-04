@@ -283,18 +283,6 @@ _dbus_condvar_wake_one (DBusCondVar *cond)
   _dbus_platform_condvar_wake_one (cond);
 }
 
-#ifdef DBUS_HAVE_STATIC_RECURSIVE_MUTEXES
-
-static dbus_bool_t
-init_global_locks (void)
-{
-  return TRUE;
-}
-
-/* implementations in dbus-sysdeps-pthread.c */
-
-#else /* !defined(DBUS_HAVE_STATIC_RECURSIVE_MUTEXES) */
-
 static DBusRMutex *global_locks[_DBUS_N_GLOBAL_LOCKS] = { NULL };
 
 static void
@@ -367,8 +355,6 @@ _dbus_unlock (DBusGlobalLock lock)
 
   _dbus_platform_rmutex_unlock (global_locks[lock]);
 }
-
-#endif /* !defined(DBUS_HAVE_STATIC_RECURSIVE_MUTEXES) */
 
 /** @} */ /* end of internals */
 
@@ -457,7 +443,7 @@ dbus_threads_init_default (void)
 
 /** @} */
 
-#ifdef DBUS_BUILD_TESTS
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
 
 dbus_bool_t
 _dbus_threads_init_debug (void)
@@ -465,4 +451,4 @@ _dbus_threads_init_debug (void)
   return dbus_threads_init (NULL);
 }
 
-#endif /* DBUS_BUILD_TESTS */
+#endif /* DBUS_ENABLE_EMBEDDED_TESTS */

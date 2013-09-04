@@ -2157,7 +2157,7 @@ kdbus_do_iteration (DBusTransport *transport,
    poll_fd.fd = socket_transport->fd;
    poll_fd.events = 0;
 
-   if (_dbus_transport_get_is_authenticated (transport))
+   if (_dbus_transport_peek_is_authenticated (transport))
    {
       /* This is kind of a hack; if we have stuff to write, then try
        * to avoid the poll. This is probably about a 5% speedup on an

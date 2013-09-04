@@ -332,25 +332,22 @@ _dbus_verbose_init (void)
 */ 
 static char *_dbus_file_path_extract_elements_from_tail(const char *file,int level)
 {
-  static int prefix = -1;
+  int prefix = 0;
+  char *p = (char *)file + strlen(file);
+  int i = 0;
 
-  if (prefix == -1) 
+  for (;p >= file;p--)
     {
-      char *p = (char *)file + strlen(file);
-      int i = 0;
-      prefix = 0;
-      for (;p >= file;p--)
+      if (DBUS_IS_DIR_SEPARATOR(*p))
         {
-          if (DBUS_IS_DIR_SEPARATOR(*p))
+          if (++i >= level)
             {
-              if (++i >= level) 
-                {
-                  prefix = p-file+1;
-                  break;
-                }
-           }
-        }
+              prefix = p-file+1;
+              break;
+            }
+       }
     }
+
   return (char *)file+prefix;
 }
 
@@ -861,7 +858,7 @@ _dbus_get_local_machine_uuid_encoded (DBusString *uuid_str)
       if (!_dbus_read_local_machine_uuid (&machine_uuid, FALSE,
                                           &error))
         {          
-#ifndef DBUS_BUILD_TESTS
+#ifndef DBUS_ENABLE_EMBEDDED_TESTS
           /* For the test suite, we may not be installed so just continue silently
            * here. But in a production build, we want to be nice and loud about
            * this.
@@ -940,7 +937,7 @@ _dbus_real_assert_not_reached (const char *explanation,
 }
 #endif /* DBUS_DISABLE_ASSERT */
   
-#ifdef DBUS_BUILD_TESTS
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
 static dbus_bool_t
 run_failing_each_malloc (int                    n_mallocs,
                          const char            *description,
@@ -1035,6 +1032,6 @@ _dbus_test_oom_handling (const char             *description,
 
   return TRUE;
 }
-#endif /* DBUS_BUILD_TESTS */
+#endif /* DBUS_ENABLE_EMBEDDED_TESTS */
 
 /** @} */

@@ -2232,7 +2232,7 @@ dbus_activation_systemd_failure (BusActivation *activation,
   return TRUE;
 }
 
-#ifdef DBUS_BUILD_TESTS
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
 
 #include <stdio.h>
 
@@ -2539,11 +2539,17 @@ dbus_bool_t
 bus_activation_service_reload_test (const DBusString *test_data_dir)
 {
   DBusString directory;
+  const char *tmp;
 
   if (!_dbus_string_init (&directory))
     return FALSE;
 
-  if (!_dbus_string_append (&directory, _dbus_get_tmpdir()))
+  tmp = _dbus_get_tmpdir ();
+
+  if (tmp == NULL)
+    return FALSE;
+
+  if (!_dbus_string_append (&directory, tmp))
     return FALSE;
 
   if (!_dbus_string_append (&directory, "/dbus-reload-test-") ||
@@ -2579,4 +2585,4 @@ bus_activation_service_reload_test (const DBusString *test_data_dir)
   return TRUE;
 }
 
-#endif /* DBUS_BUILD_TESTS */
+#endif /* DBUS_ENABLE_EMBEDDED_TESTS */

@@ -28,6 +28,7 @@
 #include "dbus-internals.h"
 #include "dbus-message.h"
 #include "dbus-marshal-validate.h"
+#include "dbus-misc.h"
 #include "dbus-threads-internal.h"
 #include "dbus-connection-internal.h"
 #include "dbus-string.h"
@@ -297,10 +298,10 @@ init_connections_unlocked (void)
        * the above code will work right
        */
       
-      if (!_dbus_setenv ("DBUS_ACTIVATION_ADDRESS", NULL))
+      if (!dbus_setenv ("DBUS_ACTIVATION_ADDRESS", NULL))
         return FALSE;
 
-      if (!_dbus_setenv ("DBUS_ACTIVATION_BUS_TYPE", NULL))
+      if (!dbus_setenv ("DBUS_ACTIVATION_BUS_TYPE", NULL))
         return FALSE;
       
       if (!_dbus_register_shutdown_func (addresses_shutdown_func,
@@ -563,7 +564,7 @@ out:
  * 
  * @param type bus type
  * @param error address where an error can be returned.
- * @returns a #DBusConnection with new ref
+ * @returns a #DBusConnection with new ref or #NULL on error
  */
 DBusConnection *
 dbus_bus_get (DBusBusType  type,

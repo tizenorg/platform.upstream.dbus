@@ -1,7 +1,79 @@
 D-Bus 1.7.6 (UNRELEASED)
 ==
 
-...
+Build-time configuration changes:
+
+• Directory change notification via dnotify on Linux is no longer
+  supported; it hadn't compiled successfully since 2010 in any case.
+  If you don't have inotify (Linux) or kqueue (*BSD), you will need
+  to send SIGHUP to the dbus-daemon when its configuration changes.
+  (fd.o #33001, Chengwei Yang)
+
+• The DBUS_DISABLE_ASSERTS CMake option didn't actually disable most
+  assertions. It has been renamed to DBUS_DISABLE_ASSERT to be consistent
+  with the Autotools build system. (fd.o #66142, Chengwei Yang)
+
+Enhancements:
+
+• D-Bus Specification 0.22
+  · Document GetAdtAuditSessionData() and
+    GetConnectionSELinuxSecurityContext() (fd.o #54445, Simon)
+  · Fix example .service file (fd.o #66481, Chengwei Yang)
+
+• Be thread-safe by default on all platforms, even if
+  dbus_threads_init_default() has not been called. For compatibility with
+  older libdbus, library users should continue to call
+  dbus_threads_init_default(): it is harmless to do so.
+  (fd.o #54972, Simon McVittie)
+
+• Add GetConnectionCredentials() method (fd.o #54445, Simon)
+
+• New API: dbus_setenv(), a simple wrapper around setenv().
+  Note that this is not thread-safe. (fd.o #39196, Simon)
+
+Fixes:
+
+• Escape addresses containing non-ASCII characters correctly
+  (fd.o #53499, Chengwei Yang)
+
+• Don't crash on "dbus-send --session / x.y.z" which regressed in 1.7.4.
+  (fd.o #65923, Chengwei Yang)
+
+• If malloc() returns NULL in _dbus_string_init() or similar, don't free
+  an invalid pointer if the string is later freed (fd.o #65959, Chengwei Yang)
+
+• If malloc() returns NULL in dbus_set_error(), don't va_end() a va_list
+  that was never va_start()ed (fd.o #66300, Chengwei Yang)
+
+• fix build failure with --enable-stats (fd.o #66004, Chengwei Yang)
+
+• fix a regression test on platforms with strict alignment (fd.o #67279,
+  Colin Walters)
+
+• Avoid calling function parameters "interface" since certain Windows headers
+  have a namespace-polluting macro of that name (fd.o #66493, Ivan Romanov)
+
+• Assorted Doxygen fixes (fd.o #65755, Chengwei Yang)
+
+• Unix-specific:
+  · dbus-run-session: clear some unwanted environment variables
+    (fd.o #39196, Simon)
+  · dbus-run-session: compile on FreeBSD (fd.o #66197, Chengwei Yang)
+
+• Windows-specific:
+  · Remove unavailable command-line options from 'dbus-daemon --help'
+    (fd.o #42441, Ralf Habacker)
+  · Add support for looking up local TCPv4 clients' credentials on
+    Windows XP via the undocumented AllocateAndGetTcpExTableFromStack
+    function (fd.o #66060, Ralf Habacker)
+
+• Internal changes:
+  · add DBUS_ENABLE_ASSERT, DBUS_ENABLE_CHECKS for less confusing
+    conditionals (fd.o #66142, Chengwei Yang)
+  · improve verbose-mode output (fd.o #63047, Colin Walters)
+  · consolidate Autotools and CMake build (fd.o #64875, Ralf Habacker)
+  · fix various unused variables, unusual build configurations
+    etc. (fd.o #65712, #65990, #66005, #66257; Chengwei Yang)
 
 D-Bus 1.7.4 (2013-06-13)
 ==
@@ -33,6 +105,12 @@ Enhancements:
 
 • Improve dbus-send documentation and command-line parsing (fd.o #65424,
   Chengwei Yang)
+
+Unix-specific:
+  · dbus-run-session: experimental new tool to start a temporary D-Bus
+    session, e.g. for regression tests or a text console, replacing
+    certain uses of dbus-launch which weren't really correct
+    (fd.o #39196, Simon)
 
 Other fixes:
 

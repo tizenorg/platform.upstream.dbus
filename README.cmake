@@ -103,7 +103,7 @@ DBUS_BUILD_TESTS:BOOL=ON
 DBUS_DAEMON_NAME:STRING=dbus-daemon
 
 // Disable assertion checking
-DBUS_DISABLE_ASSERTS:BOOL=OFF
+DBUS_DISABLE_ASSERT:BOOL=OFF
 
 // Disable public API sanity checking
 DBUS_DISABLE_CHECKS:BOOL=OFF
@@ -148,10 +148,6 @@ DBUS_USE_OUTPUT_DEBUG_STRING:BOOL=OFF
 gcc only:
 // compile with coverage profiling instrumentation
 DBUS_GCOV_ENABLED:BOOL=OFF
-
-linux only:
-// build with dnotify support 
-DBUS_BUS_ENABLE_DNOTIFY_ON_LINUX:BOOL=ON
 
 solaris only:
 // enable console owner file 

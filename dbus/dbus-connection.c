@@ -205,26 +205,19 @@
  * @{
  */
 
-#ifdef DBUS_ENABLE_VERBOSE_MODE
 static void
 _dbus_connection_trace_ref (DBusConnection *connection,
     int old_refcount,
     int new_refcount,
     const char *why)
 {
+#ifdef DBUS_ENABLE_VERBOSE_MODE
   static int enabled = -1;
 
   _dbus_trace_ref ("DBusConnection", connection, old_refcount, new_refcount,
       why, "DBUS_CONNECTION_TRACE", &enabled);
-}
-#else
-#define _dbus_connection_trace_ref(c,o,n,w) \
-  do \
-  {\
-    (void) (o); \
-    (void) (n); \
-  } while (0)
 #endif
+}
 
 /**
  * Internal struct representing a message filter function 
@@ -338,8 +331,8 @@ struct DBusConnection
 #ifndef DBUS_DISABLE_CHECKS
   unsigned int have_connection_lock : 1; /**< Used to check locking */
 #endif
-  
-#ifndef DBUS_DISABLE_CHECKS
+
+#if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   int generation; /**< _dbus_current_generation that should correspond to this connection */
 #endif 
 };
@@ -448,7 +441,7 @@ _dbus_connection_wakeup_mainloop (DBusConnection *connection)
     (*connection->wakeup_main_function) (connection->wakeup_main_data);
 }
 
-#ifdef DBUS_BUILD_TESTS
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
 /**
  * Gets the locks so we can examine them
  *
@@ -492,9 +485,9 @@ _dbus_connection_queue_received_message_link (DBusConnection  *connection,
   DBusPendingCall *pending;
   dbus_uint32_t reply_serial;
   DBusMessage *message;
-  
-  _dbus_assert (_dbus_transport_get_is_authenticated (connection->transport));
-  
+
+  _dbus_assert (_dbus_transport_peek_is_authenticated (connection->transport));
+
   _dbus_list_append_link (&connection->incoming_messages,
                           link);
   message = link->data;
@@ -1356,7 +1349,7 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
   connection->disconnected_message_arrived = FALSE;
   connection->disconnected_message_processed = FALSE;
   
-#ifndef DBUS_DISABLE_CHECKS
+#if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   connection->generation = _dbus_current_generation;
 #endif
   
@@ -2194,7 +2187,7 @@ _dbus_connection_close_if_only_one_ref (DBusConnection *connection)
  * relatively long time for memory, if they were only willing to block
  * briefly then we retry for memory at a rapid rate.
  *
- * @timeout_milliseconds the timeout requested for blocking
+ * @param timeout_milliseconds the timeout requested for blocking
  */
 static void
 _dbus_memory_pause_based_on_timeout (int timeout_milliseconds)
@@ -2727,6 +2720,7 @@ _dbus_connection_last_unref (DBusConnection *connection)
   dbus_connection_set_dispatch_status_function (connection, NULL, NULL, NULL);
   dbus_connection_set_wakeup_main_function (connection, NULL, NULL, NULL);
   dbus_connection_set_unix_user_function (connection, NULL, NULL, NULL);
+  dbus_connection_set_windows_user_function (connection, NULL, NULL, NULL);
   
   _dbus_watch_list_free (connection->watches);
   connection->watches = NULL;
@@ -2996,9 +2990,9 @@ dbus_connection_get_is_authenticated (DBusConnection *connection)
   dbus_bool_t res;
 
   _dbus_return_val_if_fail (connection != NULL, FALSE);
-  
+
   CONNECTION_LOCK (connection);
-  res = _dbus_transport_get_is_authenticated (connection->transport);
+  res = _dbus_transport_try_to_authenticate (connection->transport);
   CONNECTION_UNLOCK (connection);
   
   return res;
@@ -4000,7 +3994,7 @@ _dbus_connection_pop_message_link_unlocked (DBusConnection *connection)
       link = _dbus_list_pop_first_link (&connection->incoming_messages);
       connection->n_incoming -= 1;
 
-      _dbus_verbose ("Message %p (%s %s %s %s '%s') removed from incoming queue %p, %d incoming\n",
+      _dbus_verbose ("Message %p (%s %s %s %s sig:'%s' serial:%u) removed from incoming queue %p, %d incoming\n",
                      link->data,
                      dbus_message_type_to_string (dbus_message_get_type (link->data)),
                      dbus_message_get_path (link->data) ?
@@ -4013,6 +4007,7 @@ _dbus_connection_pop_message_link_unlocked (DBusConnection *connection)
                      dbus_message_get_member (link->data) :
                      "no member",
                      dbus_message_get_signature (link->data),
+                     dbus_message_get_serial (link->data),
                      connection, connection->n_incoming);
 
       _dbus_message_trace_ref (link->data, -1, -1,
@@ -5210,10 +5205,10 @@ dbus_connection_get_unix_user (DBusConnection *connection,
 
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (uid != NULL, FALSE);
-  
+
   CONNECTION_LOCK (connection);
 
-  if (!_dbus_transport_get_is_authenticated (connection->transport))
+  if (!_dbus_transport_try_to_authenticate (connection->transport))
     result = FALSE;
   else
     result = _dbus_transport_get_unix_user (connection->transport,
@@ -5246,10 +5241,10 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
 
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (pid != NULL, FALSE);
-  
+
   CONNECTION_LOCK (connection);
 
-  if (!_dbus_transport_get_is_authenticated (connection->transport))
+  if (!_dbus_transport_try_to_authenticate (connection->transport))
     result = FALSE;
   else
     result = _dbus_transport_get_unix_process_id (connection->transport,
@@ -5267,7 +5262,8 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
  * connection.
  *
  * @param connection the connection
- * @param data return location for audit data 
+ * @param data return location for audit data
+ * @param data_size return location for length of audit data
  * @returns #TRUE if audit data is filled in with a valid ucred pointer
  */
 dbus_bool_t
@@ -5280,10 +5276,10 @@ dbus_connection_get_adt_audit_session_data (DBusConnection *connection,
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (data != NULL, FALSE);
   _dbus_return_val_if_fail (data_size != NULL, FALSE);
-  
+
   CONNECTION_LOCK (connection);
 
-  if (!_dbus_transport_get_is_authenticated (connection->transport))
+  if (!_dbus_transport_try_to_authenticate (connection->transport))
     result = FALSE;
   else
     result = _dbus_transport_get_adt_audit_session_data (connection->transport,
@@ -5376,10 +5372,10 @@ dbus_connection_get_windows_user (DBusConnection             *connection,
 
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (windows_sid_p != NULL, FALSE);
-  
+
   CONNECTION_LOCK (connection);
 
-  if (!_dbus_transport_get_is_authenticated (connection->transport))
+  if (!_dbus_transport_try_to_authenticate (connection->transport))
     result = FALSE;
   else
     result = _dbus_transport_get_windows_user (connection->transport,
@@ -6105,7 +6101,7 @@ dbus_connection_get_max_message_size (DBusConnection *connection)
  * result in disconnecting the connection.
  *
  * @param connection a #DBusConnection
- * @param size maximum message unix fds the connection can receive
+ * @param n maximum message unix fds the connection can receive
  */
 void
 dbus_connection_set_max_message_unix_fds (DBusConnection *connection,
@@ -6203,7 +6199,7 @@ dbus_connection_get_max_received_size (DBusConnection *connection)
  * The semantics are analogous to those of dbus_connection_set_max_received_size().
  *
  * @param connection the connection
- * @param size the maximum size in bytes of all outstanding messages
+ * @param n the maximum size in bytes of all outstanding messages
  */
 void
 dbus_connection_set_max_received_unix_fds (DBusConnection *connection,

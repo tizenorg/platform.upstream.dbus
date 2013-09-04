@@ -1153,7 +1153,7 @@ _dbus_listen_unix_socket (const char     *path,
  *
  * This will set FD_CLOEXEC for the sockets returned.
  *
- * @oaram fds the file descriptors
+ * @param fds the file descriptors
  * @param error return location for errors
  * @returns the number of file descriptors
  */
@@ -2929,6 +2929,7 @@ _dbus_close (int        fd,
  * (i.e. avoids stdin/stdout/stderr). Sets O_CLOEXEC.
  *
  * @param fd the file descriptor to duplicate
+ * @param error address of error location.
  * @returns duplicated file descriptor
  * */
 int
@@ -3196,12 +3197,16 @@ _dbus_printf_string_upper_bound (const char *format,
  * Gets the temporary files directory by inspecting the environment variables
  * TMPDIR, TMP, and TEMP in that order. If none of those are set "/tmp" is returned
  *
- * @returns location of temp directory
+ * @returns location of temp directory, or #NULL if no memory for locking
  */
 const char*
 _dbus_get_tmpdir(void)
 {
+  /* Protected by _DBUS_LOCK_sysdeps */
   static const char* tmpdir = NULL;
+
+  if (!_DBUS_LOCK (sysdeps))
+    return NULL;
 
   if (tmpdir == NULL)
     {
@@ -3224,6 +3229,8 @@ _dbus_get_tmpdir(void)
       if (tmpdir == NULL)
         tmpdir = "/tmp";
     }
+
+  _DBUS_UNLOCK (sysdeps);
 
   _dbus_assert(tmpdir != NULL);
 
@@ -3441,6 +3448,7 @@ _read_subprocess_line_argv (const char *progpath,
  * address. If a failure happens, returns #FALSE and
  * sets an error in @p error.
  *
+ * @param scope scope of autolaunch (Windows only)
  * @param address a DBusString where the address can be stored
  * @param error a DBusError to store the error in case of failure
  * @returns #TRUE on success, #FALSE if an error happened
@@ -3455,7 +3463,7 @@ _dbus_get_autolaunch_address (const char *scope,
    * but that's done elsewhere, and if it worked, this function wouldn't
    * be called.) */
   const char *display;
-  static char *argv[6];
+  char *argv[6];
   int i;
   DBusString uuid;
   dbus_bool_t retval;
@@ -3564,11 +3572,9 @@ _dbus_read_local_machine_uuid (DBusGUID   *machine_id,
   return _dbus_read_uuid_file (&filename, machine_id, FALSE, error);
 }
 
-#define DBUS_UNIX_STANDARD_SESSION_SERVICEDIR "/dbus-1/services"
-#define DBUS_UNIX_STANDARD_SYSTEM_SERVICEDIR "/dbus-1/system-services"
-
 /**
  * quries launchd for a specific env var which holds the socket path.
+ * @param socket_path append the socket path to this DBusString
  * @param launchd_env_var the env var to look up
  * @param error a DBusError to store the error in case of failure
  * @return the value of the env var
@@ -3717,167 +3723,6 @@ _dbus_lookup_session_address (dbus_bool_t *supported,
 }
 
 /**
- * Returns the standard directories for a session bus to look for service
- * activation files
- *
- * On UNIX this should be the standard xdg freedesktop.org data directories:
- *
- * XDG_DATA_HOME=${XDG_DATA_HOME-$HOME/.local/share}
- * XDG_DATA_DIRS=${XDG_DATA_DIRS-/usr/local/share:/usr/share}
- *
- * and
- *
- * DBUS_DATADIR
- *
- * @param dirs the directory list we are returning
- * @returns #FALSE on OOM
- */
-
-dbus_bool_t
-_dbus_get_standard_session_servicedirs (DBusList **dirs)
-{
-  const char *xdg_data_home;
-  const char *xdg_data_dirs;
-  DBusString servicedir_path;
-
-  if (!_dbus_string_init (&servicedir_path))
-    return FALSE;
-
-  xdg_data_home = _dbus_getenv ("XDG_DATA_HOME");
-  xdg_data_dirs = _dbus_getenv ("XDG_DATA_DIRS");
-
-  if (xdg_data_home != NULL)
-    {
-      if (!_dbus_string_append (&servicedir_path, xdg_data_home))
-        goto oom;
-    }
-  else
-    {
-      const DBusString *homedir;
-      DBusString local_share;
-
-      if (!_dbus_homedir_from_current_process (&homedir))
-        goto oom;
-
-      if (!_dbus_string_append (&servicedir_path, _dbus_string_get_const_data (homedir)))
-        goto oom;
-
-      _dbus_string_init_const (&local_share, "/.local/share");
-      if (!_dbus_concat_dir_and_file (&servicedir_path, &local_share))
-        goto oom;
-    }
-
-  if (!_dbus_string_append (&servicedir_path, ":"))
-    goto oom;
-
-  if (xdg_data_dirs != NULL)
-    {
-      if (!_dbus_string_append (&servicedir_path, xdg_data_dirs))
-        goto oom;
-
-      if (!_dbus_string_append (&servicedir_path, ":"))
-        goto oom;
-    }
-  else
-    {
-      if (!_dbus_string_append (&servicedir_path, "/usr/local/share:/usr/share:"))
-        goto oom;
-    }
-
-  /*
-   * add configured datadir to defaults
-   * this may be the same as an xdg dir
-   * however the config parser should take
-   * care of duplicates
-   */
-  if (!_dbus_string_append (&servicedir_path, DBUS_DATADIR))
-    goto oom;
-
-  if (!_dbus_split_paths_and_append (&servicedir_path,
-                                     DBUS_UNIX_STANDARD_SESSION_SERVICEDIR,
-                                     dirs))
-    goto oom;
-
-  _dbus_string_free (&servicedir_path);
-  return TRUE;
-
- oom:
-  _dbus_string_free (&servicedir_path);
-  return FALSE;
-}
-
-
-/**
- * Returns the standard directories for a system bus to look for service
- * activation files
- *
- * On UNIX this should be the standard xdg freedesktop.org data directories:
- *
- * XDG_DATA_DIRS=${XDG_DATA_DIRS-/usr/local/share:/usr/share}
- *
- * and
- *
- * DBUS_DATADIR
- *
- * On Windows there is no system bus and this function can return nothing.
- *
- * @param dirs the directory list we are returning
- * @returns #FALSE on OOM
- */
-
-dbus_bool_t
-_dbus_get_standard_system_servicedirs (DBusList **dirs)
-{
-  /*
-   * DBUS_DATADIR may be the same as one of the standard directories. However,
-   * the config parser should take care of the duplicates.
-   *
-   * Also, append /lib as counterpart of /usr/share on the root
-   * directory (the root directory does not know /share), in order to
-   * facilitate early boot system bus activation where /usr might not
-   * be available.
-   */
-  static const char standard_search_path[] =
-    "/usr/local/share:"
-    "/usr/share:"
-    DBUS_DATADIR ":"
-    "/lib";
-  DBusString servicedir_path;
-
-  _dbus_string_init_const (&servicedir_path, standard_search_path);
-
-  return _dbus_split_paths_and_append (&servicedir_path,
-                                       DBUS_UNIX_STANDARD_SYSTEM_SERVICEDIR,
-                                       dirs);
-}
-
-/**
- * Append the absolute path of the system.conf file
- * (there is no system bus on Windows so this can just
- * return FALSE and print a warning or something)
- *
- * @param str the string to append to
- * @returns #FALSE if no memory
- */
-dbus_bool_t
-_dbus_append_system_config_file (DBusString *str)
-{
-  return _dbus_string_append (str, DBUS_SYSTEM_CONFIG_FILE);
-}
-
-/**
- * Append the absolute path of the session.conf file.
- *
- * @param str the string to append to
- * @returns #FALSE if no memory
- */
-dbus_bool_t
-_dbus_append_session_config_file (DBusString *str)
-{
-  return _dbus_string_append (str, DBUS_SESSION_CONFIG_FILE);
-}
-
-/**
  * Called when the bus daemon is signaled to reload its configuration; any
  * caches should be nuked. Of course any caches that need explicit reload
  * are probably broken, but c'est la vie.
@@ -3923,7 +3768,7 @@ _dbus_append_keyring_directory_for_credentials (DBusString      *directory,
   if (!_dbus_homedir_from_uid (uid, &homedir))
     goto failed;
 
-#ifdef DBUS_BUILD_TESTS
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
   {
     const char *override;
 
@@ -3939,6 +3784,8 @@ _dbus_append_keyring_directory_for_credentials (DBusString      *directory,
       }
     else
       {
+        /* Not strictly thread-safe, but if we fail at thread-safety here,
+         * the worst that will happen is some extra warnings. */
         static dbus_bool_t already_warned = FALSE;
         if (!already_warned)
           {
@@ -4054,20 +3901,6 @@ _dbus_socket_can_pass_unix_fd(int fd) {
 #endif
 }
 
-
-/*
- * replaces the term DBUS_PREFIX in configure_time_path by the
- * current dbus installation directory. On unix this function is a noop
- *
- * @param configure_time_path
- * @return real path
- */
-const char *
-_dbus_replace_install_prefix (const char *configure_time_path)
-{
-  return configure_time_path;
-}
-
 /**
  * Closes all file descriptors except the first three (i.e. stdin,
  * stdout, stderr).
@@ -4161,6 +3994,8 @@ _dbus_check_setuid (void)
   uid_t ruid, euid, suid; /* Real, effective and saved user ID's */
   gid_t rgid, egid, sgid; /* Real, effective and saved group ID's */
 
+  /* We call into this function from _dbus_threads_init_platform_specific()
+   * to make sure these are initialized before we start threading. */
   static dbus_bool_t check_setuid_initialised;
   static dbus_bool_t is_setuid;
 

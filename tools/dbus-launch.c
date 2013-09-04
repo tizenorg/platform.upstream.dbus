@@ -153,6 +153,7 @@ void
 verbose (const char *format,
          ...)
 {
+#ifdef DBUS_ENABLE_VERBOSE_MODE
   va_list args;
   static int verbose = TRUE;
   static int verbose_initted = FALSE;
@@ -177,12 +178,16 @@ verbose (const char *format,
   va_start (args, format);
   vfprintf (stderr, format, args);
   va_end (args);
+#endif /* DBUS_ENABLE_VERBOSE_MODE */
 }
 
 static void
 usage (int ecode)
 {
-  fprintf (stderr, "dbus-launch [--version] [--help] [--sh-syntax] [--csh-syntax] [--auto-syntax] [--exit-with-session]\n");
+  fprintf (stderr, "dbus-launch [--version] [--help] [--sh-syntax]"
+           " [--csh-syntax] [--auto-syntax] [--binary-syntax] [--close-stderr]"
+           " [--exit-with-session] [--autolaunch=MACHINEID]"
+           " [--config-file=FILENAME] [PROGRAM] [ARGS...]\n");
   exit (ecode);
 }
 
@@ -756,31 +761,31 @@ pass_info (const char *runprog, const char *bus_address, pid_t bus_pid,
       if (envvar == NULL || args == NULL)
         goto oom;
 
-     args[0] = xstrdup (runprog);
+      args[0] = xstrdup (runprog);
       if (!args[0])
         goto oom;
-     for (i = 1; i <= (argc-remaining_args); i++)
-      {
-        size_t len = strlen (argv[remaining_args+i-1])+1;
-        args[i] = malloc (len);
-        if (!args[i])
-          goto oom;
-        strncpy (args[i], argv[remaining_args+i-1], len);
-       }
-     args[i] = NULL;
+      for (i = 1; i <= (argc-remaining_args); i++)
+        {
+          size_t len = strlen (argv[remaining_args+i-1])+1;
+          args[i] = malloc (len);
+          if (!args[i])
+            goto oom;
+          strncpy (args[i], argv[remaining_args+i-1], len);
+        }
+      args[i] = NULL;
 
-     strcpy (envvar, "DBUS_SESSION_BUS_ADDRESS=");
-     strcat (envvar, bus_address);
-     putenv (envvar);
+      strcpy (envvar, "DBUS_SESSION_BUS_ADDRESS=");
+      strcat (envvar, bus_address);
+      putenv (envvar);
 
-     execvp (runprog, args);
-     fprintf (stderr, "Couldn't exec %s: %s\n", runprog, strerror (errno));
-     exit (1);
+      execvp (runprog, args);
+      fprintf (stderr, "Couldn't exec %s: %s\n", runprog, strerror (errno));
+      exit (1);
     }
    else
     {
       print_variables (bus_address, bus_pid, bus_wid, c_shell_syntax,
-         bourne_shell_syntax, binary_syntax);
+          bourne_shell_syntax, binary_syntax);
     }
   verbose ("dbus-launch exiting\n");
 
@@ -1101,7 +1106,7 @@ main (int argc, char **argv)
 
       verbose ("Calling exec()\n");
  
-#ifdef DBUS_BUILD_TESTS 
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
       /* exec from testdir */
       if (getenv("DBUS_USE_TEST_BINARY") != NULL)
         {
@@ -1118,7 +1123,7 @@ main (int argc, char **argv)
                    "Failed to execute test message bus daemon %s: %s. Will try again with the system path.\n",
                    TEST_BUS_BINARY, strerror (errno));
         }
- #endif /* DBUS_BUILD_TESTS */
+ #endif /* DBUS_ENABLE_EMBEDDED_TESTS */
 
       execl (DBUS_DAEMONDIR"/dbus-daemon",
              DBUS_DAEMONDIR"/dbus-daemon",

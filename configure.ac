@@ -150,7 +150,6 @@ AC_ARG_ENABLE(doxygen-docs, AS_HELP_STRING([--enable-doxygen-docs],[build DOXYGE
 AC_ARG_ENABLE(abstract-sockets, AS_HELP_STRING([--enable-abstract-sockets],[use abstract socket namespace (linux only)]),enable_abstract_sockets=$enableval,enable_abstract_sockets=auto)
 AC_ARG_ENABLE(selinux, AS_HELP_STRING([--enable-selinux],[build with SELinux support]),enable_selinux=$enableval,enable_selinux=auto)
 AC_ARG_ENABLE(libaudit,AS_HELP_STRING([--enable-libaudit],[build audit daemon support for SELinux]),enable_libaudit=$enableval,enable_libaudit=auto)
-AC_ARG_ENABLE(dnotify, AS_HELP_STRING([--enable-dnotify],[build with dnotify support (linux only)]),enable_dnotify=$enableval,enable_dnotify=auto)
 AC_ARG_ENABLE(inotify, AS_HELP_STRING([--enable-inotify],[build with inotify support (linux only)]),enable_inotify=$enableval,enable_inotify=auto)
 AC_ARG_ENABLE(kqueue, AS_HELP_STRING([--enable-kqueue],[build with kqueue support]),enable_kqueue=$enableval,enable_kqueue=auto)
 AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[enable console owner file]),enable_console_owner_file=$enableval,enable_console_owner_file=auto)
@@ -193,15 +192,11 @@ AC_ARG_ENABLE([tests],
   [])
 
 # DBUS_ENABLE_EMBEDDED_TESTS controls unit tests built in to .c files
-# and also some stuff in the test/ subdir. DBUS_BUILD_TESTS was an older
-# name for this.
-AM_CONDITIONAL([DBUS_BUILD_TESTS], [test "x$enable_embedded_tests" = xyes])
+# and also some stuff in the test/ subdir.
 AM_CONDITIONAL([DBUS_ENABLE_EMBEDDED_TESTS],
   [test "x$enable_embedded_tests" = xyes])
 if test "x$enable_embedded_tests" = xyes; then
     AC_DEFINE([DBUS_ENABLE_EMBEDDED_TESTS], [1],
-      [Define to build test code into the library and binaries])
-    AC_DEFINE([DBUS_BUILD_TESTS], [1],
       [Define to build test code into the library and binaries])
 fi
 
@@ -215,7 +210,8 @@ AC_DEFINE([GLIB_VERSION_MAX_ALLOWED], [GLIB_VERSION_2_32], [Prevent post-2.32 AP
 
 with_glib=yes
 
-if test "x$enable_modular_tests" != xno; then
+AS_IF([test "x$enable_modular_tests" != xno],
+  [
   PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.24, gio-2.0 >= 2.24],
     [],
     [if test "x$enable_modular_tests" = xyes; then
@@ -224,16 +220,25 @@ if test "x$enable_modular_tests" != xno; then
     else # assumed to be "auto"
       with_glib=no
     fi])
-  # If dbus-gmain.[ch] returned to libdbus then we wouldn't need this
-  PKG_CHECK_MODULES([DBUS_GLIB], [dbus-glib-1],
+  ],
+  [with_glib=no])
+
+# Not required, because we can use internal APIs (but that makes the
+# "installable tests" less useful as integration tests)
+AC_ARG_WITH([dbus_glib],
+  [AS_HELP_STRING([--with-dbus-glib], [Use dbus-glib for regression tests])],
+  [],
+  [with_dbus_glib=auto])
+AS_IF([test "x$with_dbus_glib" != xno],
+  [PKG_CHECK_MODULES([DBUS_GLIB], [dbus-glib-1],
     [],
-    [if test "x$enable_modular_tests" = xyes; then
-      AC_MSG_NOTICE([Full test coverage (--enable-modular-tests=yes or --enable-tests=yes) requires dbus-glib])
-      AC_MSG_ERROR([$DBUS_GLIB_ERRORS])
-    else # assumed to be "auto"
-      with_glib=no
-    fi])
-fi
+    [AS_IF([test "x$with_dbus_glib" = xyes],
+      dnl specifically requested, but not found
+      [AC_MSG_ERROR([$DBUS_GLIB_ERRORS])],
+      dnl else: assumed to be "auto"
+      [with_dbus_glib=no])])])
+AM_CONDITIONAL([DBUS_WITH_DBUS_GLIB], [test "x$with_dbus_glib" != xno])
+
 if test "x$enable_modular_tests" != xno; then
   AC_DEFINE([DBUS_ENABLE_MODULAR_TESTS], [1],
     [Define to build independent test binaries])
@@ -278,6 +283,11 @@ if test x$enable_asserts = xno; then
     AC_DEFINE(DBUS_DISABLE_ASSERT,1,[Disable assertion checking])
     DISABLE_UNUSED_WARNINGS="unused-label"
     R_DYNAMIC_LDFLAG=""
+    if test x$enable_embedded_tests = xyes; then
+        DISABLE_UNUSED_WARNINGS="$DISABLE_UNUSED_WARNINGS \
+                unused-but-set-variable unused-variable \
+                unused-function"
+    fi
 else
     # -rdynamic is needed for glibc's backtrace_symbols to work.
     # No clue how much overhead this adds, but it's useful
@@ -296,6 +306,15 @@ if test x$enable_checks = xno; then
     AC_DEFINE(G_DISABLE_CHECKS,1,[Disable GLib public API sanity checking])
     DISABLE_UNUSED_WARNINGS="unused-label"
 fi
+
+AH_BOTTOM([
+/* explicitly define these macros to get less confusing conditions */
+#ifndef DBUS_DISABLE_ASSERT
+#  define DBUS_ENABLE_ASSERT 1
+#endif
+#ifndef DBUS_DISABLE_CHECKS
+#  define DBUS_ENABLE_CHECKS 1
+#endif])
 
 if test x$enable_userdb_cache = xyes; then
     AC_DEFINE(DBUS_ENABLE_USERDB_CACHE,1,[Build with caching of user data])
@@ -1050,24 +1069,6 @@ if test x$have_inotify = xyes; then
 fi
 
 AM_CONDITIONAL(DBUS_BUS_ENABLE_INOTIFY, test x$have_inotify = xyes)
-
-# dnotify checks
-if test x$enable_dnotify = xno ; then
-    have_dnotify=no;
-else
-    if test x$have_inotify = xno -a x$host_os = xlinux-gnu -o x$host_os = xlinux; then
-        have_dnotify=yes;
-    else
-        have_dnotify=no;
-    fi
-fi
-
-dnl check if dnotify backend is enabled
-if test x$have_dnotify = xyes; then
-   AC_DEFINE(DBUS_BUS_ENABLE_DNOTIFY_ON_LINUX,1,[Use dnotify on Linux])
-fi
-
-AM_CONDITIONAL(DBUS_BUS_ENABLE_DNOTIFY_ON_LINUX, test x$have_dnotify = xyes)
 
 # For simplicity, we require the userland API for epoll_create1 at
 # compile-time (glibc 2.9), but we'll run on kernels that turn out
@@ -1857,13 +1858,13 @@ echo "
         Building embedded tests:  ${enable_embedded_tests}
         Building modular tests:   ${enable_modular_tests}
             - with GLib:          ${with_glib}
+            - with dbus-glib:     ${with_dbus_glib}
         Building verbose mode:    ${enable_verbose_mode}
         Building assertions:      ${enable_asserts}
         Building checks:          ${enable_checks}
         Building bus stats API:   ${enable_stats}
         Building SELinux support: ${have_selinux}
         Building inotify support: ${have_inotify}
-        Building dnotify support: ${have_dnotify}
         Building kqueue support:  ${have_kqueue}
         Building systemd support: ${have_systemd}
         Building X11 code:        ${have_x11}
