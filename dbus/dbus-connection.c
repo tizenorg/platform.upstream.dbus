@@ -335,6 +335,7 @@ struct DBusConnection
 #if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   int generation; /**< _dbus_current_generation that should correspond to this connection */
 #endif 
+  unsigned int is_kdbus; /* Samsung change: to spare comparing address too often. 0 - uninitialized, 1 - not kdbus, 2 - kdbus */
 };
 
 static DBusDispatchStatus _dbus_connection_get_dispatch_status_unlocked      (DBusConnection     *connection);
@@ -1990,6 +1991,16 @@ _dbus_connection_preallocate_send_unlocked (DBusConnection *connection)
   dbus_free (preallocated);
   
   return NULL;
+}
+
+unsigned int dbus_connection_get_is_kdbus(DBusConnection *connection)
+{
+  return connection->is_kdbus;
+}
+
+void dbus_connection_set_is_kdbus(DBusConnection *connection, unsigned int value)
+{
+  connection->is_kdbus = value;
 }
 
 /* Called with lock held, does not update dispatch status */
