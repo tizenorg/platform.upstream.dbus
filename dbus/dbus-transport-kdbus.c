@@ -2845,6 +2845,11 @@ void dbus_bus_add_match_kdbus (DBusConnection *connection, const char *rule, DBu
 
 	if(strstr(rule, "member='NameOwnerChanged'"))
 	{
+		kernel_item = ~0;
+		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /*std DBus: 3 name related items plus 2 id related items*/
+	}
+	else if(strstr(rule, "member='NameChanged'"))
+	{
 		kernel_item = KDBUS_MATCH_NAME_CHANGE;
 		size += KDBUS_ITEM_SIZE(1);
 	}

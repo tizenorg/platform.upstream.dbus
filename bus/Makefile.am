@@ -76,6 +76,8 @@ BUS_SOURCES=					\
 	driver.h				\
 	expirelist.c				\
 	expirelist.h				\
+	kdbus-d.c					\
+	kdbus-d.h					\	
 	policy.c				\
 	policy.h				\
 	selinux.h				\

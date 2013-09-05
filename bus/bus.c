@@ -39,6 +39,7 @@
 #include <dbus/dbus-hash.h>
 #include <dbus/dbus-credentials.h>
 #include <dbus/dbus-internals.h>
+#include <kdbus-d.h>
 
 #ifdef DBUS_CYGWIN
 #include <signal.h>
@@ -68,6 +69,8 @@ struct BusContext
   unsigned int keep_umask : 1;
   unsigned int allow_anonymous : 1;
   unsigned int systemd_activation : 1;
+  unsigned int is_kdbus : 1;
+  DBusConnection *myConnection;
 };
 
 static dbus_int32_t server_data_slot = -1;
@@ -423,22 +426,45 @@ process_config_first_time_only (BusContext       *context,
 
   if (address)
     {
-      DBusServer *server;
+      if(!strcmp(_dbus_string_get_const_data(address), "kdbus"))
+      {
+    	  DBusBusType type;
 
-      server = dbus_server_listen (_dbus_string_get_const_data(address), error);
-      if (server == NULL)
-        {
-          _DBUS_ASSERT_ERROR_IS_SET (error);
-          goto failed;
-        }
-      else if (!setup_server (context, server, auth_mechanisms, error))
-        {
-          _DBUS_ASSERT_ERROR_IS_SET (error);
-          goto failed;
-        }
+    	  context->is_kdbus = TRUE;
 
-      if (!_dbus_list_append (&context->servers, server))
-        goto oom;
+    	  if(!strcmp (context->type, "system"))
+    		  type = DBUS_BUS_SYSTEM;
+    	  else if(!strcmp (context->type, "session"))
+    		  type = DBUS_BUS_SESSION;
+    	  else
+    		  type = DBUS_BUS_STARTER;
+
+    	  if(!make_kdbus_bus(type, error))
+    	  	  goto failed;
+
+    	  context->myConnection = daemon_as_client(type, error);
+    	  if(context->myConnection == NULL)
+    		  goto failed;
+      }
+      else
+      {
+		  DBusServer *server;
+
+		  server = dbus_server_listen (_dbus_string_get_const_data(address), error);
+		  if (server == NULL)
+			{
+			  _DBUS_ASSERT_ERROR_IS_SET (error);
+			  goto failed;
+			}
+		  else if (!setup_server (context, server, auth_mechanisms, error))
+			{
+			  _DBUS_ASSERT_ERROR_IS_SET (error);
+			  goto failed;
+			}
+
+		  if (!_dbus_list_append (&context->servers, server))
+			goto oom;
+      }
     }
   else
     {
@@ -1173,6 +1199,11 @@ DBusLoop*
 bus_context_get_loop (BusContext *context)
 {
   return context->loop;
+}
+
+DBusConnection* bus_context_get_myConnection(BusContext *context)
+{
+  return context->myConnection;
 }
 
 dbus_bool_t
