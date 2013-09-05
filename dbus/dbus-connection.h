@@ -193,6 +193,10 @@ unsigned int       dbus_connection_get_is_kdbus                 (DBusConnection 
 DBUS_EXPORT
 void               dbus_connection_set_is_kdbus                 (DBusConnection             *connection, unsigned int value);
 DBUS_EXPORT
+void               dbus_connection_set_sender                   (DBusConnection             *connection, char *value);
+DBUS_EXPORT
+char*              dbus_connection_get_sender                   (DBusConnection             *connection);
+DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_authenticated         (DBusConnection             *connection);
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_set_is_authenticated         (DBusConnection             *connection);

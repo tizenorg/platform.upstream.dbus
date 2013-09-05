@@ -662,6 +662,7 @@ dbus_bus_register (DBusConnection *connection,
   char *name = NULL;
   BusData *bd;
   dbus_bool_t retval;
+  char* sender;
 
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_error_is_set (error, FALSE);
@@ -728,6 +729,17 @@ dbus_bus_register (DBusConnection *connection,
   }
 
   bd->unique_name = _dbus_strdup (name);
+
+  /* determine sender once, not for every message */
+  sender = malloc (strlen(name) + 4);
+  if(sender)
+  {
+    strcpy(sender,":1.");
+    strcpy(&sender[3], name);
+    _dbus_verbose ("Message sender: %s\n", sender);
+    dbus_connection_set_sender(connection, sender);             
+  }
+
   if (bd->unique_name == NULL)
     {
       _DBUS_SET_OOM (error);

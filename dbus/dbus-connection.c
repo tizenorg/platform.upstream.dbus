@@ -336,6 +336,7 @@ struct DBusConnection
   int generation; /**< _dbus_current_generation that should correspond to this connection */
 #endif 
   unsigned int is_kdbus; /* Samsung change: to spare comparing address too often. 0 - uninitialized, 1 - not kdbus, 2 - kdbus */
+  char* sender; /* Samsung change: to spare building sender name for each message sent */
 };
 
 static DBusDispatchStatus _dbus_connection_get_dispatch_status_unlocked      (DBusConnection     *connection);
@@ -1993,6 +1994,16 @@ _dbus_connection_preallocate_send_unlocked (DBusConnection *connection)
   return NULL;
 }
 
+void dbus_connection_set_sender(DBusConnection *connection, char *value)
+{
+  connection->sender = value;
+}
+
+char* dbus_connection_get_sender(DBusConnection *connection)
+{
+  return connection->sender;
+}
+
 unsigned int dbus_connection_get_is_kdbus(DBusConnection *connection)
 {
   return connection->is_kdbus;
@@ -2011,6 +2022,7 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
                                                        dbus_uint32_t        *client_serial)
 {
   dbus_uint32_t serial;
+  char* sender;
 
   preallocated->queue_link->data = message;
   _dbus_list_prepend_link (&connection->outgoing_messages,
@@ -2065,19 +2077,8 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
   
   if(dbus_transport_is_kdbus(connection))
   {
-	  const char* name;
-	  char* sender;
-
-	  name = dbus_bus_get_unique_name(connection);
-	  sender = malloc (strlen(name) + 4);
-	  if(sender)
-	  {
-		  strcpy(sender,":1.");
-		  strcpy(&sender[3], name);
-		  _dbus_verbose ("Message sender: %s\n", sender);
-		  dbus_message_set_sender(message, sender);
-		  free((void*)sender);
-	  }
+	  sender = dbus_connection_get_sender(connection);
+                dbus_message_set_sender(message, sender);
   }
 
   dbus_message_lock (message);
