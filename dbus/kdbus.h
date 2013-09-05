@@ -40,6 +40,8 @@
 		__u64 type;						\
 	}
 
+#define KDBUS_PART_HEADER_SIZE offsetof(struct kdbus_item, data)
+
 /* Message sent from kernel to userspace, when the owner or starter of
  * a well-known name changes */
 struct kdbus_manager_msg_name_change {
