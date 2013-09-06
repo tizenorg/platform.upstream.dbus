@@ -335,8 +335,8 @@ struct DBusConnection
 #if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   int generation; /**< _dbus_current_generation that should correspond to this connection */
 #endif 
-  unsigned int is_kdbus; /* Samsung change: to spare comparing address too often. 0 - uninitialized, 1 - not kdbus, 2 - kdbus */
-  char* sender; /* Samsung change: to spare building sender name for each message sent */
+  unsigned int is_kdbus : 1; /* Samsung change for kdbus: sometimes it's needed to check do we use kdbus*/
+  char* sender; /* Samsung change for kdbus: sender has to be added to message by libdbus because there is no daemon to do this*/
 };
 
 static DBusDispatchStatus _dbus_connection_get_dispatch_status_unlocked      (DBusConnection     *connection);
@@ -1260,6 +1260,7 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
   DBusMessage *disconnect_message;
   DBusCounter *outgoing_counter;
   DBusObjectTree *objects;
+  const char* address;
   
   watch_list = NULL;
   connection = NULL;
@@ -1350,6 +1351,14 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
   connection->route_peer_messages = FALSE;
   connection->disconnected_message_arrived = FALSE;
   connection->disconnected_message_processed = FALSE;
+  connection->is_kdbus = FALSE;
+
+  address = _dbus_transport_get_address (connection->transport);
+  if(address)
+  {
+	  if(address == strstr(address, "kdbus:path="))
+		  connection->is_kdbus = TRUE;
+  }
   
 #if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   connection->generation = _dbus_current_generation;
@@ -2004,16 +2013,6 @@ char* dbus_connection_get_sender(DBusConnection *connection)
   return connection->sender;
 }
 
-unsigned int dbus_connection_get_is_kdbus(DBusConnection *connection)
-{
-  return connection->is_kdbus;
-}
-
-void dbus_connection_set_is_kdbus(DBusConnection *connection, unsigned int value)
-{
-  connection->is_kdbus = value;
-}
-
 /* Called with lock held, does not update dispatch status */
 static void
 _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *connection,
@@ -2022,7 +2021,6 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
                                                        dbus_uint32_t        *client_serial)
 {
   dbus_uint32_t serial;
-  char* sender;
 
   preallocated->queue_link->data = message;
   _dbus_list_prepend_link (&connection->outgoing_messages,
@@ -2075,11 +2073,8 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
   _dbus_verbose ("Message %p serial is %u\n",
                  message, dbus_message_get_serial (message));
   
-  if(dbus_transport_is_kdbus(connection))
-  {
-	  sender = dbus_connection_get_sender(connection);
-                dbus_message_set_sender(message, sender);
-  }
+  if(dbus_connection_is_kdbus(connection))
+	  dbus_message_set_sender(message, dbus_connection_get_sender(connection));
 
   dbus_message_lock (message);
 
@@ -6348,5 +6343,9 @@ dbus_connection_get_transport(DBusConnection *connection)
 	return connection->transport;
 }
 
+dbus_bool_t dbus_connection_is_kdbus(DBusConnection *connection)
+{
+	return (dbus_bool_t) connection->is_kdbus;
+}
 
 /** @} */

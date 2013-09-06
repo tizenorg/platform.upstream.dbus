@@ -698,7 +698,7 @@ dbus_bus_register (DBusConnection *connection,
       retval = TRUE;
       goto out;
     }
-  if(dbus_transport_is_kdbus(connection))
+  if(dbus_connection_is_kdbus(connection))
   {
 	  name = malloc(snprintf(name, 0, "%llu", ULLONG_MAX) + 1);
 	  if(!bus_register_kdbus(name, connection, error))
@@ -708,6 +708,20 @@ dbus_bus_register (DBusConnection *connection,
 		goto out;
 
 	  dbus_connection_set_is_authenticated(connection);
+
+	  /* Set sender for messages.
+	   * If not kdbus - daemon does this. */
+	  sender = malloc (strlen(name) + 4);
+	  if(sender)
+	  {
+		  sprintf(sender, ":1.%s", name);
+		  dbus_connection_set_sender(connection, sender);
+	  }
+	  else
+	  {
+		  _DBUS_SET_OOM (error);
+		  goto out;
+	  }
   }
   else
   {
@@ -734,16 +748,6 @@ dbus_bus_register (DBusConnection *connection,
   }
 
   bd->unique_name = _dbus_strdup (name);
-
-  /* determine sender once, not for every message */
-  sender = malloc (strlen(name) + 4);
-  if(sender)
-  {
-    strcpy(sender,":1.");
-    strcpy(&sender[3], name);
-    _dbus_verbose ("Message sender: %s\n", sender);
-    dbus_connection_set_sender(connection, sender);             
-  }
 
   if (bd->unique_name == NULL)
     {
@@ -1164,7 +1168,7 @@ dbus_bus_request_name (DBusConnection *connection,
 	_dbus_return_val_if_fail (_dbus_check_is_valid_bus_name (name), 0);
 	_dbus_return_val_if_error_is_set (error, 0);
 
-	if(!dbus_transport_is_kdbus(connection))
+	if(!dbus_connection_is_kdbus(connection))
 	{
 		DBusMessage *message, *reply;
 
@@ -1582,7 +1586,7 @@ dbus_bus_add_match (DBusConnection *connection,
 {
 	_dbus_return_if_fail (rule != NULL);
 
-	if(!dbus_transport_is_kdbus(connection))
+	if(!dbus_connection_is_kdbus(connection))
 	{
 		DBusMessage *msg;
 
@@ -1635,7 +1639,7 @@ dbus_bus_remove_match (DBusConnection *connection,
                        const char     *rule,
                        DBusError      *error)
 {
-	if(!dbus_transport_is_kdbus(connection))
+	if(!dbus_connection_is_kdbus(connection))
 	{
 		DBusMessage *msg;
 

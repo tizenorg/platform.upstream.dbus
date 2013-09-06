@@ -2750,42 +2750,6 @@ int bus_request_name_kdbus(DBusConnection *connection, const char *name, const u
 }
 
 /**
- * Checks if the connection's transport is kdbus on the basis of its address
- * saves result in DBusConnection for performance.
- *
- * @param pointer to the connection
- * @returns TRUE if kdbus transport, otherwise FALSE
- */
-dbus_bool_t dbus_transport_is_kdbus(DBusConnection *connection)
-{
-	unsigned int is_kdbus;
-
-	is_kdbus = dbus_connection_get_is_kdbus(connection);
-	if(is_kdbus == 0) 
-	{
-		const char* address = _dbus_connection_get_address(connection);
-
-		if(address)
-		{
-			if(address == strstr(address, "kdbus:path=")) 
-			{
-				dbus_connection_set_is_kdbus(connection, 2);
-				return TRUE;
-			} else {
-				dbus_connection_set_is_kdbus(connection, 1);
-				return FALSE;
-			}
-		}
-	} 
-	
-	if(is_kdbus == 2) return TRUE;
-	if(is_kdbus == 1) return FALSE;
-	
-	_dbus_verbose("is_kdbus is not 0 or 1 or 2. Should not happen! \n");
-	return FALSE;
-}
-
-/**
  * Seeks key in rule string, and duplicates value of the key into pValue.
  * If value is "org.freedesktop.DBus" it is indicated by returning -1, because it
  * needs to be handled in different manner.
