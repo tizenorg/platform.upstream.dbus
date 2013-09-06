@@ -13,11 +13,12 @@
 
 
 #include <dbus/dbus-bus.h>
-#include <bus.h>
-
+#include "bus.h"
+#include <dbus/dbus-server.h>
 
 char* make_kdbus_bus(DBusBusType type, DBusError *error);
-DBusConnection* daemon_as_client(DBusBusType type, DBusError *error);
+DBusServer* fake_server(char* address);
+DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *error);
 
 
 #endif /* KDBUS_H_ */

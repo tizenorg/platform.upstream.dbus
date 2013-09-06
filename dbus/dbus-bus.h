@@ -38,6 +38,9 @@ DBUS_BEGIN_DECLS
  */
 
 DBUS_EXPORT
+void			dbus_bus_set_bus_connection_address(DBusBusType address_type, char* address);
+
+DBUS_EXPORT
 DBusConnection *dbus_bus_get              (DBusBusType     type,
 					   DBusError      *error);
 DBUS_EXPORT

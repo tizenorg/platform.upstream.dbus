@@ -8,9 +8,10 @@
  *
  */
 
-#include <kdbus-d.h>
+#include "kdbus-d.h"
 #include <dbus/kdbus.h>
 #include <dbus/dbus-connection-internal.h>
+#include <dbus/dbus-bus.h>
 
 #include <utils.h>
 #include <stdlib.h>
@@ -68,9 +69,16 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
 	return bus;
 }
 
-DBusConnection* daemon_as_client(DBusBusType type, DBusError *error)
+DBusServer* fake_server(char* address)
+{
+	return dbus_server_init_mini(address);
+}
+
+DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *error)
 {
 	DBusConnection* connection;
+
+	dbus_bus_set_bus_connection_address(type, address);
 
 	connection = dbus_bus_get(type, error);
 	if(connection == NULL)
@@ -82,13 +90,14 @@ DBusConnection* daemon_as_client(DBusBusType type, DBusError *error)
 	dbus_bus_add_match(connection, "type='signal', member='NameAcquired'", error);
 	dbus_bus_add_match(connection, "type='signal', member='NameLost'", error);
 	if(dbus_error_is_set(error))
-		goto failed;
+	{
+failed:
+		_dbus_connection_close_possibly_shared (connection);
+		dbus_connection_unref (connection);
+		connection = NULL;
+	}
+	else
+		_dbus_verbose ("Daemon connected as kdbus client.\n");
 
 	return connection;
-
-failed:
-	_dbus_connection_close_possibly_shared (connection);
-	dbus_connection_unref (connection);
-	connection = NULL;
-	return NULL;
 }

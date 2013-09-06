@@ -139,6 +139,13 @@ get_from_env (char           **connection_p,
     }
 }
 
+void dbus_bus_set_bus_connection_address(DBusBusType address_type, char* address)
+{
+	if(bus_connection_addresses[address_type] != NULL)
+		free(bus_connection_addresses[address_type]);
+	bus_connection_addresses[address_type] = address;
+}
+
 static dbus_bool_t
 init_session_address (void)
 {
@@ -489,8 +496,6 @@ internal_bus_get (DBusBusType  type,
     {
       goto out;
     }
-
-  _dbus_verbose (" !!! dbus_connection_open finished successfully   !!!! \n");  //todo RP to be removed
 
   if (!dbus_bus_register (connection, error))
     {

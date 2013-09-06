@@ -854,6 +854,7 @@ static int put_message_into_data(DBusMessage *message, char* data)
     const DBusString *body;
     int size;
 
+    dbus_message_set_serial(message, 1);
     dbus_message_lock (message);
     _dbus_message_get_network_data (message, &header, &body);
     ret_size = _dbus_string_get_length(header);
@@ -862,7 +863,6 @@ static int put_message_into_data(DBusMessage *message, char* data)
 	size = _dbus_string_get_length(body);
 	memcpy(data, _dbus_string_get_const_data(body), size);
 	ret_size += size;
-	dbus_message_unref(message);
 
 	return ret_size;
 }

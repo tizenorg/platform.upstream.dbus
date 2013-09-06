@@ -39,7 +39,8 @@
 #include <dbus/dbus-hash.h>
 #include <dbus/dbus-credentials.h>
 #include <dbus/dbus-internals.h>
-#include <kdbus-d.h>
+#include "kdbus-d.h"
+#include <stdlib.h>
 
 #ifdef DBUS_CYGWIN
 #include <signal.h>
@@ -429,6 +430,8 @@ process_config_first_time_only (BusContext       *context,
       if(!strcmp(_dbus_string_get_const_data(address), "kdbus"))
       {
     	  DBusBusType type;
+    	  DBusServer* server;
+    	  char* bus_address;
 
     	  context->is_kdbus = TRUE;
 
@@ -439,12 +442,27 @@ process_config_first_time_only (BusContext       *context,
     	  else
     		  type = DBUS_BUS_STARTER;
 
-    	  if(!make_kdbus_bus(type, error))
+    	  bus_address = make_kdbus_bus(type, error);
+    	  if(bus_address == NULL)
     	  	  goto failed;
 
-    	  context->myConnection = daemon_as_client(type, error);
+    	  server = fake_server(bus_address);
+    	  if(server == NULL)
+    	  {
+    		  free(bus_address);
+    		  goto failed;
+    	  }
+
+    	  if (!_dbus_list_append (&context->servers, server))
+    	  {
+    		  free(bus_address);
+    		  goto oom;
+    	  }
+
+    	  context->myConnection = daemon_as_client(type, bus_address, error);
     	  if(context->myConnection == NULL)
     		  goto failed;
+
       }
       else
       {

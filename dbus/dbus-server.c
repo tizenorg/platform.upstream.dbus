@@ -183,6 +183,29 @@ _dbus_server_init_base (DBusServer             *server,
   return FALSE;
 }
 
+DBusServer*
+dbus_server_init_mini (char* address)
+{
+	DBusServer *server;
+
+	server = dbus_new0(struct DBusServer, 1);
+	if(server == NULL)
+		return NULL;
+
+	memset(server, 0, sizeof(struct DBusServer));
+	_dbus_rmutex_new_at_location (&server->mutex);
+	if (server->mutex == NULL)
+	    goto failed;
+	server->address = address;
+
+	return server;
+
+failed:
+	dbus_free(server);
+	return NULL;
+}
+
+
 /**
  * Finalizes the members of the DBusServer base class.
  * Chained up to by subclass finalizers.

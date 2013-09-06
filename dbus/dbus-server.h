@@ -47,6 +47,8 @@ typedef struct DBusServer DBusServer;
 typedef void (* DBusNewConnectionFunction) (DBusServer     *server,
                                             DBusConnection *new_connection,
                                             void           *data);
+DBUS_EXPORT
+DBusServer* dbus_server_init_mini		 (char* address);
 
 DBUS_EXPORT
 DBusServer* dbus_server_listen           (const char     *address,
