@@ -667,7 +667,6 @@ dbus_bus_register (DBusConnection *connection,
   char *name = NULL;
   BusData *bd;
   dbus_bool_t retval;
-  char* sender;
 
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_error_is_set (error, FALSE);
@@ -698,54 +697,26 @@ dbus_bus_register (DBusConnection *connection,
       retval = TRUE;
       goto out;
     }
-  if(dbus_connection_is_kdbus(connection))
-  {
-	  name = malloc(snprintf(name, 0, "%llu", ULLONG_MAX) + 1);
-	  if(!bus_register_kdbus(name, connection, error))
-		  goto out;
-
-	  if(!bus_register_policy_kdbus(name, connection, error))
-		goto out;
-
-	  dbus_connection_set_is_authenticated(connection);
-
-	  /* Set sender for messages.
-	   * If not kdbus - daemon does this. */
-	  sender = malloc (strlen(name) + 4);
-	  if(sender)
-	  {
-		  sprintf(sender, ":1.%s", name);
-		  dbus_connection_set_sender(connection, sender);
-	  }
-	  else
-	  {
-		  _DBUS_SET_OOM (error);
-		  goto out;
-	  }
-  }
-  else
-  {
-	  message = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+  message = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
 											  DBUS_PATH_DBUS,
 											  DBUS_INTERFACE_DBUS,
 											  "Hello");
-	  if (!message)
-		{
-		  _DBUS_SET_OOM (error);
-		  goto out;
-		}
+  if (!message)
+	{
+	  _DBUS_SET_OOM (error);
+	  goto out;
+	}
 
-	  reply = dbus_connection_send_with_reply_and_block (connection, message, -1, error);
+  reply = dbus_connection_send_with_reply_and_block (connection, message, -1, error);
 
-	  if (reply == NULL)
-		goto out;
-	  else if (dbus_set_error_from_message (error, reply))
-		goto out;
-	  else if (!dbus_message_get_args (reply, error,
-									   DBUS_TYPE_STRING, &name,
-									   DBUS_TYPE_INVALID))
-		goto out;
-  }
+  if (reply == NULL)
+	goto out;
+  else if (dbus_set_error_from_message (error, reply))
+	goto out;
+  else if (!dbus_message_get_args (reply, error,
+								   DBUS_TYPE_STRING, &name,
+								   DBUS_TYPE_INVALID))
+	goto out;
 
   bd->unique_name = _dbus_strdup (name);
 
@@ -1162,73 +1133,61 @@ dbus_bus_request_name (DBusConnection *connection,
                        DBusError      *error)
 {
 	dbus_uint32_t result;
+	DBusMessage *message, *reply;
 
 	_dbus_return_val_if_fail (connection != NULL, 0);
 	_dbus_return_val_if_fail (name != NULL, 0);
 	_dbus_return_val_if_fail (_dbus_check_is_valid_bus_name (name), 0);
 	_dbus_return_val_if_error_is_set (error, 0);
 
-	if(!dbus_connection_is_kdbus(connection))
-	{
-		DBusMessage *message, *reply;
-
-		message = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+	message = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
 											  DBUS_PATH_DBUS,
 											  DBUS_INTERFACE_DBUS,
 											  "RequestName");
-		if (message == NULL)
-		{
-		  _DBUS_SET_OOM (error);
-		  return -1;
-		}
+	if (message == NULL)
+	{
+	  _DBUS_SET_OOM (error);
+	  return -1;
+	}
 
-		if (!dbus_message_append_args (message,
+	if (!dbus_message_append_args (message,
 					 DBUS_TYPE_STRING, &name,
 					 DBUS_TYPE_UINT32, &flags,
 					 DBUS_TYPE_INVALID))
-		{
-		  dbus_message_unref (message);
-		  _DBUS_SET_OOM (error);
-		  return -1;
-		}
+	{
+		dbus_message_unref (message);
+		_DBUS_SET_OOM (error);
+		return -1;
+	}
 
-		reply = dbus_connection_send_with_reply_and_block (connection, message, -1,
+	reply = dbus_connection_send_with_reply_and_block (connection, message, -1,
 														 error);
 
-		dbus_message_unref (message);
+	dbus_message_unref (message);
 
-		if (reply == NULL)
-		{
-		  _DBUS_ASSERT_ERROR_IS_SET (error);
-		  return -1;
-		}
+	if (reply == NULL)
+	{
+		_DBUS_ASSERT_ERROR_IS_SET (error);
+		return -1;
+	}
 
-		if (dbus_set_error_from_message (error, reply))
-		{
-		  _DBUS_ASSERT_ERROR_IS_SET (error);
-		  dbus_message_unref (reply);
-		  return -1;
-		}
+	if (dbus_set_error_from_message (error, reply))
+	{
+		_DBUS_ASSERT_ERROR_IS_SET (error);
+		dbus_message_unref (reply);
+		return -1;
+	}
 
-		if (!dbus_message_get_args (reply, error,
+	if (!dbus_message_get_args (reply, error,
 								  DBUS_TYPE_UINT32, &result,
 								  DBUS_TYPE_INVALID))
-		{
-		  _DBUS_ASSERT_ERROR_IS_SET (error);
-		  dbus_message_unref (reply);
-		  return -1;
-		}
-
-		dbus_message_unref (reply);
-	}
-	else
 	{
-		if(!bus_register_policy_kdbus(name, connection, error))
-			return -1;
-
-		result = bus_request_name_kdbus(connection, name, flags, error);
+		_DBUS_ASSERT_ERROR_IS_SET (error);
+		dbus_message_unref (reply);
+		return -1;
 	}
-  
+
+	dbus_message_unref (reply);
 	return result;
 }
 
@@ -1584,37 +1543,32 @@ dbus_bus_add_match (DBusConnection *connection,
                     const char     *rule,
                     DBusError      *error)
 {
+	DBusMessage *msg;
+
 	_dbus_return_if_fail (rule != NULL);
 
-	if(!dbus_connection_is_kdbus(connection))
-	{
-		DBusMessage *msg;
-
-		msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+	msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
                                       DBUS_PATH_DBUS,
                                       DBUS_INTERFACE_DBUS,
                                       "AddMatch");
 
-	  if (msg == NULL)
-		{
-		  _DBUS_SET_OOM (error);
-		  return;
-		}
-
-	  if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
-									 DBUS_TYPE_INVALID))
-		{
-		  dbus_message_unref (msg);
-		  _DBUS_SET_OOM (error);
-		  return;
-		}
-
-	  send_no_return_values (connection, msg, error);
-
-	  dbus_message_unref (msg);
+	if (msg == NULL)
+	{
+		_DBUS_SET_OOM (error);
+		return;
 	}
-	else
-		dbus_bus_add_match_kdbus(connection, rule, error);
+
+	if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
+									 DBUS_TYPE_INVALID))
+	{
+		dbus_message_unref (msg);
+		_DBUS_SET_OOM (error);
+		return;
+	}
+
+	send_no_return_values (connection, msg, error);
+
+	dbus_message_unref (msg);
 }
 
 /**
@@ -1639,31 +1593,26 @@ dbus_bus_remove_match (DBusConnection *connection,
                        const char     *rule,
                        DBusError      *error)
 {
-	if(!dbus_connection_is_kdbus(connection))
-	{
-		DBusMessage *msg;
+	DBusMessage *msg;
 
-	  _dbus_return_if_fail (rule != NULL);
+	_dbus_return_if_fail (rule != NULL);
 
-	  msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
+	msg = dbus_message_new_method_call (DBUS_SERVICE_DBUS,
 										  DBUS_PATH_DBUS,
 										  DBUS_INTERFACE_DBUS,
 										  "RemoveMatch");
 
-	  if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
+	if (!dbus_message_append_args (msg, DBUS_TYPE_STRING, &rule,
 									 DBUS_TYPE_INVALID))
-		{
-		  dbus_message_unref (msg);
-		  _DBUS_SET_OOM (error);
-		  return;
-		}
-
-	  send_no_return_values (connection, msg, error);
-
-	  dbus_message_unref (msg);
+	{
+		dbus_message_unref (msg);
+		_DBUS_SET_OOM (error);
+		return;
 	}
-	else
-		dbus_bus_remove_match_kdbus(connection, error);
+
+	send_no_return_values (connection, msg, error);
+
+	dbus_message_unref (msg);
 }
 
 /** @} */

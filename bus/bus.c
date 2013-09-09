@@ -463,6 +463,8 @@ process_config_first_time_only (BusContext       *context,
     	  if(context->myConnection == NULL)
     		  goto failed;
 
+    	  if(!setup_connection(context, error))
+    		  goto failed;
       }
       else
       {

@@ -396,6 +396,12 @@ dbus_message_lock (DBusMessage  *message)
     }
 }
 
+void
+dbus_message_unlock (DBusMessage  *message)
+{
+	message->locked = FALSE;
+}
+
 static dbus_bool_t
 set_or_delete_string_field (DBusMessage *message,
                             int          field,

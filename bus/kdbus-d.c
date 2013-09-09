@@ -101,3 +101,63 @@ failed:
 
 	return connection;
 }
+
+dbus_bool_t setup_connection(BusContext* context, DBusError* error)
+{
+	//on the basis of bus_connections_setup_connection from connection.c
+
+	dbus_bool_t retval = FALSE; //todo opitimize
+//	DBusConnection* connection;
+
+	//todo what to do with error
+
+/*	connection = context->myConnection;  //todo
+	dbus_connection_set_route_peer_messages (connection, TRUE);
+
+	if (!dbus_connection_set_watch_functions (connection,
+											add_connection_watch,
+											remove_connection_watch,
+											toggle_connection_watch,
+											connection,
+											NULL))
+		goto out;
+
+	if (!dbus_connection_set_timeout_functions (connection,
+											  add_connection_timeout,
+											  remove_connection_timeout,
+											  NULL,
+											  connection, NULL))
+		goto out;
+
+	dbus_connection_set_dispatch_status_function (connection,
+												dispatch_status_function,
+												bus_context_get_loop (context),
+												NULL);
+
+	if (!bus_dispatch_add_connection (connection))
+		goto out;
+
+	retval = TRUE;
+
+	out:
+	if (!retval)
+	{
+	  if (!dbus_connection_set_watch_functions (connection,
+												NULL, NULL, NULL,
+												connection,
+												NULL))
+		_dbus_assert_not_reached ("setting watch functions to NULL failed");
+
+	  if (!dbus_connection_set_timeout_functions (connection,
+												  NULL, NULL, NULL,
+												  connection,
+												  NULL))
+		_dbus_assert_not_reached ("setting timeout functions to NULL failed");
+
+
+	  dbus_connection_set_dispatch_status_function (connection,
+													NULL, NULL, NULL);
+	}
+*/
+	return retval;
+}

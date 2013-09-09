@@ -95,6 +95,7 @@ struct DBusTransportSocket
                                          *   Kdbus kernel module. 
                                          */
   __u64 bloom_size;						/**<  bloom filter field size */
+  char* sender;                         /**< uniqe name of the sender */
 };
 
 static dbus_bool_t
@@ -128,7 +129,7 @@ static dbus_bool_t add_message_to_received(DBusMessage *message, DBusConnection*
 	return TRUE;
 }
 
-static dbus_bool_t reply_with_error(char* error_type, const char* template, const char* object, DBusMessage *message, DBusConnection* connection)
+static int reply_with_error(char* error_type, const char* template, const char* object, DBusMessage *message, DBusConnection* connection)
 {
 	DBusMessage *errMessage;
 	char* error_msg = "";
@@ -143,32 +144,44 @@ static dbus_bool_t reply_with_error(char* error_type, const char* template, cons
 
 	errMessage = generate_local_error_message(dbus_message_get_serial(message), error_type, error_msg);
 	if(errMessage == NULL)
-		return FALSE;
+		return -1;
 	if (add_message_to_received(errMessage, connection))
-		return TRUE;
+		return 0;
 
-	return FALSE;
+	return -1;
 }
 
-static dbus_bool_t reply_1_data(DBusMessage *message, int data_type, void* pData, DBusConnection* connection)
+static int reply_1_data(DBusMessage *message, int data_type, void* pData, DBusConnection* connection)
 {
 	DBusMessageIter args;
 	DBusMessage *reply;
 
 	reply = dbus_message_new_method_return(message);
 	if(reply == NULL)
-		return FALSE;
+		return -1;
 	dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
     dbus_message_iter_init_append(reply, &args);
     if (!dbus_message_iter_append_basic(&args, data_type, pData))
     {
     	dbus_message_unref(reply);
-        return FALSE;
+        return -1;
     }
     if(add_message_to_received(reply, connection))
-    	return TRUE;
+    	return 0;
 
-    return FALSE;
+    return -1;
+}
+
+static int reply_ack(DBusMessage *message, DBusConnection* connection)
+{
+	DBusMessage *reply;
+
+	reply = dbus_message_new_method_return(message);
+	if(reply == NULL)
+		return -1;
+    if(add_message_to_received(reply, connection))
+    	return 0;
+    return -1;
 }
 
 /**
@@ -401,11 +414,11 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 			if(autostart)
 			{
 				//todo start service here, otherwise
-				if(reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
+				if(!reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
 					goto out;
 			}
 			else
-				if(reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+				if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
 					goto out;
 
 		}
@@ -514,6 +527,427 @@ _dbus_verbose ("I'm alive 1\n");
 	return ret;
 }
 
+static struct kdbus_policy *make_policy_name(const char *name)
+{
+	struct kdbus_policy *p;
+	__u64 size;
+
+	size = offsetof(struct kdbus_policy, name) + strlen(name) + 1;
+	p = malloc(size);
+	if (!p)
+		return NULL;
+	memset(p, 0, size);
+	p->size = size;
+	p->type = KDBUS_POLICY_NAME;
+	strcpy(p->name, name);
+
+	return p;
+}
+
+static struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
+{
+	struct kdbus_policy *p;
+	__u64 size = sizeof(*p);
+
+	p = malloc(size);
+	if (!p)
+		return NULL;
+
+	memset(p, 0, size);
+	p->size = size;
+	p->type = KDBUS_POLICY_ACCESS;
+	p->access.type = type;
+	p->access.bits = bits;
+	p->access.id = id;
+
+	return p;
+}
+
+static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
+{
+	struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
+
+	if (cmd_policy->size + policy->size > max_size)
+		return;
+
+	memcpy(dst, policy, policy->size);
+	cmd_policy->size += KDBUS_ALIGN8(policy->size);
+	free(policy);
+}
+
+/**
+ * Registers kdbus policy for given connection.
+ *
+ * Policy sets rights of the name (unique or well known) on the bus. Without policy it is
+ * not possible to send or receive messages. It must be set separately for unique id and
+ * well known name of the connection. It is set after registering on the bus, but before
+ * requesting for name. The policy is valid for the given name, not for the connection.
+ *
+ * Name of the policy equals name on the bus.
+ *
+ * @param name name of the policy = name of the connection
+ * @param connection the connection
+ * @param error place to store errors
+ *
+ * @returns #TRUE on success
+ */
+static dbus_bool_t bus_register_policy_kdbus(const char* name, int fd)
+{
+	struct kdbus_cmd_policy *cmd_policy;
+	struct kdbus_policy *policy;
+	int size = 0xffff;
+
+	cmd_policy = alloca(size);
+	memset(cmd_policy, 0, size);
+
+	policy = (struct kdbus_policy *) cmd_policy->policies;
+	cmd_policy->size = offsetof(struct kdbus_cmd_policy, policies);
+
+	policy = make_policy_name(name);
+	append_policy(cmd_policy, policy, size);
+
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, getuid());
+	append_policy(cmd_policy, policy, size);
+
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_RECV, 0);
+	append_policy(cmd_policy, policy, size);
+
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_SEND, 0);
+	append_policy(cmd_policy, policy, size);
+
+	if (ioctl(fd, KDBUS_CMD_EP_POLICY_SET, cmd_policy) < 0)
+	{
+		_dbus_verbose ("Error setting policy: %m, %d", errno);
+		return FALSE;
+	}
+
+	_dbus_verbose("Policy %s set correctly\n", name);
+	return TRUE;
+}
+
+/**
+ * Kdbus part of dbus_bus_register.
+ * Shouldn't be used separately because it needs to be surrounded
+ * by other functions as it is done in dbus_bus_register.
+ *
+ * @param name place to store unique name given by bus
+ * @param connection the connection
+ * @param error place to store errors
+ * @returns #TRUE on success
+ */
+static dbus_bool_t bus_register_kdbus(char* name, DBusTransportSocket* transportS)
+{
+	struct kdbus_cmd_hello __attribute__ ((__aligned__(8))) hello;
+
+	hello.conn_flags = KDBUS_HELLO_ACCEPT_FD/* |
+			   KDBUS_HELLO_ATTACH_COMM |
+			   KDBUS_HELLO_ATTACH_EXE |
+			   KDBUS_HELLO_ATTACH_CMDLINE |
+			   KDBUS_HELLO_ATTACH_CAPS |
+			   KDBUS_HELLO_ATTACH_CGROUP |
+			   KDBUS_HELLO_ATTACH_SECLABEL |
+			   KDBUS_HELLO_ATTACH_AUDIT*/;
+	hello.size = sizeof(struct kdbus_cmd_hello);
+	hello.pool_size = RECEIVE_POOL_SIZE;
+
+	if (ioctl(transportS->fd, KDBUS_CMD_HELLO, &hello))
+	{
+		_dbus_verbose ("Failed to send hello: %m, %d",errno);
+		return FALSE;
+	}
+
+	sprintf(name, "%llu", (unsigned long long)hello.id);
+	_dbus_verbose("-- Our peer ID is: %s\n", name);
+	transportS->bloom_size = hello.bloom_size;
+
+	transportS->kdbus_mmap_ptr = mmap(NULL, RECEIVE_POOL_SIZE, PROT_READ, MAP_SHARED, transportS->fd, 0);
+	if (transportS->kdbus_mmap_ptr == MAP_FAILED)
+	{
+		_dbus_verbose("Error when mmap: %m, %d",errno);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+/**
+ * kdbus version of dbus_bus_request_name.
+ *
+ * Asks the bus to assign the given name to this connection.
+ *
+ * Use same flags as original dbus version with one exception below.
+ * Result flag #DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER is currently
+ * never returned by kdbus, instead DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
+ * is returned by kdbus.
+ *
+ * @param connection the connection
+ * @param name the name to request
+ * @param flags flags
+ * @param error location to store the error
+ * @returns a result code, -1 if error is set
+ */
+static int bus_request_name_kdbus(int fd, const char *name, const uint64_t flags)
+{
+	struct kdbus_cmd_name *cmd_name;
+
+	uint64_t size = sizeof(*cmd_name) + strlen(name) + 1;
+	uint64_t flags_kdbus = 0;
+
+	cmd_name = alloca(size);
+
+	memset(cmd_name, 0, size);
+	strcpy(cmd_name->name, name);
+	cmd_name->size = size;
+
+	if(flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
+		flags_kdbus |= KDBUS_NAME_ALLOW_REPLACEMENT;
+	if(!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
+		flags_kdbus |= KDBUS_NAME_QUEUE;
+	if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
+		flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
+
+	cmd_name->conn_flags = flags_kdbus;
+
+	_dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
+
+	if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name))
+	{
+		_dbus_verbose ("error acquiring name '%s': %m, %d", name, errno);
+		if(errno == EEXIST)
+			return DBUS_REQUEST_NAME_REPLY_EXISTS;
+		return -1;
+	}
+
+	_dbus_verbose("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
+
+	if(cmd_name->conn_flags & KDBUS_NAME_IN_QUEUE)
+		return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
+	else
+		return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
+	/*todo now 1 code is never returned -  DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
+	 * because kdbus never returns it now
+	 */
+}
+
+/**
+ * Seeks key in rule string, and duplicates value of the key into pValue.
+ * If value is "org.freedesktop.DBus" it is indicated by returning -1, because it
+ * needs to be handled in different manner.
+ * Value is duplicated from rule string to newly allocated memory pointe by pValue,
+ * so it must be freed after use.
+ *
+ * @param rule rule to look through
+ * @param key key to look for
+ * @param pValue pointer to value of the key found
+ * @return length of the value string, 0 means not found, -1 means "org.freedesktop.DBus"
+ */
+static int parse_match_key(const char *rule, const char* key, char** pValue)
+{
+	const char* pBegin;
+	const char* pValueEnd;
+	int value_length = 0;
+
+	pBegin = strstr(rule, key);
+	if(pBegin)
+	{
+		pBegin += strlen(key);
+		pValueEnd = strchr(pBegin, '\'');
+		if(pValueEnd)
+		{
+			value_length = pValueEnd - pBegin;
+			*pValue = strndup(pBegin, value_length);
+			if(*pValue)
+			{
+				if(strcmp(*pValue, "org.freedesktop.DBus") == 0)
+					value_length = -1;
+				_dbus_verbose ("found for key: %s value:'%s'\n", key, *pValue);
+			}
+		}
+	}
+	return value_length;
+}
+
+/**
+ * Adds a match rule to match broadcast messages going through the message bus.
+ * Do no affect messages addressed directly.
+ *
+ * The "rule" argument is the string form of a match rule.
+ *
+ * In kdbus function do not blocks.
+ *
+ * Upper function returns nothing because of blocking issues
+ * so there is no point to return true or false here.
+ *
+ * Only part of the dbus's matching capabilities is implemented in kdbus now, because of different mechanism.
+ * Current mapping:
+ * interface match key mapped to bloom
+ * sender match key mapped to src_name
+ * also handled org.freedesktop.dbus members: NameOwnerChanged, NameLost, NameAcquired
+ *
+ * @param connection connection to the message bus
+ * @param rule textual form of match rule
+ * @param error location to store any errors - may be NULL
+ */
+static dbus_bool_t dbus_bus_add_match_kdbus (DBusTransportSocket* transportS, const char *rule)
+{
+	struct kdbus_cmd_match* pCmd_match;
+	struct kdbus_item *pItem;
+	__u64 src_id = KDBUS_MATCH_SRC_ID_ANY;
+	uint64_t size;
+	unsigned int kernel_item = 0;
+	int name_size;
+	char* pName = NULL;
+	char* pInterface = NULL;
+	dbus_bool_t ret_value = FALSE;
+
+	/*parsing rule and calculating size of command*/
+	size = sizeof(struct kdbus_cmd_match);
+
+	if(strstr(rule, "member='NameOwnerChanged'"))
+	{
+		kernel_item = ~0;
+		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /*std DBus: 3 name related items plus 2 id related items*/
+	}
+	else if(strstr(rule, "member='NameChanged'"))
+	{
+		kernel_item = KDBUS_MATCH_NAME_CHANGE;
+		size += KDBUS_ITEM_SIZE(1);
+	}
+	else if(strstr(rule, "member='NameLost'"))
+	{
+		kernel_item = KDBUS_MATCH_NAME_REMOVE;
+		size += KDBUS_ITEM_SIZE(1);
+	}
+	else if(strstr(rule, "member='NameAcquired'"))
+	{
+		kernel_item = KDBUS_MATCH_NAME_ADD;
+		size += KDBUS_ITEM_SIZE(1);
+	}
+
+	name_size = parse_match_key(rule, "interface='", &pInterface);
+	if((name_size == -1) && (kernel_item == 0))   //means org.freedesktop.DBus without specified member
+	{
+		kernel_item = ~0;
+		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /* 3 above name related items plus 2 id related items*/
+	}
+	else if(name_size > 0)   		/*actual size is not important for interface because bloom size is defined by bus*/
+		size += KDBUS_PART_HEADER_SIZE + transportS->bloom_size;
+
+	name_size = parse_match_key(rule, "sender='", &pName);
+	if((name_size == -1) && (kernel_item == 0))  //means org.freedesktop.DBus without specified name - same as interface few line above
+	{
+		kernel_item = ~0;
+		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2; /* 3 above	name related items plus 2 id related items*/
+	}
+	else if(name_size > 0)
+	{
+		if(!strncmp(pName, ":1.", 3)) /*if name is unique name it must be converted to unique id*/
+		{
+			src_id = strtoull(&pName[3], NULL, 10);
+			free(pName);
+			pName = NULL;
+		}
+		else
+			size += KDBUS_ITEM_SIZE(name_size + 1);  //well known name
+	}
+
+	pCmd_match = alloca(size);
+	if(pCmd_match == NULL)
+		goto out;
+
+	pCmd_match->id = 0;
+	pCmd_match->size = size;
+	pCmd_match->cookie = strtoull(dbus_bus_get_unique_name(transportS->base.connection), NULL , 10);
+
+	pItem = pCmd_match->items;
+	if(kernel_item == ~0)  //all signals from kernel
+	{
+		pCmd_match->src_id = 0;
+		pItem->type = KDBUS_MATCH_NAME_CHANGE;
+		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+		pItem = KDBUS_PART_NEXT(pItem);
+		pItem->type = KDBUS_MATCH_NAME_ADD;
+		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+		pItem = KDBUS_PART_NEXT(pItem);
+		pItem->type = KDBUS_MATCH_NAME_REMOVE;
+		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+		pItem = KDBUS_PART_NEXT(pItem);
+		pItem->type = KDBUS_MATCH_ID_ADD;
+		pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+		pItem = KDBUS_PART_NEXT(pItem);
+		pItem->type = KDBUS_MATCH_ID_REMOVE;
+		pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+	}
+	else if(kernel_item) //only one item
+	{
+		pCmd_match->src_id = 0;
+		pItem->type = kernel_item;
+		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+	}
+	else
+	{
+		pCmd_match->src_id = src_id;
+		if(pName)
+		{
+			pItem->type = KDBUS_MATCH_SRC_NAME;
+			pItem->size = KDBUS_PART_HEADER_SIZE + name_size + 1;
+			strcpy(pItem->str, pName);
+			pItem = KDBUS_PART_NEXT(pItem);
+		}
+
+		if(pInterface)
+		{
+			pItem->type = KDBUS_MATCH_BLOOM;
+			pItem->size = KDBUS_PART_HEADER_SIZE + transportS->bloom_size;
+			strncpy(pItem->data, pInterface, transportS->bloom_size);
+		}
+	}
+
+	if(ioctl(transportS->fd, KDBUS_CMD_MATCH_ADD, pCmd_match))
+		_dbus_verbose("Failed adding match bus rule %s,\nerror: %d, %m\n", rule, errno);
+	else
+	{
+		_dbus_verbose("Added match bus rule %s\n", rule);
+		ret_value = TRUE;
+	}
+
+out:
+	if(pName)
+		free(pName);
+	if(pInterface)
+		free(pInterface);
+	return ret_value;
+}
+
+/**
+ * Opposing to dbus, in kdbus removes all match rules with given
+ * cookie, which now is equal to uniqe id.
+ *
+ * In kdbus this function will not block
+ *
+ * @param connection connection to the message bus
+ * @param error location to store any errors - may be NULL
+ */
+static dbus_bool_t dbus_bus_remove_match_kdbus (DBusTransportSocket* transportS)
+{
+	struct kdbus_cmd_match __attribute__ ((__aligned__(8))) cmd;
+
+	cmd.cookie = strtoull(dbus_bus_get_unique_name(transportS->base.connection), NULL , 10);
+	cmd.id = cmd.cookie;
+	cmd.size = sizeof(struct kdbus_cmd_match);
+
+	if(ioctl(transportS->fd, KDBUS_CMD_MATCH_ADD, &cmd))
+	{
+		_dbus_verbose("Failed removing match rule; error: %d, %m\n", errno);
+		return FALSE;
+	}
+	else
+	{
+		_dbus_verbose("Match rule removed correctly.\n");
+		return TRUE;
+	}
+}
+
 /**
  * Handles messages sent to bus daemon - "org.freedesktop.DBus" and translates them to appropriate
  * kdbus ioctl commands. Than translate kdbus reply into dbus message and put it into recived messages queue.
@@ -533,13 +967,72 @@ _dbus_verbose ("I'm alive 1\n");
  * - GetConnectionUnixUser
  * - GetId
  */
-static dbus_bool_t emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *message)
+static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *message)
 {
 	int inter_ret;
 	struct nameInfo info;
-	dbus_bool_t ret_value;
+	int ret_value = -1;
 
-	if(!strcmp(dbus_message_get_member(message), "GetNameOwner"))  //returns id of the well known name
+	if(!strcmp(dbus_message_get_member(message), "Hello"))
+	{
+		char* sender = NULL;
+		char* name = NULL;
+
+		name = malloc(snprintf(name, 0, "%llu", ULLONG_MAX) + 1);
+		if(name == NULL)
+			return -1;
+		if(!bus_register_kdbus(name, (DBusTransportSocket*)transport))
+			goto outH1;
+		if(!bus_register_policy_kdbus(name, ((DBusTransportSocket*)transport)->fd))
+			goto outH1;
+
+		sender = malloc (strlen(name) + 4);
+		if(!sender)
+			goto outH1;
+		sprintf(sender, ":1.%s", name);
+		((DBusTransportSocket*)transport)->sender = sender;
+
+		if(!reply_1_data(message, DBUS_TYPE_STRING, &name, transport->connection))
+			return 0;  //todo why we cannot free name after sending reply?
+		else
+			free(sender);
+
+	outH1:
+		free(name);
+	}
+	else if(!strcmp(dbus_message_get_member(message), "RequestName"))
+	{
+		char* name;
+		int flags;
+		int result;
+
+		if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_UINT32, &flags, DBUS_TYPE_INVALID))
+			return -1;
+		if(!bus_register_policy_kdbus(name, ((DBusTransportSocket*)transport)->fd))
+			return -1;
+
+		result = bus_request_name_kdbus(((DBusTransportSocket*)transport)->fd, name, flags);
+		return reply_1_data(message, DBUS_TYPE_UINT32, &result, transport->connection);
+	}
+	else if(!strcmp(dbus_message_get_member(message), "AddMatch"))
+	{
+		char* rule;
+
+		if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &rule, DBUS_TYPE_INVALID))
+			return -1;
+
+		if(!dbus_bus_add_match_kdbus((DBusTransportSocket*)transport, rule))
+			return -1;
+
+		return reply_ack(message,transport->connection);
+	}
+	else if(!strcmp(dbus_message_get_member(message), "RemoveMatch"))
+	{
+		if(!dbus_bus_remove_match_kdbus((DBusTransportSocket*)transport))
+			return -1;
+		return reply_ack(message, transport->connection);
+	}
+	else if(!strcmp(dbus_message_get_member(message), "GetNameOwner"))  //returns id of the well known name
 	{
 		char* name = NULL;
 
@@ -1743,6 +2236,8 @@ do_writing (DBusTransport *transport)
 
 		message = _dbus_connection_get_message_to_send (transport->connection);
 		_dbus_assert (message != NULL);
+		dbus_message_unlock(message);
+	    dbus_message_set_sender(message, socket_transport->sender);
 		dbus_message_lock (message);
 		_dbus_message_get_network_data (message, &header, &body);
 		total_bytes_to_write = _dbus_string_get_length(header) + _dbus_string_get_length(body);
@@ -1752,11 +2247,23 @@ do_writing (DBusTransport *transport)
 		{
 			if(!strcmp(pDestination, "org.freedesktop.DBus"))
 			{
-				if(emulateOrgFreedesktopDBus(transport, message))
-					bytes_written = total_bytes_to_write;
-				else
-					bytes_written = -1;
-				goto written;
+				if(!strcmp(dbus_message_get_interface(message), DBUS_INTERFACE_DBUS))
+				{
+					int ret;
+
+					ret = emulateOrgFreedesktopDBus(transport, message);
+					if(ret < 0)
+					{
+						bytes_written = -1;
+						goto written;
+					}
+					else if(ret == 0)
+					{
+						bytes_written = total_bytes_to_write;
+						goto written;
+					}
+					//else send to "daemon" as to normal recipient
+				}
 			}
 		}
 		if (_dbus_auth_needs_encoding (transport->auth))
@@ -2092,9 +2599,11 @@ socket_disconnect (DBusTransport *transport)
 }
 
 static dbus_bool_t
-socket_connection_set (DBusTransport *transport)
+kdbus_connection_set (DBusTransport *transport)
 {
   DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+
+  dbus_connection_set_is_authenticated(transport->connection); //todo remove when authentication will work
 
   _dbus_watch_set_handler (socket_transport->write_watch,
                            _dbus_connection_handle_watch,
@@ -2300,7 +2809,7 @@ static const DBusTransportVTable kdbus_vtable = {
   socket_finalize,
   socket_handle_watch,
   socket_disconnect,
-  socket_connection_set,
+  kdbus_connection_set,
   kdbus_do_iteration,
   socket_live_messages_changed,
   socket_get_socket_fd
@@ -2407,23 +2916,6 @@ static int _dbus_connect_kdbus (const char *path, DBusError *error)
 }
 
 /**
- * maps memory pool for messages received by the kdbus transport
- *
- * @param transport transport
- * @returns #TRUE on success, otherwise FALSE
- */
-static dbus_bool_t kdbus_mmap(DBusTransport* transport)
-{
-	DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
-
-	socket_transport->kdbus_mmap_ptr = mmap(NULL, RECEIVE_POOL_SIZE, PROT_READ, MAP_SHARED, socket_transport->fd, 0);
-	if (socket_transport->kdbus_mmap_ptr == MAP_FAILED)
-		return FALSE;
-
-	return TRUE;
-}
-
-/**
  * Creates a new transport for kdbus.
  * This creates a client-side of a transport.
  *
@@ -2526,447 +3018,4 @@ DBusTransportOpenResult _dbus_transport_open_kdbus(DBusAddressEntry  *entry,
 		_DBUS_ASSERT_ERROR_IS_CLEAR (error);
 		return DBUS_TRANSPORT_OPEN_NOT_HANDLED;
     }
-}
-
-static struct kdbus_policy *make_policy_name(const char *name)
-{
-	struct kdbus_policy *p;
-	__u64 size;
-
-	size = offsetof(struct kdbus_policy, name) + strlen(name) + 1;
-	p = malloc(size);
-	if (!p)
-		return NULL;
-	memset(p, 0, size);
-	p->size = size;
-	p->type = KDBUS_POLICY_NAME;
-	strcpy(p->name, name);
-
-	return p;
-}
-
-static struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
-{
-	struct kdbus_policy *p;
-	__u64 size = sizeof(*p);
-
-	p = malloc(size);
-	if (!p)
-		return NULL;
-
-	memset(p, 0, size);
-	p->size = size;
-	p->type = KDBUS_POLICY_ACCESS;
-	p->access.type = type;
-	p->access.bits = bits;
-	p->access.id = id;
-
-	return p;
-}
-
-static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
-{
-	struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
-
-	if (cmd_policy->size + policy->size > max_size)
-		return;
-
-	memcpy(dst, policy, policy->size);
-	cmd_policy->size += KDBUS_ALIGN8(policy->size);
-	free(policy);
-}
-
-/**
- * Registers kdbus policy for given connection.
- *
- * Policy sets rights of the name (unique or well known) on the bus. Without policy it is
- * not possible to send or receive messages. It must be set separately for unique id and
- * well known name of the connection. It is set after registering on the bus, but before
- * requesting for name. The policy is valid for the given name, not for the connection.
- *
- * Name of the policy equals name on the bus.
- *
- * @param name name of the policy = name of the connection
- * @param connection the connection
- * @param error place to store errors
- *
- * @returns #TRUE on success
- */
-dbus_bool_t bus_register_policy_kdbus(const char* name, DBusConnection *connection, DBusError *error)
-{
-	struct kdbus_cmd_policy *cmd_policy;
-	struct kdbus_policy *policy;
-	int size = 0xffff;
-	int fd;
-
-	if(!dbus_connection_get_socket(connection, &fd))
-	{
-		dbus_set_error (error, "Failed to get fd for registering policy", NULL);
-		return FALSE;
-	}
-
-	cmd_policy = alloca(size);
-	memset(cmd_policy, 0, size);
-
-	policy = (struct kdbus_policy *) cmd_policy->policies;
-	cmd_policy->size = offsetof(struct kdbus_cmd_policy, policies);
-
-	policy = make_policy_name(name);
-	append_policy(cmd_policy, policy, size);
-
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, getuid());
-	append_policy(cmd_policy, policy, size);
-
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_RECV, 0);
-	append_policy(cmd_policy, policy, size);
-
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_SEND, 0);
-	append_policy(cmd_policy, policy, size);
-
-	if (ioctl(fd, KDBUS_CMD_EP_POLICY_SET, cmd_policy) < 0)
-	{
-		dbus_set_error(error,_dbus_error_from_errno (errno), "Error setting EP policy: %s", _dbus_strerror (errno));
-		return FALSE;
-	}
-
-	_dbus_verbose("Policy %s set correctly\n", name);
-	return TRUE;
-}
-
-/**
- * Kdbus part of dbus_bus_register.
- * Shouldn't be used separately because it needs to be surrounded
- * by other functions as it is done in dbus_bus_register.
- *
- * @param name place to store unique name given by bus
- * @param connection the connection
- * @param error place to store errors
- * @returns #TRUE on success
- */
-dbus_bool_t bus_register_kdbus(char* name, DBusConnection *connection, DBusError *error)
-{
-	struct kdbus_cmd_hello __attribute__ ((__aligned__(8))) hello;
-	int fd;
-
-	hello.conn_flags = KDBUS_HELLO_ACCEPT_FD/* |
-			   KDBUS_HELLO_ATTACH_COMM |
-			   KDBUS_HELLO_ATTACH_EXE |
-			   KDBUS_HELLO_ATTACH_CMDLINE |
-			   KDBUS_HELLO_ATTACH_CAPS |
-			   KDBUS_HELLO_ATTACH_CGROUP |
-			   KDBUS_HELLO_ATTACH_SECLABEL |
-			   KDBUS_HELLO_ATTACH_AUDIT*/;
-	hello.size = sizeof(struct kdbus_cmd_hello);
-	hello.pool_size = RECEIVE_POOL_SIZE;
-
-	if(!dbus_connection_get_socket(connection, &fd))
-	{
-		dbus_set_error (error, "failed to get fd for bus registration", NULL);
-		return FALSE;
-	}
-	if (ioctl(fd, KDBUS_CMD_HELLO, &hello))
-	{
-		dbus_set_error(error,_dbus_error_from_errno (errno), "Failed to send hello: %s", _dbus_strerror (errno));
-		return FALSE;
-	}
-
-	sprintf(name, "%llu", (unsigned long long)hello.id);
-	_dbus_verbose("-- Our peer ID is: %s\n", name);
-	((DBusTransportSocket*)dbus_connection_get_transport(connection))->bloom_size = hello.bloom_size;
-
-	if(!kdbus_mmap(dbus_connection_get_transport(connection)))
-	{
-		dbus_set_error(error,_dbus_error_from_errno (errno), "Error when mmap: %s", _dbus_strerror (errno));
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-/**
- * kdbus version of dbus_bus_request_name.
- *
- * Asks the bus to assign the given name to this connection.
- *
- * Use same flags as original dbus version with one exception below.
- * Result flag #DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER is currently
- * never returned by kdbus, instead DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
- * is returned by kdbus.
- *
- * @param connection the connection
- * @param name the name to request
- * @param flags flags
- * @param error location to store the error
- * @returns a result code, -1 if error is set
- */
-int bus_request_name_kdbus(DBusConnection *connection, const char *name, const uint64_t flags, DBusError *error)
-{
-	struct kdbus_cmd_name *cmd_name;
-	int fd;
-	uint64_t size = sizeof(*cmd_name) + strlen(name) + 1;
-	uint64_t flags_kdbus = 0;
-
-	cmd_name = alloca(size);
-
-	memset(cmd_name, 0, size);
-	strcpy(cmd_name->name, name);
-	cmd_name->size = size;
-
-	if(flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
-		flags_kdbus |= KDBUS_NAME_ALLOW_REPLACEMENT;
-	if(!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
-		flags_kdbus |= KDBUS_NAME_QUEUE;
-	if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
-		flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
-
-	cmd_name->conn_flags = flags_kdbus;
-
-	if(!dbus_connection_get_socket(connection, &fd))
-	{
-		dbus_set_error (error, "failed to get fd for name request", NULL);
-		return -1;
-	}
-
-	_dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
-
-	_DBUS_ASSERT_ERROR_IS_CLEAR (error);
-	if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name))
-	{
-		dbus_set_error(error,_dbus_error_from_errno (errno), "error acquiring name: %s", _dbus_strerror (errno));
-		if(errno == EEXIST)
-			return DBUS_REQUEST_NAME_REPLY_EXISTS;
-		return -1;
-	}
-
-	_dbus_verbose("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->conn_flags);
-
-	if(cmd_name->conn_flags & KDBUS_NAME_IN_QUEUE)
-		return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
-	else
-		return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
-	/*todo now 1 code is never returned -  DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
-	 * because kdbus never returns it now
-	 */
-}
-
-/**
- * Seeks key in rule string, and duplicates value of the key into pValue.
- * If value is "org.freedesktop.DBus" it is indicated by returning -1, because it
- * needs to be handled in different manner.
- * Value is duplicated from rule string to newly allocated memory pointe by pValue,
- * so it must be freed after use.
- *
- * @param rule rule to look through
- * @param key key to look for
- * @param pValue pointer to value of the key found
- * @return length of the value string, 0 means not found, -1 means "org.freedesktop.DBus"
- */
-static int parse_match_key(const char *rule, const char* key, char** pValue)
-{
-	const char* pBegin;
-	const char* pValueEnd;
-	int value_length = 0;
-
-	pBegin = strstr(rule, key);
-	if(pBegin)
-	{
-		pBegin += strlen(key);
-		pValueEnd = strchr(pBegin, '\'');
-		if(pValueEnd)
-		{
-			value_length = pValueEnd - pBegin;
-			*pValue = strndup(pBegin, value_length);
-			if(*pValue)
-			{
-				if(strcmp(*pValue, "org.freedesktop.DBus") == 0)
-					value_length = -1;
-				_dbus_verbose ("found for key: %s value:'%s'\n", key, *pValue);
-			}
-		}
-	}
-	return value_length;
-}
-
-/**
- * Adds a match rule to match broadcast messages going through the message bus.
- * Do no affect messages addressed directly.
- *
- * The "rule" argument is the string form of a match rule.
- *
- * In kdbus function do not blocks.
- *
- * Upper function returns nothing because of blocking issues
- * so there is no point to return true or false here.
- *
- * Only part of the dbus's matching capabilities is implemented in kdbus now, because of different mechanism.
- * Current mapping:
- * interface match key mapped to bloom
- * sender match key mapped to src_name
- * also handled org.freedesktop.dbus members: NameOwnerChanged, NameLost, NameAcquired
- *
- * @param connection connection to the message bus
- * @param rule textual form of match rule
- * @param error location to store any errors - may be NULL
- */
-void dbus_bus_add_match_kdbus (DBusConnection *connection, const char *rule, DBusError *error)
-{
-	struct kdbus_cmd_match* pCmd_match;
-	struct kdbus_item *pItem;
-	int fd;
-	__u64 src_id = KDBUS_MATCH_SRC_ID_ANY;
-	uint64_t size;
-	unsigned int kernel_item = 0;
-	int name_size;
-	char* pName = NULL;
-	char* pInterface = NULL;
-	__u64 bloom_size = ((DBusTransportSocket*)dbus_connection_get_transport(connection))->bloom_size;
-
-	dbus_connection_get_socket(connection, &fd);
-
-	/*parsing rule and calculating size of command*/
-	size = sizeof(struct kdbus_cmd_match);
-
-	if(strstr(rule, "member='NameOwnerChanged'"))
-	{
-		kernel_item = ~0;
-		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /*std DBus: 3 name related items plus 2 id related items*/
-	}
-	else if(strstr(rule, "member='NameChanged'"))
-	{
-		kernel_item = KDBUS_MATCH_NAME_CHANGE;
-		size += KDBUS_ITEM_SIZE(1);
-	}
-	else if(strstr(rule, "member='NameLost'"))
-	{
-		kernel_item = KDBUS_MATCH_NAME_REMOVE;
-		size += KDBUS_ITEM_SIZE(1);
-	}
-	else if(strstr(rule, "member='NameAcquired'"))
-	{
-		kernel_item = KDBUS_MATCH_NAME_ADD;
-		size += KDBUS_ITEM_SIZE(1);
-	}
-
-	name_size = parse_match_key(rule, "interface='", &pInterface);
-	if((name_size == -1) && (kernel_item == 0))   //means org.freedesktop.DBus without specified member
-	{
-		kernel_item = ~0;
-		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /* 3 above name related items plus 2 id related items*/
-	}
-	else if(name_size > 0)   		/*actual size is not important for interface because bloom size is defined by bus*/
-		size += KDBUS_PART_HEADER_SIZE + bloom_size;
-
-	name_size = parse_match_key(rule, "sender='", &pName);
-	if((name_size == -1) && (kernel_item == 0))  //means org.freedesktop.DBus without specified name - same as interface few line above
-	{
-		kernel_item = ~0;
-		size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2; /* 3 above	name related items plus 2 id related items*/
-	}
-	else if(name_size > 0)
-	{
-		if(!strncmp(pName, ":1.", 3)) /*if name is unique name it must be converted to unique id*/
-		{
-			src_id = strtoull(&pName[3], NULL, 10);
-			free(pName);
-			pName = NULL;
-		}
-		else
-			size += KDBUS_ITEM_SIZE(name_size + 1);  //well known name
-	}
-
-	pCmd_match = alloca(size);
-	if(pCmd_match == NULL)
-		goto out;
-
-	pCmd_match->id = 0;
-	pCmd_match->size = size;
-	pCmd_match->cookie = strtoull(dbus_bus_get_unique_name(connection), NULL , 10);
-
-	pItem = pCmd_match->items;
-	if(kernel_item == ~0)  //all signals from kernel
-	{
-		pCmd_match->src_id = 0;
-		pItem->type = KDBUS_MATCH_NAME_CHANGE;
-		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
-		pItem = KDBUS_PART_NEXT(pItem);
-		pItem->type = KDBUS_MATCH_NAME_ADD;
-		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
-		pItem = KDBUS_PART_NEXT(pItem);
-		pItem->type = KDBUS_MATCH_NAME_REMOVE;
-		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
-		pItem = KDBUS_PART_NEXT(pItem);
-		pItem->type = KDBUS_MATCH_ID_ADD;
-		pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
-		pItem = KDBUS_PART_NEXT(pItem);
-		pItem->type = KDBUS_MATCH_ID_REMOVE;
-		pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
-	}
-	else if(kernel_item) //only one item
-	{
-		pCmd_match->src_id = 0;
-		pItem->type = kernel_item;
-		pItem->size = KDBUS_PART_HEADER_SIZE + 1;
-	}
-	else
-	{
-		pCmd_match->src_id = src_id;
-		if(pName)
-		{
-			pItem->type = KDBUS_MATCH_SRC_NAME;
-			pItem->size = KDBUS_PART_HEADER_SIZE + name_size + 1;
-			strcpy(pItem->str, pName);
-			pItem = KDBUS_PART_NEXT(pItem);
-		}
-
-		if(pInterface)
-		{
-			pItem->type = KDBUS_MATCH_BLOOM;
-			pItem->size = KDBUS_PART_HEADER_SIZE + bloom_size;
-			strncpy(pItem->data, pInterface, bloom_size);
-		}
-	}
-
-	if(ioctl(fd, KDBUS_CMD_MATCH_ADD, pCmd_match))
-	{
-		if(error)
-			dbus_set_error(error,_dbus_error_from_errno (errno), "error adding match: %s", _dbus_strerror (errno));
-		_dbus_verbose("Failed adding match bus rule %s,\nerror: %d, %m\n", rule, errno);
-	}
-	else
-		_dbus_verbose("Added match bus rule %s\n", rule);
-
-out:
-	if(pName)
-		free(pName);
-	if(pInterface)
-		free(pInterface);
-}
-
-/**
- * Opposing to dbus, in kdbus removes all match rules with given
- * cookie, which now is equal to uniqe id.
- *
- * In kdbus this function will not block
- *
- * @param connection connection to the message bus
- * @param error location to store any errors - may be NULL
- */
-void dbus_bus_remove_match_kdbus (DBusConnection *connection, DBusError *error)
-{
-	struct kdbus_cmd_match __attribute__ ((__aligned__(8))) cmd;
-	int fd;
-
-	dbus_connection_get_socket(connection, &fd);
-	cmd.cookie = strtoull(dbus_bus_get_unique_name(connection), NULL , 10);
-	cmd.id = cmd.cookie;
-	cmd.size = sizeof(struct kdbus_cmd_match);
-
-	if(ioctl(fd, KDBUS_CMD_MATCH_ADD, &cmd))
-	{
-		if(error)
-			dbus_set_error(error,_dbus_error_from_errno (errno), "error removing match: %s", _dbus_strerror (errno));
-		_dbus_verbose("Failed removing match rule; error: %d, %m\n", errno);
-	}
-	else
-		_dbus_verbose("Match rule removed correctly.\n");
 }

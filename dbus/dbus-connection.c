@@ -335,8 +335,6 @@ struct DBusConnection
 #if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   int generation; /**< _dbus_current_generation that should correspond to this connection */
 #endif 
-  unsigned int is_kdbus : 1; /* Samsung change for kdbus: sometimes it's needed to check do we use kdbus*/
-  char* sender; /* Samsung change for kdbus: sender has to be added to message by libdbus because there is no daemon to do this*/
 };
 
 static DBusDispatchStatus _dbus_connection_get_dispatch_status_unlocked      (DBusConnection     *connection);
@@ -1260,7 +1258,6 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
   DBusMessage *disconnect_message;
   DBusCounter *outgoing_counter;
   DBusObjectTree *objects;
-  const char* address;
   
   watch_list = NULL;
   connection = NULL;
@@ -1351,15 +1348,7 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
   connection->route_peer_messages = FALSE;
   connection->disconnected_message_arrived = FALSE;
   connection->disconnected_message_processed = FALSE;
-  connection->is_kdbus = FALSE;
 
-  address = _dbus_transport_get_address (connection->transport);
-  if(address)
-  {
-	  if(address == strstr(address, "kdbus:path="))
-		  connection->is_kdbus = TRUE;
-  }
-  
 #if defined(DBUS_ENABLE_CHECKS) || defined(DBUS_ENABLE_ASSERT)
   connection->generation = _dbus_current_generation;
 #endif
@@ -2003,16 +1992,6 @@ _dbus_connection_preallocate_send_unlocked (DBusConnection *connection)
   return NULL;
 }
 
-void dbus_connection_set_sender(DBusConnection *connection, char *value)
-{
-  connection->sender = value;
-}
-
-char* dbus_connection_get_sender(DBusConnection *connection)
-{
-  return connection->sender;
-}
-
 /* Called with lock held, does not update dispatch status */
 static void
 _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *connection,
@@ -2073,9 +2052,6 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
   _dbus_verbose ("Message %p serial is %u\n",
                  message, dbus_message_get_serial (message));
   
-  if(dbus_connection_is_kdbus(connection))
-	  dbus_message_set_sender(message, dbus_connection_get_sender(connection));
-
   dbus_message_lock (message);
 
   /* Now we need to run an iteration to hopefully just write the messages
@@ -3008,7 +2984,7 @@ dbus_connection_get_is_authenticated (DBusConnection *connection)
 /**
  * Sets authenticated status for connection. Needed for kdbus, where authentication is
  * made in different manner.
- *
+ * LOCK commented out because called with lock already set
  * @param connection the connection
  */
 dbus_bool_t
@@ -3016,9 +2992,9 @@ dbus_connection_set_is_authenticated (DBusConnection *connection)
 {
   _dbus_return_val_if_fail (connection != NULL, FALSE);
 
-  CONNECTION_LOCK (connection);
+//  CONNECTION_LOCK (connection);
   connection->transport->authenticated = TRUE;
-  CONNECTION_UNLOCK (connection);
+//  CONNECTION_UNLOCK (connection);
 
   return TRUE;
 }
@@ -6341,11 +6317,6 @@ dbus_connection_get_transport(DBusConnection *connection)
 	_dbus_return_val_if_fail (connection != NULL, NULL);
 
 	return connection->transport;
-}
-
-dbus_bool_t dbus_connection_is_kdbus(DBusConnection *connection)
-{
-	return (dbus_bool_t) connection->is_kdbus;
 }
 
 /** @} */

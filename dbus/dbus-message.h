@@ -267,6 +267,9 @@ DBUS_EXPORT
 void dbus_message_lock    (DBusMessage  *message);
 
 DBUS_EXPORT
+void dbus_message_unlock  (DBusMessage  *message);
+
+DBUS_EXPORT
 dbus_bool_t  dbus_set_error_from_message  (DBusError    *error,
                                            DBusMessage  *message);
 
