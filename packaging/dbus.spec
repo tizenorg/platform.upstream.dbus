@@ -156,6 +156,13 @@ rm -rf %{buildroot}/%{_bindir}/dbus-launch
 %{_unitdir}/multi-user.target.wants/dbus.service
 %dir %{_unitdir}/sockets.target.wants
 %{_unitdir}/sockets.target.wants/dbus.socket
+%dir %{_sysconfdir}/dbus-1
+%dir %{_sysconfdir}/dbus-1/session.d
+%dir %{_sysconfdir}/dbus-1/system.d
+%dir %{_datadir}/dbus-1
+%dir %{_datadir}/dbus-1/interfaces
+%dir %{_datadir}/dbus-1/services
+%dir %{_datadir}/dbus-1/system-services
 
 %files devel-doc
 %defattr(-,root,root)
