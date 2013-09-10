@@ -446,7 +446,7 @@ process_config_first_time_only (BusContext       *context,
     	  if(bus_address == NULL)
     	  	  goto failed;
 
-    	  server = fake_server(bus_address);
+    	  server = empty_server_init(bus_address);
     	  if(server == NULL)
     	  {
     		  free(bus_address);
@@ -461,9 +461,6 @@ process_config_first_time_only (BusContext       *context,
 
     	  context->myConnection = daemon_as_client(type, bus_address, error);
     	  if(context->myConnection == NULL)
-    		  goto failed;
-
-    	  if(!setup_connection(context, error))
     		  goto failed;
       }
       else
@@ -973,6 +970,18 @@ bus_context_new (const DBusString *config_file,
     }
 
   dbus_server_free_data_slot (&server_data_slot);
+
+  if(context->myConnection)
+  {
+	  DBusString unique_name;
+
+	  bus_connections_setup_connection(context->connections, context->myConnection);
+	  _dbus_string_init_const(&unique_name, ":1.1");
+	  if(!bus_connection_complete(context->myConnection, &unique_name, error))
+	  {
+		  _dbus_verbose ("bus connection complete failed\n");
+	  }
+  }
 
   return context;
 

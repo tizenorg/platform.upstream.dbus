@@ -17,9 +17,7 @@
 #include <dbus/dbus-server.h>
 
 char* make_kdbus_bus(DBusBusType type, DBusError *error);
-DBusServer* fake_server(char* address);
+DBusServer* empty_server_init(char* address);
 DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *error);
-dbus_bool_t setup_connection(BusContext* context, DBusError* error);
-
 
 #endif /* KDBUS_H_ */

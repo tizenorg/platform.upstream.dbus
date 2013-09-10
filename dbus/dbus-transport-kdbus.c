@@ -1137,13 +1137,13 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 		{
 			pCmd = realloc(pCmd, cmd_size);  //prepare memory
 			if(pCmd == NULL)
-				return FALSE;
+				return -1;
 			goto again;						//and try again
 		}
 		else
 		{
 			DBusMessage *reply;
-			DBusMessageIter args;
+			DBusMessageIter iter, sub;
 			struct kdbus_cmd_name* pCmd_name;
 			char* pName;
 
@@ -1151,28 +1151,35 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 			if(reply == NULL)
 				goto out;
 			dbus_message_set_sender(reply, DBUS_SERVICE_DBUS);
-			dbus_message_iter_init_append(reply, &args);
-
+			dbus_message_iter_init_append(reply, &iter);
+			if (!dbus_message_iter_open_container (&iter, DBUS_TYPE_ARRAY, DBUS_TYPE_STRING_AS_STRING, &sub))
+			{
+				dbus_message_unref(reply);
+				goto out;
+			}
 			for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
 			{
 				pName = pCmd_name->name;
-				if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &pName))
+				if (!dbus_message_iter_append_basic(&sub, DBUS_TYPE_STRING, &pName))
 				{
 					dbus_message_unref(reply);
 					goto out;
 				}
 			}
 
-			if(add_message_to_received(reply, transport->connection))
+			if (!dbus_message_iter_close_container (&iter, &sub))
 			{
-				free(pCmd);
-				return TRUE;
+				dbus_message_unref (reply);
+				goto out;
 			}
+
+			if(add_message_to_received(reply, transport->connection))
+				ret_value = 0;
 		}
 out:
 		if(pCmd)
 			free(pCmd);
-		return FALSE;
+		return ret_value;
 	}
 	else if(!strcmp(dbus_message_get_member(message), "GetId"))
 	{
@@ -1182,7 +1189,6 @@ out:
 		MD5_CTX md5;
 		DBusString binary, encoded;
 
-		ret_value = FALSE;
 		path = &transport->address[11]; //start of kdbus bus path
 		if(stat(path, &stats) < -1)
 		{
@@ -1230,7 +1236,6 @@ out:
 		{
 			DBusMessage *reply;
 
-			ret_value = FALSE;
 			reply = dbus_message_new_method_return(message);
 			if(reply != NULL)
 			{
@@ -1238,12 +1243,13 @@ out:
 				if (!dbus_message_append_args (reply, DBUS_TYPE_ARRAY, DBUS_TYPE_BYTE, &info.sec_label, info.sec_label_len, DBUS_TYPE_INVALID))
 					dbus_message_unref(reply);
 				else if(add_message_to_received(reply, transport->connection))
-					ret_value = TRUE;
+					ret_value = 0;
 			}
 		}
 	}
 	else
-		return reply_with_error(DBUS_ERROR_UNKNOWN_METHOD, NULL, (char*)dbus_message_get_member(message), message, transport->connection);
+		return 1;  //send to daemon
+//		return reply_with_error(DBUS_ERROR_UNKNOWN_METHOD, NULL, (char*)dbus_message_get_member(message), message, transport->connection);
 /*	else if(!strcmp(dbus_message_get_member(message), "ListActivatableNames"))  //todo
 	{
 
