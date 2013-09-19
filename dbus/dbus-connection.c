@@ -3238,7 +3238,7 @@ dbus_connection_send_preallocated (DBusConnection       *connection,
     }
 
 #endif
-
+  _dbus_verbose ("Reply sender: %s, destination: %s\n", dbus_message_get_sender(message), dbus_message_get_destination(message));  //todo kdbus temp addon
   _dbus_connection_send_preallocated_and_unlock (connection,
 						 preallocated,
 						 message, client_serial);

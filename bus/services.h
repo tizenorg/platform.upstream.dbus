@@ -57,6 +57,12 @@ dbus_bool_t  bus_registry_acquire_service (BusRegistry                 *registry
                                            dbus_uint32_t               *result,
                                            BusTransaction              *transaction,
                                            DBusError                   *error);
+dbus_bool_t bus_registry_acquire_kdbus_service (BusRegistry      *registry,
+                              	  	  	  DBusConnection   *connection,
+                              	  	  	  DBusMessage *message,
+                              	  	  	  dbus_uint32_t    *result,
+                              	  	  	  BusTransaction   *transaction,
+                              	  	  	  DBusError        *error);
 dbus_bool_t  bus_registry_release_service (BusRegistry                 *registry,
                                            DBusConnection              *connection,
                                            const DBusString            *service_name,

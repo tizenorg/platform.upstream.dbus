@@ -251,7 +251,8 @@ bus_dispatch (DBusConnection *connection,
     }
 
   /* Assign a sender to the message */
-  if (bus_connection_is_active (connection))
+  if(!bus_context_is_kdbus(context))  /* todo kdbus inclusion - if not kdbus daemon */
+    if (bus_connection_is_active (connection))
     {
       sender = bus_connection_get_name (connection);
       _dbus_assert (sender != NULL);

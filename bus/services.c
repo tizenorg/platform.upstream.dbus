@@ -27,6 +27,10 @@
 #include <dbus/dbus-list.h>
 #include <dbus/dbus-mempool.h>
 #include <dbus/dbus-marshal-validate.h>
+#include <linux/types.h>
+#include <errno.h>
+#include <stdlib.h>
+
 
 #include "driver.h"
 #include "services.h"
@@ -36,6 +40,7 @@
 #include "policy.h"
 #include "bus.h"
 #include "selinux.h"
+#include "kdbus-d.h"
 
 struct BusService
 {
@@ -368,7 +373,7 @@ bus_registry_list_services (BusRegistry *registry,
   
  error:
   for (j = 0; j < i; j++)
-    dbus_free (retval[i]);
+    dbus_free (retval[j]);
   dbus_free (retval);
 
   return FALSE;
@@ -437,153 +442,263 @@ bus_registry_acquire_service (BusRegistry      *registry,
    * in bus_connection_selinux_allows_acquire_service()
    */
   sid = bus_selinux_id_table_lookup (registry->service_sid_table,
-                                     service_name);
+									 service_name);
 
   if (!bus_selinux_allows_acquire_service (connection, sid,
 					   _dbus_string_get_const_data (service_name), error))
-    {
+	{
 
-      if (dbus_error_is_set (error) &&
+	  if (dbus_error_is_set (error) &&
 	  dbus_error_has_name (error, DBUS_ERROR_NO_MEMORY))
 	{
 	  goto out;
 	}
 
-      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-                      "Connection \"%s\" is not allowed to own the service \"%s\" due "
-                      "to SELinux policy",
-                      bus_connection_is_active (connection) ?
-                      bus_connection_get_name (connection) :
-                      "(inactive)",
-                      _dbus_string_get_const_data (service_name));
-      goto out;
-    }
-  
+	  dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+					  "Connection \"%s\" is not allowed to own the service \"%s\" due "
+					  "to SELinux policy",
+					  bus_connection_is_active (connection) ?
+					  bus_connection_get_name (connection) :
+					  "(inactive)",
+					  _dbus_string_get_const_data (service_name));
+	  goto out;
+	}
+
   if (!bus_client_policy_check_can_own (policy, service_name))
-    {
-      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-                      "Connection \"%s\" is not allowed to own the service \"%s\" due "
-                      "to security policies in the configuration file",
-                      bus_connection_is_active (connection) ?
-                      bus_connection_get_name (connection) :
-                      "(inactive)",
-                      _dbus_string_get_const_data (service_name));
-      goto out;
-    }
+	{
+	  dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+					  "Connection \"%s\" is not allowed to own the service \"%s\" due "
+					  "to security policies in the configuration file",
+					  bus_connection_is_active (connection) ?
+					  bus_connection_get_name (connection) :
+					  "(inactive)",
+					  _dbus_string_get_const_data (service_name));
+	  goto out;
+	}
 
   if (bus_connection_get_n_services_owned (connection) >=
-      bus_context_get_max_services_per_connection (registry->context))
-    {
-      dbus_set_error (error, DBUS_ERROR_LIMITS_EXCEEDED,
-                      "Connection \"%s\" is not allowed to own more services "
-                      "(increase limits in configuration file if required)",
-                      bus_connection_is_active (connection) ?
-                      bus_connection_get_name (connection) :
-                      "(inactive)");
-      goto out;
-    }
-  
+	  bus_context_get_max_services_per_connection (registry->context))
+	{
+	  dbus_set_error (error, DBUS_ERROR_LIMITS_EXCEEDED,
+					  "Connection \"%s\" is not allowed to own more services "
+					  "(increase limits in configuration file if required)",
+					  bus_connection_is_active (connection) ?
+					  bus_connection_get_name (connection) :
+					  "(inactive)");
+	  goto out;
+	}
+
   service = bus_registry_lookup (registry, service_name);
 
   if (service != NULL)
-    {
-      primary_owner = bus_service_get_primary_owner (service);
-      if (primary_owner != NULL)
-        old_owner_conn = primary_owner->conn;
-      else
-        old_owner_conn = NULL;
-    }
+	{
+	  primary_owner = bus_service_get_primary_owner (service);
+	  if (primary_owner != NULL)
+		old_owner_conn = primary_owner->conn;
+	  else
+		old_owner_conn = NULL;
+	}
   else
-    old_owner_conn = NULL;
-      
+	old_owner_conn = NULL;
+
   if (service == NULL)
-    {
-      service = bus_registry_ensure (registry,
-                                     service_name, connection, flags,
-                                     transaction, error);
-      if (service == NULL)
-        goto out;
-    }
+	{
+	  service = bus_registry_ensure (registry,
+									 service_name, connection, flags,
+									 transaction, error);
+	  if (service == NULL)
+		goto out;
+	}
 
   primary_owner = bus_service_get_primary_owner (service);
   if (primary_owner == NULL)
-    goto out;
+	goto out;
 
   if (old_owner_conn == NULL)
-    {
-      _dbus_assert (primary_owner->conn == connection);
+	{
+	  _dbus_assert (primary_owner->conn == connection);
 
-      *result = DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;      
-    }
+	  *result = DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
+	}
   else if (old_owner_conn == connection)
-    {
-      bus_owner_set_flags (primary_owner, flags);
-      *result = DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER;
-    }
+	{
+	  bus_owner_set_flags (primary_owner, flags);
+	  *result = DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER;
+	}
   else if (((flags & DBUS_NAME_FLAG_DO_NOT_QUEUE) &&
-           !(bus_service_get_allow_replacement (service))) ||
+		   !(bus_service_get_allow_replacement (service))) ||
 	   ((flags & DBUS_NAME_FLAG_DO_NOT_QUEUE) &&
-           !(flags & DBUS_NAME_FLAG_REPLACE_EXISTING))) 
-    {
-      DBusList *link;
-      BusOwner *temp_owner;
-    /* Since we can't be queued if we are already in the queue
-       remove us */
+		   !(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)))
+	{
+	  DBusList *link;
+	  BusOwner *temp_owner;
+	/* Since we can't be queued if we are already in the queue
+	   remove us */
 
-      link = _bus_service_find_owner_link (service, connection);
-      if (link != NULL)
-        {
-          _dbus_list_unlink (&service->owners, link);
-          temp_owner = (BusOwner *)link->data;
-          bus_owner_unref (temp_owner); 
-          _dbus_list_free_link (link);
-        }
-      
-      *result = DBUS_REQUEST_NAME_REPLY_EXISTS;
-    }
+	  link = _bus_service_find_owner_link (service, connection);
+	  if (link != NULL)
+		{
+		  _dbus_list_unlink (&service->owners, link);
+		  temp_owner = (BusOwner *)link->data;
+		  bus_owner_unref (temp_owner);
+		  _dbus_list_free_link (link);
+		}
+
+	  *result = DBUS_REQUEST_NAME_REPLY_EXISTS;
+	}
   else if (!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE) &&
-           (!(flags & DBUS_NAME_FLAG_REPLACE_EXISTING) ||
-	    !(bus_service_get_allow_replacement (service))))
-    {
-      /* Queue the connection */
-      if (!bus_service_add_owner (service, connection, 
-                                  flags,
-                                  transaction, error))
-        goto out;
-      
-      *result = DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
-    }
+		   (!(flags & DBUS_NAME_FLAG_REPLACE_EXISTING) ||
+		!(bus_service_get_allow_replacement (service))))
+	{
+	  /* Queue the connection */
+	  if (!bus_service_add_owner (service, connection,
+								  flags,
+								  transaction, error))
+		goto out;
+
+	  *result = DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
+	}
   else
+	{
+	  /* Replace the current owner */
+
+	  /* We enqueue the new owner and remove the first one because
+	   * that will cause NameAcquired and NameLost messages to
+	   * be sent.
+	   */
+
+	  if (!bus_service_add_owner (service, connection,
+								  flags,
+								  transaction, error))
+		goto out;
+
+	  if (primary_owner->do_not_queue)
+		{
+		  if (!bus_service_remove_owner (service, old_owner_conn,
+										 transaction, error))
+			goto out;
+		}
+	  else
+		{
+		  if (!bus_service_swap_owner (service, old_owner_conn,
+									   transaction, error))
+			goto out;
+		}
+
+
+	  _dbus_assert (connection == bus_service_get_primary_owner (service)->conn);
+	  *result = DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
+	}
+
+  activation = bus_context_get_activation (registry->context);
+  retval = bus_activation_send_pending_auto_activation_messages (activation,
+								 service,
+								 transaction,
+								 error);
+
+ out:
+  return retval;
+}
+
+dbus_bool_t
+bus_registry_acquire_kdbus_service (BusRegistry      *registry,
+                              DBusConnection   *connection,
+                              DBusMessage *message,
+                              dbus_uint32_t    *result,
+                              BusTransaction   *transaction,
+                              DBusError        *error)
+{
+  dbus_bool_t retval;
+  BusService *service;
+  BusActivation  *activation;
+
+  DBusString service_name_real;
+  const DBusString *service_name = &service_name_real;
+  char* name;
+  dbus_uint32_t flags;
+  __u64 sender_id;
+
+  if (!dbus_message_get_args (message, error,
+                              DBUS_TYPE_STRING, &name,
+                              DBUS_TYPE_UINT32, &flags,
+                              DBUS_TYPE_INVALID))
+    return FALSE;
+
+  retval = FALSE;
+
+  _dbus_string_init_const (&service_name_real, name);
+
+  if (!_dbus_validate_bus_name (service_name, 0,
+                                _dbus_string_get_length (service_name)))
     {
-      /* Replace the current owner */
+      dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
+                      "Requested bus name \"%s\" is not valid",
+                      _dbus_string_get_const_data (service_name));
 
-      /* We enqueue the new owner and remove the first one because
-       * that will cause NameAcquired and NameLost messages to
-       * be sent.
-       */
-      
-      if (!bus_service_add_owner (service, connection,
-                                  flags,
-                                  transaction, error))
-        goto out;
+      _dbus_verbose ("Attempt to acquire invalid service name\n");
 
-      if (primary_owner->do_not_queue)
-        {
-          if (!bus_service_remove_owner (service, old_owner_conn,
-                                         transaction, error))
-            goto out;
-        }
-      else
-        {
-          if (!bus_service_swap_owner (service, old_owner_conn,
-                                       transaction, error))
-            goto out;
-        }
-        
-    
-      _dbus_assert (connection == bus_service_get_primary_owner (service)->conn);
-      *result = DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
+      goto out;
     }
+
+  if (_dbus_string_get_byte (service_name, 0) == ':')
+    {
+      /* Not allowed; only base services can start with ':' */
+      dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
+                      "Cannot acquire a service starting with ':' such as \"%s\"",
+                      _dbus_string_get_const_data (service_name));
+
+      _dbus_verbose ("Attempt to acquire invalid base service name \"%s\"",
+                     _dbus_string_get_const_data (service_name));
+
+      goto out;
+    }
+
+  if (_dbus_string_equal_c_str (service_name, DBUS_SERVICE_DBUS))
+    {
+      dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
+                      "Connection \"%s\" is not allowed to own the service \"%s\"because "
+                      "it is reserved for D-Bus' use only",
+                      bus_connection_is_active (connection) ?
+                      bus_connection_get_name (connection) :
+                      "(inactive)",
+                      DBUS_SERVICE_DBUS);
+      goto out;
+    }
+
+	service = bus_registry_lookup (registry, service_name);
+	if (service == NULL)
+	{
+		service = bus_registry_ensure (registry, service_name, connection, flags,
+									 transaction, error);  //todo need correction because it will send NameOwnerChangedSignal
+		if (service == NULL)
+		  goto out;
+
+		if(!kdbus_register_policy(service_name, connection))
+		{
+			dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+						  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
+						  _dbus_string_get_const_data (service_name));
+			goto out;
+		}
+	}
+
+	sender_id = sender_name_to_id(dbus_message_get_sender(message), error);
+	if(dbus_error_is_set(error))
+		return FALSE;
+
+	*result = kdbus_request_name(connection, service_name, flags, sender_id);
+	if(*result == -EPERM)
+	{
+		dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+					  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
+					  _dbus_string_get_const_data (service_name));
+		goto out;
+	}
+	else if(*result < 0)
+	{
+		dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
+		goto out;
+	}
 
   activation = bus_context_get_activation (registry->context);
   retval = bus_activation_send_pending_auto_activation_messages (activation,
@@ -646,25 +761,38 @@ bus_registry_release_service (BusRegistry      *registry,
       goto out;
     }
 
-  service = bus_registry_lookup (registry, service_name);
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  {
+	__u64 sender_id;
 
-  if (service == NULL)
-    {
-      *result = DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
-    }
-  else if (!bus_service_has_owner (service, connection))
-    {
-      *result = DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
-    }
+	sender_id = sender_name_to_id(dbus_message_get_sender((DBusMessage*)registry), error);
+	if(dbus_error_is_set(error))
+		return FALSE;
+
+	*result = kdbus_release_name(connection, service_name, sender_id);
+  }
   else
-    {
-      if (!bus_service_remove_owner (service, connection,
-                                     transaction, error))
-        goto out;
+  {
+	  service = bus_registry_lookup (registry, service_name);
 
-      _dbus_assert (!bus_service_has_owner (service, connection));
-      *result = DBUS_RELEASE_NAME_REPLY_RELEASED;
-    }
+	  if (service == NULL)
+		{
+		  *result = DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
+		}
+	  else if (!bus_service_has_owner (service, connection))
+		{
+		  *result = DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
+		}
+	  else
+		{
+		  if (!bus_service_remove_owner (service, connection,
+										 transaction, error))
+			goto out;
+
+		  _dbus_assert (!bus_service_has_owner (service, connection));
+		  *result = DBUS_RELEASE_NAME_REPLY_RELEASED;
+		}
+  }
 
   retval = TRUE;
 

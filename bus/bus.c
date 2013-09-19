@@ -70,8 +70,7 @@ struct BusContext
   unsigned int keep_umask : 1;
   unsigned int allow_anonymous : 1;
   unsigned int systemd_activation : 1;
-  unsigned int is_kdbus : 1;
-  DBusConnection *myConnection;
+  DBusConnection *myKdbusConnection;  //todo maybe can be rafctored and removed
 };
 
 static dbus_int32_t server_data_slot = -1;
@@ -433,8 +432,6 @@ process_config_first_time_only (BusContext       *context,
     	  DBusServer* server;
     	  char* bus_address;
 
-    	  context->is_kdbus = TRUE;
-
     	  if(!strcmp (context->type, "system"))
     		  type = DBUS_BUS_SYSTEM;
     	  else if(!strcmp (context->type, "session"))
@@ -459,8 +456,8 @@ process_config_first_time_only (BusContext       *context,
     		  goto oom;
     	  }
 
-    	  context->myConnection = daemon_as_client(type, bus_address, error);
-    	  if(context->myConnection == NULL)
+    	  context->myKdbusConnection = daemon_as_client(type, bus_address, error);
+    	  if(context->myKdbusConnection == NULL)
     		  goto failed;
       }
       else
@@ -773,6 +770,7 @@ bus_context_new (const DBusString *config_file,
       goto failed;
     }
   context->refcount = 1;
+  context->myKdbusConnection = NULL;
 
   _dbus_generate_uuid (&context->uuid);
 
@@ -971,16 +969,20 @@ bus_context_new (const DBusString *config_file,
 
   dbus_server_free_data_slot (&server_data_slot);
 
-  if(context->myConnection)
+  if(context->myKdbusConnection)
   {
 	  DBusString unique_name;
 
-	  bus_connections_setup_connection(context->connections, context->myConnection);
-	  _dbus_string_init_const(&unique_name, ":1.1");
-	  if(!bus_connection_complete(context->myConnection, &unique_name, error))
+	  bus_connections_setup_connection(context->connections, context->myKdbusConnection);
+	  dbus_connection_set_route_peer_messages (context->myKdbusConnection, FALSE);
+	  _dbus_string_init_const(&unique_name, ":1.1"); //dbus_bus_get_unique_name(context->myConnection)); this is without :1.
+	  if(!bus_connection_complete(context->myKdbusConnection, &unique_name, error))
 	  {
-		  _dbus_verbose ("bus connection complete failed\n");
+		  _dbus_verbose ("bus connection complete failed for kdbus\n");
+		  _dbus_string_free(&unique_name);
+		  goto failed;
 	  }
+	  _dbus_string_free(&unique_name);
   }
 
   return context;
@@ -1232,7 +1234,7 @@ bus_context_get_loop (BusContext *context)
 
 DBusConnection* bus_context_get_myConnection(BusContext *context)
 {
-  return context->myConnection;
+  return context->myKdbusConnection;
 }
 
 dbus_bool_t
@@ -1330,6 +1332,11 @@ int
 bus_context_get_reply_timeout (BusContext *context)
 {
   return context->limits.reply_timeout;
+}
+
+dbus_bool_t bus_context_is_kdbus(BusContext* context)
+{
+	return context->myKdbusConnection != NULL;
 }
 
 void

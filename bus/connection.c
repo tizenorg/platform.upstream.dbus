@@ -2016,7 +2016,8 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
   if (!dbus_message_set_sender (message, DBUS_SERVICE_DBUS))
     return FALSE;
 
-  if (bus_connection_is_active (connection))
+  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction))) /* todo kdbus inclusion*/
+    if (bus_connection_is_active (connection))
     {
       if (!dbus_message_set_destination (message,
                                          bus_connection_get_name (connection)))
