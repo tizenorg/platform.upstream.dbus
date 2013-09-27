@@ -315,7 +315,7 @@ bus_registry_ensure (BusRegistry               *registry,
       BUS_SET_OOM (error);
       return NULL;
     }
-  
+
   return service;
 }
 
@@ -669,7 +669,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	if (service == NULL)
 	{
 		service = bus_registry_ensure (registry, service_name, connection, flags,
-									 transaction, error);  //todo need correction because it will send NameOwnerChangedSignal
+									 transaction, error);  //adds daemon to service owners list - must be removed after right owner is set
 		if (service == NULL)
 		  goto out;
 
@@ -698,6 +698,20 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	{
 		dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
 		goto out;
+	}
+
+	if((*result == DBUS_REQUEST_NAME_REPLY_IN_QUEUE) || (*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER))
+	{
+	    DBusConnection* phantom;
+
+	    phantom = create_phantom_connection(connection, dbus_message_get_sender(message));
+	    if(phantom == NULL)
+	        goto out;
+	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
+	        goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
+	    if(*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
+	        if (!bus_service_remove_owner (service, connection, transaction, error))
+	            goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
 	}
 
   activation = bus_context_get_activation (registry->context);
@@ -928,7 +942,7 @@ add_cancel_ownership_to_transaction (BusTransaction *transaction,
   bus_service_ref (d->service);
   bus_owner_ref (owner);
   dbus_connection_ref (d->owner->conn);
- 
+
   return TRUE;
 }
 

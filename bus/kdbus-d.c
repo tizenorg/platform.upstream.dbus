@@ -8,14 +8,15 @@
  *
  */
 
+#include <dbus/dbus-connection-internal.h>
 #include "kdbus-d.h"
 #include <dbus/kdbus.h>
-#include <dbus/dbus-connection-internal.h>
 #include <dbus/dbus-bus.h>
 #include "dispatch.h"
 #include <dbus/kdbus-common.h>
 #include <dbus/dbus-transport.h>
 #include <dbus/dbus-transport-kdbus.h>
+#include "connection.h"
 
 #include <utils.h>
 #include <stdlib.h>
@@ -283,4 +284,34 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 	}
 
 	return ret;
+}
+
+DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name)
+{
+    DBusConnection *phantom_connection;
+    DBusString name;
+    DBusError error;
+
+    _dbus_string_init_const(&name, unique_name);
+
+    phantom_connection = _dbus_connection_new_for_used_transport (dbus_connection_get_transport(connection));
+    if(phantom_connection == NULL)
+        return FALSE;
+    if(!bus_connections_setup_connection(bus_connection_get_connections(connection), phantom_connection))
+    {
+        /*todo FIXME something should be done to clean up the phantom connection
+         * but we can't use standard disconnect, unref or last_unref because the transport is taken from connection
+         * so we probably should write own function on the basis of _dbus_connection_last_unref
+         */
+        phantom_connection = NULL;
+    }
+    if(!bus_connection_complete(phantom_connection, &name, &error))
+    {
+        /* todo FIXME exactly the same issue as above */
+        phantom_connection = NULL;
+    }
+
+    _dbus_verbose ("Created phantom connection for %s\n", bus_connection_get_name(phantom_connection));
+
+    return phantom_connection;
 }

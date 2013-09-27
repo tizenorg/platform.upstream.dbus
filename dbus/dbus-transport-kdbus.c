@@ -43,6 +43,7 @@
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
 
 #define KDBUS_MSG_DECODE_DEBUG 0
+//#define DBUS_AUTHENTICATION
 
 #define ITER_APPEND_STR(string) \
 if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
@@ -394,7 +395,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 		item = KDBUS_PART_NEXT(item);
 		item->type = KDBUS_MSG_DST_NAME;
 		item->size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
-		strcpy(item->str, name);
+		memcpy(item->str, name, item->size - KDBUS_PART_HEADER_SIZE);
 	}
 	else if (dst_id == KDBUS_DST_ID_BROADCAST)
 	{
@@ -472,7 +473,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 	item = msg->items;
 	item->type = KDBUS_NAME_INFO_ITEM_NAME;
 	item->size = item_size;
-	strcpy(item->str, name);
+	memcpy(item->str, name, strlen(name) + 1);
 
 	again:
 	ret = ioctl(((DBusTransportSocket*)transport)->fd, KDBUS_CMD_NAME_QUERY, msg);
@@ -496,13 +497,12 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 		pInfo->uniqueId = msg->id;
 		pInfo->userId = msg->creds.uid;
 		pInfo->processId = msg->creds.pid;
-
 		item = msg->items;
 		while((uint8_t *)(item) < (uint8_t *)(msg) + msg->size)
 		{
 			if(item->type == KDBUS_NAME_INFO_ITEM_SECLABEL)
 			{
-				pInfo->sec_label_len = item->size - KDBUS_PART_HEADER_SIZE - 1;
+			    pInfo->sec_label_len = item->size - KDBUS_PART_HEADER_SIZE - 1;
 				if(pInfo->sec_label_len != 0)
 				{
 					pInfo->sec_label = malloc(pInfo->sec_label_len);
@@ -511,7 +511,6 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 					else
 						memcpy(pInfo->sec_label, item->data, pInfo->sec_label_len);
 				}
-					
 				break;
 			}
 			item = KDBUS_PART_NEXT(item);
@@ -730,7 +729,7 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
 		{
 			pItem->type = KDBUS_MATCH_SRC_NAME;
 			pItem->size = KDBUS_PART_HEADER_SIZE + name_size + 1;
-			strcpy(pItem->str, pName);
+			memcpy(pItem->str, pName, strlen(pName) + 1);
 			pItem = KDBUS_PART_NEXT(pItem);
 		}
 
@@ -1067,13 +1066,13 @@ out:
 		return ret_value;
 	}
 #endif
-	else if(!strcmp(dbus_message_get_member(message), "GetAdtAuditSessionData"))  //todo to be implemented - now can not be simply passed to daemon
+/*	else if(!strcmp(dbus_message_get_member(message), "GetAdtAuditSessionData"))  //todo to be implemented
 	{
 		char* name = NULL;
 
 		dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
 		return reply_with_error(DBUS_ERROR_ADT_AUDIT_DATA_UNKNOWN, "Could not determine audit session data for '%s'", name, message, transport->connection);
-	}
+	}*/
 #ifdef DBUS_SERVICES_IN_LIB
 	else if(!strcmp(dbus_message_get_member(message), "GetConnectionSELinuxSecurityContext"))
 	{
@@ -1681,7 +1680,7 @@ check_write_watch (DBusTransport *transport)
   _dbus_transport_ref (transport);
 
 #ifdef DBUS_AUTHENTICATION
-  if (_dbus_transport_get_is_authenticated (transport))
+  if (_dbus_transport_try_to_authenticate (transport))
 #endif
     needed = _dbus_connection_has_messages_to_send_unlocked (transport->connection);
 #ifdef DBUS_AUTHENTICATION
@@ -1739,7 +1738,7 @@ check_read_watch (DBusTransport *transport)
   _dbus_transport_ref (transport);
 
 #ifdef DBUS_AUTHENTICATION
-  if (_dbus_transport_get_is_authenticated (transport))
+  if (_dbus_transport_try_to_authenticate (transport))
 #endif
     need_read_watch =
       (_dbus_counter_get_size_value (transport->live_messages) < transport->max_live_messages_size) &&
@@ -1800,12 +1799,13 @@ read_data_into_auth (DBusTransport *transport,
   DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
   DBusString *buffer;
   int bytes_read;
+  int *fds, n_fds;
 
   *oom = FALSE;
 
   _dbus_auth_get_buffer (transport->auth, &buffer);
 
-  bytes_read = kdbus_read_message(socket_transport, buffer);
+  bytes_read = kdbus_read_message(socket_transport, buffer, fds, &n_fds);
 
   _dbus_auth_return_buffer (transport->auth, buffer,
                             bytes_read > 0 ? bytes_read : 0);
@@ -1845,11 +1845,38 @@ read_data_into_auth (DBusTransport *transport,
     }
 }
 
+static int kdbus_send_auth (DBusTransport *transport,  const DBusString *buffer)
+{
+	int len;
+	int bytes_written = -1;
+	struct kdbus_msg *msg;
+	struct kdbus_item *item;
+
+	len = _dbus_string_get_length (buffer);
+//	data = _dbus_string_get_const_data_len (buffer, 0, len);
+
+	msg = kdbus_init_msg(NULL, 1, 0, FALSE, 0, (DBusTransportSocket*)transport);
+	item = msg->items;
+	MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data_len (buffer, 0, len), len);
+
+    again:
+    if(ioctl(((DBusTransportSocket*)transport)->fd, KDBUS_CMD_MSG_SEND, msg))
+    {
+        if(errno == EINTR)
+            goto again;
+        _dbus_verbose ("Error writing auth: %d, %m\n", errno);
+    }
+    else
+        bytes_written = len;
+
+	return bytes_written;
+}
+
 /* Return value is whether we successfully wrote any bytes */
 static dbus_bool_t
 write_data_from_auth (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+//  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
   int bytes_written;
   const DBusString *buffer;
 
@@ -1857,9 +1884,7 @@ write_data_from_auth (DBusTransport *transport)
                                      &buffer))
     return FALSE;
 
-  bytes_written = _dbus_write_socket (socket_transport->fd,
-                                      buffer,
-                                      0, _dbus_string_get_length (buffer));
+  bytes_written = kdbus_send_auth (transport, buffer);
 
   if (bytes_written > 0)
     {
@@ -1955,7 +1980,7 @@ do_authentication (DBusTransport *transport,
 
   oom = FALSE;
 
-  orig_auth_state = _dbus_transport_get_is_authenticated (transport);
+  orig_auth_state = _dbus_transport_try_to_authenticate (transport);
 
   /* This is essential to avoid the check_write_watch() at the end,
    * we don't want to add a write watch in do_iteration before
@@ -1970,7 +1995,7 @@ do_authentication (DBusTransport *transport,
 
   _dbus_transport_ref (transport);
 
-  while (!_dbus_transport_get_is_authenticated (transport) &&
+   while (!_dbus_transport_try_to_authenticate (transport) &&
          _dbus_transport_get_is_connected (transport))
     {
       if (!exchange_credentials (transport, do_reading, do_writing))
@@ -2027,7 +2052,7 @@ do_authentication (DBusTransport *transport,
 
  out:
   if (auth_completed)
-    *auth_completed = (orig_auth_state != _dbus_transport_get_is_authenticated (transport));
+    *auth_completed = (orig_auth_state != _dbus_transport_try_to_authenticate (transport));
 
   check_read_watch (transport);
   check_write_watch (transport);
@@ -2049,7 +2074,7 @@ do_writing (DBusTransport *transport)
 
 #ifdef DBUS_AUTHENTICATION
 	/* No messages without authentication! */
-	if (!_dbus_transport_get_is_authenticated (transport))
+	if (!_dbus_transport_try_to_authenticate (transport))
     {
 		_dbus_verbose ("Not authenticated, not writing anything\n");
 		return TRUE;
@@ -2205,7 +2230,7 @@ do_reading (DBusTransport *transport)
 
 #ifdef DBUS_AUTHENTICATION
   /* No messages without authentication! */
-  if (!_dbus_transport_get_is_authenticated (transport))
+  if (!_dbus_transport_try_to_authenticate (transport))
     return TRUE;
 #endif
 
@@ -2510,7 +2535,7 @@ kdbus_do_iteration (DBusTransport *transport,
    poll_fd.fd = socket_transport->fd;
    poll_fd.events = 0;
 
-   if (_dbus_transport_peek_is_authenticated (transport))
+   if (_dbus_transport_try_to_authenticate (transport))
    {
       /* This is kind of a hack; if we have stuff to write, then try
        * to avoid the poll. This is probably about a 5% speedup on an

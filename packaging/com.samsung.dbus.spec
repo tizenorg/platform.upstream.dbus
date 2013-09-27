@@ -32,7 +32,8 @@ else
 	sed -i 's/\/\* #undef HAVE_ABSTRACT_SOCKETS \*\//#define HAVE_ABSTRACT_SOCKETS 1/' config.h
 fi
 
-make %{?jobs:-j%jobs}
+#make %{?jobs:-j%jobs}
+make -j8
 
 %install
 

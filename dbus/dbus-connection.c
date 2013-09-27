@@ -1246,9 +1246,9 @@ _dbus_connection_do_iteration_unlocked (DBusConnection *connection,
  *
  * @param transport the transport.
  * @returns the new connection, or #NULL on failure.
- */
-DBusConnection*
-_dbus_connection_new_for_transport (DBusTransport *transport)
+*/
+static DBusConnection*
+_dbus_connection_new_for_transport_internal (DBusTransport *transport, dbus_bool_t exists)
 {
   DBusConnection *connection;
   DBusWatchList *watch_list;
@@ -1278,7 +1278,7 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
 
   pending_replies =
     _dbus_hash_table_new (DBUS_HASH_INT,
-			  NULL,
+              NULL,
                           (DBusFreeFunction)free_pending_call_on_hash_removal);
   if (pending_replies == NULL)
     goto error;
@@ -1359,18 +1359,21 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
 
   connection->disconnect_message_link = disconnect_link;
 
-  CONNECTION_LOCK (connection);
-  
-  if (!_dbus_transport_set_connection (transport, connection))
-    {
+  if(!exists)
+  {
+      CONNECTION_LOCK (connection);
+
+      if (!_dbus_transport_set_connection (transport, connection))
+        {
+          CONNECTION_UNLOCK (connection);
+
+          goto error;
+        }
+
+      _dbus_transport_ref (transport);
+
       CONNECTION_UNLOCK (connection);
-
-      goto error;
-    }
-
-  _dbus_transport_ref (transport);
-
-  CONNECTION_UNLOCK (connection);
+  }
 
   _dbus_connection_trace_ref (connection, 0, 1, "new_for_transport");
   return connection;
@@ -1408,6 +1411,27 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
     _dbus_object_tree_unref (objects);
   
   return NULL;
+}
+
+/**
+ * Creates a new connection for the given transport.  A transport
+ * represents a message stream that uses some concrete mechanism, such
+ * as UNIX domain sockets. May return #NULL if insufficient
+ * memory exists to create the connection.
+ *
+ * @param transport the transport.
+ * @returns the new connection, or #NULL on failure.
+ */
+DBusConnection*
+_dbus_connection_new_for_transport (DBusTransport *transport)
+{
+    return _dbus_connection_new_for_transport_internal(transport, FALSE);
+}
+
+DBusConnection*
+_dbus_connection_new_for_used_transport (DBusTransport *transport)
+{
+    return _dbus_connection_new_for_transport_internal(transport, TRUE);
 }
 
 /**

@@ -347,9 +347,9 @@ static const struct {
                                     DBusTransport   **transport_p,
                                     DBusError        *error);
 } open_funcs[] = {
+  { _dbus_transport_open_kdbus },
   { _dbus_transport_open_socket },
   { _dbus_transport_open_platform_specific },
-  { _dbus_transport_open_kdbus },
   { _dbus_transport_open_autolaunch }
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
   , { _dbus_transport_open_debug_pipe }
