@@ -17,6 +17,7 @@
 #include <dbus/dbus-transport.h>
 #include <dbus/dbus-transport-kdbus.h>
 #include "connection.h"
+#include "activation.h"
 
 #include <utils.h>
 #include <stdlib.h>
@@ -102,7 +103,7 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
 
 	dbus_bus_set_bus_connection_address(type, address);
 
-	connection = dbus_bus_get(type, error);
+	connection = dbus_bus_get(type, error);  /*todo possibly could be optimised by using lower functions*/
 	if(connection == NULL)
 		return NULL;
 
@@ -113,9 +114,7 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
 	if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
 		goto failed;
 
-//	dbus_bus_add_match(connection, "type='signal', member='NameAcquired'", error);  //not needed if request name ioctled  by daemon not libdbus
-//	dbus_bus_add_match(connection, "type='signal', member='NameLost'", error);  //todo dispatch and digest this  or ioctl about name where daemon checks name presence
-	if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "type='signal', member='NameLost'"))
+	if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "type='signal', member='NameLost'"))  //todo handle tis in dispatch
 	{
 	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
 	      return FALSE;
@@ -314,4 +313,28 @@ DBusConnection* create_phantom_connection(DBusConnection* connection, const char
     _dbus_verbose ("Created phantom connection for %s\n", bus_connection_get_name(phantom_connection));
 
     return phantom_connection;
+}
+
+dbus_bool_t register_kdbus_starters(DBusConnection* connection)
+{
+    int i, len;
+    char **services;
+    dbus_bool_t retval = FALSE;
+    int fd;
+
+    if (!bus_activation_list_services (bus_connection_get_activation (connection), &services, &len))
+        return FALSE;
+
+    _dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
+
+   /* for(i=0; i<len; i++)
+    {
+        if (request_kdbus_name(fd, services[i], DBUS_NAME_FLAG_ALLOW_REPLACEMENT, 1) < 0)
+            goto out;
+    }*/
+    retval = TRUE;
+
+out:
+    dbus_free_string_array (services);
+    return retval;
 }

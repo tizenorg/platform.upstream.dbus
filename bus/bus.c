@@ -978,11 +978,17 @@ bus_context_new (const DBusString *config_file,
 	  _dbus_string_init_const(&unique_name, ":1.1"); //dbus_bus_get_unique_name(context->myConnection)); this is without :1.
 	  if(!bus_connection_complete(context->myKdbusConnection, &unique_name, error))
 	  {
-		  _dbus_verbose ("bus connection complete failed for kdbus\n");
+		  _dbus_verbose ("Bus connection complete failed for kdbus!\n");
 		  _dbus_string_free(&unique_name);
 		  goto failed;
 	  }
 	  _dbus_string_free(&unique_name);
+
+	  if(!register_kdbus_starters(context->myKdbusConnection))
+	  {
+          _dbus_verbose ("Registering kdbus starters for dbus activatable names failed!\n");
+          goto failed;
+	  }
   }
 
   return context;

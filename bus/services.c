@@ -710,8 +710,11 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
 	        goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
 	    if(*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
-	        if (!bus_service_remove_owner (service, connection, transaction, error))
-	            goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
+	    {
+	        if(_bus_service_find_owner_link (service, connection))
+                if (!bus_service_remove_owner (service, connection, transaction, error))
+                    goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
+	    }
 	}
 
   activation = bus_context_get_activation (registry->context);
