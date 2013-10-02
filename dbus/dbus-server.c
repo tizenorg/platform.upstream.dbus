@@ -183,10 +183,22 @@ _dbus_server_init_base (DBusServer             *server,
   return FALSE;
 }
 
+static void mini_vtable_dummy_func(DBusServer *server)
+{
+    // Used to prevent assert errors. Pointer to function is passed to
+    // DBusServerVTable which is passed to server->vtable in
+    // dbus_server_init_mini function.
+}
+
 DBusServer*
 dbus_server_init_mini (char* address)
 {
 	DBusServer *server;
+
+    static const DBusServerVTable dbus_server_init_mini_vtable = {
+        mini_vtable_dummy_func,
+        mini_vtable_dummy_func
+    };
 
 	server = dbus_new0(struct DBusServer, 1);
 	if(server == NULL)
@@ -197,6 +209,18 @@ dbus_server_init_mini (char* address)
 	if (server->mutex == NULL)
 	    goto failed;
 	server->address = address;
+
+    server->vtable = &dbus_server_init_mini_vtable;
+
+    _dbus_atomic_inc (&server->refcount);
+
+    server->watches = _dbus_watch_list_new ();
+    if (server->watches == NULL)
+        goto failed;
+
+    server->timeouts = _dbus_timeout_list_new();
+    if (server->timeouts == NULL)
+        goto failed;
 
 	return server;
 

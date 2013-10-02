@@ -103,7 +103,7 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
 
 	dbus_bus_set_bus_connection_address(type, address);
 
-	connection = dbus_bus_get(type, error);  /*todo possibly could be optimised by using lower functions*/
+	connection = dbus_bus_get_private(type, error);  /*todo possibly could be optimised by using lower functions*/
 	if(connection == NULL)
 		return NULL;
 
