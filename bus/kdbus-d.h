@@ -32,6 +32,6 @@ dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, DBusMessa
 dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, DBusMessage* message, unsigned long* pid, DBusError* error);
 dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* connection, DBusMessage* message, DBusMessage* reply, DBusError* error);
 
-DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name);
+DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name, DBusError* error);
 dbus_bool_t register_kdbus_starters(DBusConnection* connection);
 #endif /* KDBUS_H_ */

@@ -224,6 +224,8 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
 		flags_kdbus |= KDBUS_NAME_QUEUE;
 	if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
 		flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
+	if(flags & KDBUS_NAME_STARTER)
+	    flags_kdbus |= KDBUS_NAME_STARTER;
 
 	cmd_name->flags = flags_kdbus;
 	cmd_name->id = id;

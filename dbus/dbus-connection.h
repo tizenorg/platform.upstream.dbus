@@ -185,6 +185,8 @@ DBusConnection*    dbus_connection_ref                          (DBusConnection 
 DBUS_EXPORT
 void               dbus_connection_unref                        (DBusConnection             *connection);
 DBUS_EXPORT
+void               dbus_connection_unref_phantom               (DBusConnection             *connection);
+DBUS_EXPORT
 void               dbus_connection_close                        (DBusConnection             *connection);
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_connected             (DBusConnection             *connection);

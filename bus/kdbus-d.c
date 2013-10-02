@@ -26,9 +26,6 @@
 #include <unistd.h>
 #include <errno.h>
 
-//todo there should be no include below - needed functions should be moved to kdbus-common
-#include <dbus/dbus-transport-kdbus.h>
-
 __u64 sender_name_to_id(const char* name, DBusError* error)
 {
 	__u64 sender_id = 0;
@@ -114,7 +111,7 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
 	if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
 		goto failed;
 
-	if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "type='signal', member='NameLost'"))  //todo handle tis in dispatch
+	if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "type='signal', member='NameLost'"))  //todo handle this in dispatch
 	{
 	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
 	      return FALSE;
@@ -285,11 +282,10 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 	return ret;
 }
 
-DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name)
+DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name, DBusError* error)
 {
     DBusConnection *phantom_connection;
     DBusString name;
-    DBusError error;
 
     _dbus_string_init_const(&name, unique_name);
 
@@ -298,20 +294,21 @@ DBusConnection* create_phantom_connection(DBusConnection* connection, const char
         return FALSE;
     if(!bus_connections_setup_connection(bus_connection_get_connections(connection), phantom_connection))
     {
-        /*todo FIXME something should be done to clean up the phantom connection
-         * but we can't use standard disconnect, unref or last_unref because the transport is taken from connection
-         * so we probably should write own function on the basis of _dbus_connection_last_unref
-         */
+        dbus_connection_unref_phantom(phantom_connection);
         phantom_connection = NULL;
+        dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", unique_name);
+        goto out;
     }
-    if(!bus_connection_complete(phantom_connection, &name, &error))
+    if(!bus_connection_complete(phantom_connection, &name, error))
     {
-        /* todo FIXME exactly the same issue as above */
+        dbus_connection_unref_phantom(phantom_connection);
         phantom_connection = NULL;
+        goto out;
     }
 
     _dbus_verbose ("Created phantom connection for %s\n", bus_connection_get_name(phantom_connection));
 
+out:
     return phantom_connection;
 }
 
@@ -327,11 +324,14 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
 
     _dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
 
-   /* for(i=0; i<len; i++)
+    for(i=0; i<len; i++)
     {
-        if (request_kdbus_name(fd, services[i], DBUS_NAME_FLAG_ALLOW_REPLACEMENT, 1) < 0)
+        if(!register_kdbus_policy(services[i], fd))
             goto out;
-    }*/
+
+        if (request_kdbus_name(fd, services[i], (DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER) , 0) < 0)
+            goto out;
+    }
     retval = TRUE;
 
 out:

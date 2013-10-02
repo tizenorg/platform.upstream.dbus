@@ -2702,12 +2702,8 @@ free_outgoing_message (void *element,
   dbus_message_unref (message);
 }
 
-/* This is run without the mutex held, but after the last reference
- * to the connection has been dropped we should have no thread-related
- * problems
- */
 static void
-_dbus_connection_last_unref (DBusConnection *connection)
+_dbus_connection_last_unref_internal (DBusConnection *connection, dbus_bool_t unref_transport)
 {
   DBusList *link;
 
@@ -2762,17 +2758,18 @@ _dbus_connection_last_unref (DBusConnection *connection)
   
   _dbus_list_foreach (&connection->outgoing_messages,
                       free_outgoing_message,
-		      connection);
+              connection);
   _dbus_list_clear (&connection->outgoing_messages);
   
   _dbus_list_foreach (&connection->incoming_messages,
-		      (DBusForeachFunction) dbus_message_unref,
-		      NULL);
+              (DBusForeachFunction) dbus_message_unref,
+              NULL);
   _dbus_list_clear (&connection->incoming_messages);
 
   _dbus_counter_unref (connection->outgoing_counter);
 
-  _dbus_transport_unref (connection->transport);
+  if(unref_transport)
+      _dbus_transport_unref (connection->transport);
 
   if (connection->disconnect_message_link)
     {
@@ -2792,6 +2789,16 @@ _dbus_connection_last_unref (DBusConnection *connection)
   _dbus_rmutex_free_at_location (&connection->mutex);
   
   dbus_free (connection);
+}
+
+/* This is run without the mutex held, but after the last reference
+ * to the connection has been dropped we should have no thread-related
+ * problems
+ */
+static void
+_dbus_connection_last_unref (DBusConnection *connection)
+{
+    _dbus_connection_last_unref_internal(connection, TRUE);
 }
 
 /**
@@ -2840,6 +2847,22 @@ dbus_connection_unref (DBusConnection *connection)
 #endif
       _dbus_connection_last_unref (connection);
     }
+}
+
+void
+dbus_connection_unref_phantom (DBusConnection *connection)
+{
+  dbus_int32_t old_refcount;
+
+  _dbus_return_if_fail (connection != NULL);
+  _dbus_return_if_fail (connection->generation == _dbus_current_generation);
+
+  old_refcount = _dbus_atomic_dec (&connection->refcount);
+
+  _dbus_connection_trace_ref (connection, old_refcount, old_refcount - 1, "unref");
+
+  if (old_refcount == 1)
+      _dbus_connection_last_unref_internal(connection, FALSE);
 }
 
 /*

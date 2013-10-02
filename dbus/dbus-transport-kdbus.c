@@ -33,8 +33,6 @@
 #include <sys/stat.h>
 #include <openssl/md5.h>
 
-//todo documentation need to be corrected
-
 #define KDBUS_PART_FOREACH(part, head, first)				\
 	for (part = (head)->first;					\
 	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
@@ -172,7 +170,7 @@ static int reply_1_data(DBusMessage *message, int data_type, void* pData, DBusCo
     return -1;
 }
 
-/*todo uncomment if needed
+/*
 static int reply_ack(DBusMessage *message, DBusConnection* connection)
 {
 	DBusMessage *reply;
@@ -410,18 +408,21 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 	{
 		if(errno == EINTR)
 			goto again;
-		if((errno == ESRCH) || (errno == ENXIO) || (errno = EADDRNOTAVAIL))  //when recipient is not available on the bus
+		else if(errno == ENXIO) //no such id on the bus
+		{
+            if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+                goto out;
+		}
+        else if((errno == ESRCH) || (errno = EADDRNOTAVAIL))  //when well known name is not available on the bus
 		{
 			if(autostart)
 			{
-				//todo start service here, otherwise
 				if(!reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
 					goto out;
 			}
 			else
-				if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
-					goto out;
-
+	            if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+	                goto out;
 		}
 		_dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
 		ret_size = -1;
@@ -834,7 +835,7 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 		((DBusTransportSocket*)transport)->sender = sender;
 
 		if(!reply_1_data(message, DBUS_TYPE_STRING, &name, transport->connection))
-			return 0;  //todo why we cannot free name after sending reply?
+			return 0;  //todo why we cannot free name after sending reply, shouldn't we?
 		else
 			free(sender);
 
@@ -1066,7 +1067,7 @@ out:
 		return ret_value;
 	}
 #endif
-/*	else if(!strcmp(dbus_message_get_member(message), "GetAdtAuditSessionData"))  //todo to be implemented
+/*	else if(!strcmp(dbus_message_get_member(message), "GetAdtAuditSessionData"))  //todo to be implemented if needed and possible
 	{
 		char* name = NULL;
 
@@ -1102,7 +1103,6 @@ out:
 #endif
 	else
 		return 1;  //send to daemon
-//		return reply_with_error(DBUS_ERROR_UNKNOWN_METHOD, NULL, (char*)dbus_message_get_member(message), message, transport->connection);
 
 #ifdef DBUS_SERVICES_IN_LIB
 	if(info.sec_label)
@@ -2106,9 +2106,12 @@ do_writing (DBusTransport *transport)
 
 		message = _dbus_connection_get_message_to_send (transport->connection);
 		_dbus_assert (message != NULL);
-		dbus_message_unlock(message);
-	    dbus_message_set_sender(message, socket_transport->sender);
-		dbus_message_lock (message);
+		if(dbus_message_get_sender(message) == NULL)  //needed for daemon
+		{
+            dbus_message_unlock(message);
+            dbus_message_set_sender(message, socket_transport->sender);
+            dbus_message_lock (message);
+		}
 		_dbus_message_get_network_data (message, &header, &body);
 		total_bytes_to_write = _dbus_string_get_length(header) + _dbus_string_get_length(body);
 		pDestination = dbus_message_get_destination(message);
@@ -2473,7 +2476,7 @@ kdbus_connection_set (DBusTransport *transport)
 {
   DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
 
-  dbus_connection_set_is_authenticated(transport->connection); //todo remove when authentication will work
+  dbus_connection_set_is_authenticated(transport->connection); //now we don't have authentication in kdbus
 
   _dbus_watch_set_handler (socket_transport->write_watch,
                            _dbus_connection_handle_watch,
@@ -2501,7 +2504,7 @@ kdbus_connection_set (DBusTransport *transport)
   return TRUE;
 }
 
-/**
+/**  original dbus copy-pasted
  * @todo We need to have a way to wake up the select sleep if
  * a new iteration request comes in with a flag (read/write) that
  * we're not currently serving. Otherwise a call that just reads

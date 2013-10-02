@@ -1187,7 +1187,14 @@ bus_activation_send_pending_auto_activation_messages (BusActivation  *activation
         {
           DBusConnection *addressed_recipient;
 
-          addressed_recipient = bus_service_get_primary_owners_connection (service);
+          /* kdbus change - we can not send anything using phantom connections
+           * (DBusConnection structures for services other than daemon)
+           * so we have to use daemon connection
+           */
+          if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
+              addressed_recipient = entry->connection;
+          else
+              addressed_recipient = bus_service_get_primary_owners_connection (service);
 
           /* Resume dispatching where we left off in bus_dispatch() */
           if (!bus_dispatch_matches (transaction,

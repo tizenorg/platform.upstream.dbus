@@ -177,6 +177,28 @@ _bus_service_find_owner_link (BusService *service,
   return link;
 }
 
+static DBusConnection *
+_bus_service_find_owner_connection (BusService *service,
+                                   const char* unique_name)
+{
+  DBusList *link;
+
+  link = _dbus_list_get_first_link (&service->owners);
+
+  while (link != NULL)
+    {
+      BusOwner *bus_owner;
+
+      bus_owner = (BusOwner *) link->data;
+      if(!strcmp(bus_connection_get_name(bus_owner->conn), unique_name))
+          return bus_owner->conn;
+
+      link = _dbus_list_get_next_link (&service->owners, link);
+    }
+
+  return NULL;
+}
+
 static void
 bus_owner_set_flags (BusOwner *owner,
                      dbus_uint32_t flags)
@@ -678,13 +700,13 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 			dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
 						  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
 						  _dbus_string_get_const_data (service_name));
-			goto out;
+			goto failed;
 		}
 	}
 
 	sender_id = sender_name_to_id(dbus_message_get_sender(message), error);
 	if(dbus_error_is_set(error))
-		return FALSE;
+		goto failed;
 
 	*result = kdbus_request_name(connection, service_name, flags, sender_id);
 	if(*result == -EPERM)
@@ -692,28 +714,35 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 		dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
 					  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
 					  _dbus_string_get_const_data (service_name));
-		goto out;
+		goto failed;
 	}
 	else if(*result < 0)
 	{
 		dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
-		goto out;
+		goto failed;
 	}
 
 	if((*result == DBUS_REQUEST_NAME_REPLY_IN_QUEUE) || (*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER))
 	{
 	    DBusConnection* phantom;
 
-	    phantom = create_phantom_connection(connection, dbus_message_get_sender(message));
+	    phantom = create_phantom_connection(connection, dbus_message_get_sender(message), error);
 	    if(phantom == NULL)
-	        goto out;
+	        goto failed2;
 	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
-	        goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
+	    {
+	        dbus_connection_unref_phantom(phantom);
+	        goto failed2;
+	    }
 	    if(*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
 	    {
+            /* Here we are removing DBus daemon as an owner of the service,
+             * which is set by bus_registry_ensure.
+             * If bus_service_remove_owner fail, we ignore it, because it has
+             * almost none impact on the usage
+             */
 	        if(_bus_service_find_owner_link (service, connection))
-                if (!bus_service_remove_owner (service, connection, transaction, error))
-                    goto out;  /* todo FIXME what to do with phantom connection? look into create_phantom_connection for a clue*/
+                bus_service_remove_owner (service, connection, transaction, NULL);
 	    }
 	}
 
@@ -722,9 +751,16 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 								 service,
 								 transaction,
 								 error);
-  
  out:
-  return retval;
+     return retval;
+  
+failed2:
+    kdbus_release_name(connection, service_name, sender_id);
+failed:
+    if(_bus_service_find_owner_link (service, connection))
+        bus_service_remove_owner (service, connection, transaction, NULL);
+
+  return FALSE;
 }
 
 dbus_bool_t
@@ -778,15 +814,38 @@ bus_registry_release_service (BusRegistry      *registry,
       goto out;
     }
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	__u64 sender_id;
 
-	sender_id = sender_name_to_id(dbus_message_get_sender((DBusMessage*)registry), error);
+	sender_id = sender_name_to_id((const char*)registry, error);
 	if(dbus_error_is_set(error))
 		return FALSE;
 
 	*result = kdbus_release_name(connection, service_name, sender_id);
+
+	if(*result == DBUS_RELEASE_NAME_REPLY_RELEASED)
+	{
+	    const char* name;
+
+	    name = (const char*)registry;  //get name passed in registry pointer
+	    registry = bus_connection_get_registry (connection);  //than take original registry address
+
+	    service = bus_registry_lookup (registry, service_name);
+	    if(service)
+	    {
+	        DBusConnection* phantom;
+
+	        phantom = _bus_service_find_owner_connection(service, name);
+	        if(phantom)
+	        {
+	            bus_service_remove_owner (service, phantom, transaction, NULL);
+                dbus_connection_unref_phantom(phantom);
+	        }
+	        else
+	            _dbus_verbose ("Didn't find phantom connection for released name!\n");
+	    }
+	}
   }
   else
   {

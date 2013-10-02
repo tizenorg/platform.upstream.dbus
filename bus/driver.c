@@ -731,12 +731,11 @@ bus_driver_handle_release_service (DBusConnection *connection,
 
   _dbus_string_init_const (&service_name, name);
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
-	  registry = (BusRegistry*) message;
-	  /* looks like hack? Yes.
-	   * But how to pass message to bus_registry_release_service in other way?
-	   * In kdbus mode we don't need registry, though.
+	  registry = (BusRegistry*) dbus_message_get_sender(message);
+	  /* todo looks like hack? Yes.
+	   * But how to pass sender of message to bus_registry_release_service in other way?
 	   */
   }
 
