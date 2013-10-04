@@ -103,7 +103,7 @@ bus_driver_send_service_owner_changed (const char     *service_name,
   dbus_bool_t retval;
   const char *null_service;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  return TRUE;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
@@ -155,7 +155,7 @@ bus_driver_send_service_lost (DBusConnection *connection,
 {
   DBusMessage *message;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  return TRUE;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
@@ -201,7 +201,7 @@ bus_driver_send_service_acquired (DBusConnection *connection,
 {
   DBusMessage *message;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  return TRUE;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
@@ -452,7 +452,7 @@ bus_driver_handle_list_services (DBusConnection *connection,
     }
 
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_list_services (connection, &services, &len))
 	    {
@@ -481,7 +481,7 @@ bus_driver_handle_list_services (DBusConnection *connection,
       return FALSE;
     }
 
-  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction))) //not needed for kdbus, we got it from kdbus_list_services
   {
     /* Include the bus driver in the list */
     const char *v_STRING = DBUS_SERVICE_DBUS;
@@ -653,7 +653,7 @@ bus_driver_handle_acquire_service (DBusConnection *connection,
   retval = FALSE;
   reply = NULL;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if (!bus_registry_acquire_kdbus_service (registry, connection,
 			  	  	  	  	  	  	  	 message,
@@ -686,8 +686,6 @@ bus_driver_handle_acquire_service (DBusConnection *connection,
       goto out;
     }
 
- _dbus_verbose ("Reply sender: %s, destination: %s\n", dbus_message_get_sender(reply), dbus_message_get_destination(reply)); //todo kdbus incl
-
   if (!bus_transaction_send_from_driver (transaction, connection, reply))
     {
       BUS_SET_OOM (error);
@@ -717,8 +715,6 @@ bus_driver_handle_release_service (DBusConnection *connection,
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
-  registry = bus_connection_get_registry (connection);
-
   if (!dbus_message_get_args (message, error,
                               DBUS_TYPE_STRING, &name,
                               DBUS_TYPE_INVALID))
@@ -730,16 +726,16 @@ bus_driver_handle_release_service (DBusConnection *connection,
   reply = NULL;
 
   _dbus_string_init_const (&service_name, name);
+  registry = bus_connection_get_registry (connection);
 
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
-	  registry = (BusRegistry*) dbus_message_get_sender(message);
-	  /* todo looks like hack? Yes.
-	   * But how to pass sender of message to bus_registry_release_service in other way?
-	   */
+	  if (!bus_registry_release_service_kdbus (dbus_message_get_sender(message), connection,
+	                                     &service_name, &service_reply,
+	                                     transaction, error))
+	      goto out;
   }
-
-  if (!bus_registry_release_service (registry, connection,
+  else if (!bus_registry_release_service (registry, connection,
                                      &service_name, &service_reply,
                                      transaction, error))
     goto out;
@@ -802,7 +798,7 @@ bus_driver_handle_service_exists (DBusConnection *connection,
     }
   else
     {
-	  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+	  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  {
 		  int inter_ret;
 		  struct nameInfo info;
@@ -1092,7 +1088,7 @@ bus_driver_handle_add_match (DBusConnection *connection,
   if (rule == NULL)
     goto failed;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 
 	  if (!kdbus_add_match_rule (connection, message, text, error))
@@ -1161,7 +1157,7 @@ bus_driver_handle_remove_match (DBusConnection *connection,
   if (rule == NULL)
     goto failed;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_remove_match(connection, message, error))
 		  goto failed;
@@ -1174,7 +1170,7 @@ bus_driver_handle_remove_match (DBusConnection *connection,
                        message, error))
     goto failed;
 
-  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  matchmaker = bus_connection_get_matchmaker (connection);
 
@@ -1219,7 +1215,7 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
 			       DBUS_TYPE_INVALID))
       goto failed;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  int ret;
 	  struct nameInfo info;
@@ -1429,7 +1425,7 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_get_connection_unix_user(connection, message, &uid, error))
 		  goto failed;
@@ -1492,7 +1488,7 @@ bus_driver_handle_get_connection_unix_process_id (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_get_connection_unix_process_id(connection, message, &pid, error))
 		  goto failed;
@@ -1612,7 +1608,7 @@ bus_driver_handle_get_connection_selinux_security_context (DBusConnection *conne
   if (reply == NULL)
     goto oom;
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_get_connection_unix_selinux_security_context(connection, message, reply, error))
 		  goto failed;
@@ -1674,7 +1670,7 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
-  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))  //todo kdbus incl
+  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  conn = bus_driver_get_conn_helper (connection, message, "credentials",
 										 &service, error);

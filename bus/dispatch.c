@@ -36,6 +36,7 @@
 #include <dbus/dbus-internals.h>
 #include <dbus/dbus-misc.h>
 #include <string.h>
+#include "kdbus-d.h"
 
 #ifdef HAVE_UNIX_FD_PASSING
 #include <dbus/dbus-sysdeps-unix.h>
@@ -218,6 +219,14 @@ bus_dispatch (DBusConnection *connection,
   }
 #endif /* DBUS_ENABLE_VERBOSE_MODE */
 
+  /* Create our transaction */
+  transaction = bus_transaction_new (context);
+  if (transaction == NULL)
+    {
+      BUS_SET_OOM (&error);
+      goto out;
+    }
+
   /* If service_name is NULL, if it's a signal we send it to all
    * connections with a match rule. If it's not a signal, there
    * are some special cases here but mostly we just bail out.
@@ -240,18 +249,19 @@ bus_dispatch (DBusConnection *connection,
           result = DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
           goto out;
         }
-    }
 
-  /* Create our transaction */
-  transaction = bus_transaction_new (context);
-  if (transaction == NULL)
-    {
-      BUS_SET_OOM (&error);
-      goto out;
+      if(bus_context_is_kdbus(context))
+      {
+          if (dbus_message_is_signal (message, DBUS_INTERFACE_DBUS, "NameOwnerChanged"))
+          {
+              handleNameOwnerChanged(message, transaction, connection);
+              goto out;
+          }
+      }
     }
 
   /* Assign a sender to the message */
-  if(!bus_context_is_kdbus(context))  /* todo kdbus inclusion - if not kdbus daemon */
+  if(bus_context_is_kdbus(context) == FALSE)  //if using kdbus, sender must be set on library side
     if (bus_connection_is_active (connection))
     {
       sender = bus_connection_get_name (connection);

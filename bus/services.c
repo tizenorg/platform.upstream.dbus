@@ -726,12 +726,13 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	{
 	    DBusConnection* phantom;
 
+	    //todo what if we already have phantom for that sender?
 	    phantom = create_phantom_connection(connection, dbus_message_get_sender(message), error);
 	    if(phantom == NULL)
 	        goto failed2;
 	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
 	    {
-	        dbus_connection_unref_phantom(phantom);
+	        bus_connection_disconnected(phantom);
 	        goto failed2;
 	    }
 	    if(*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
@@ -814,61 +815,108 @@ bus_registry_release_service (BusRegistry      *registry,
       goto out;
     }
 
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
-  {
-	__u64 sender_id;
+  service = bus_registry_lookup (registry, service_name);
 
-	sender_id = sender_name_to_id((const char*)registry, error);
-	if(dbus_error_is_set(error))
-		return FALSE;
-
-	*result = kdbus_release_name(connection, service_name, sender_id);
-
-	if(*result == DBUS_RELEASE_NAME_REPLY_RELEASED)
-	{
-	    const char* name;
-
-	    name = (const char*)registry;  //get name passed in registry pointer
-	    registry = bus_connection_get_registry (connection);  //than take original registry address
-
-	    service = bus_registry_lookup (registry, service_name);
-	    if(service)
-	    {
-	        DBusConnection* phantom;
-
-	        phantom = _bus_service_find_owner_connection(service, name);
-	        if(phantom)
-	        {
-	            bus_service_remove_owner (service, phantom, transaction, NULL);
-                dbus_connection_unref_phantom(phantom);
-	        }
-	        else
-	            _dbus_verbose ("Didn't find phantom connection for released name!\n");
-	    }
-	}
-  }
+  if (service == NULL)
+    {
+      *result = DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
+    }
+  else if (!bus_service_has_owner (service, connection))
+    {
+      *result = DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
+    }
   else
-  {
-	  service = bus_registry_lookup (registry, service_name);
+    {
+      if (!bus_service_remove_owner (service, connection,
+                                     transaction, error))
+        goto out;
 
-	  if (service == NULL)
-		{
-		  *result = DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
-		}
-	  else if (!bus_service_has_owner (service, connection))
-		{
-		  *result = DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
-		}
-	  else
-		{
-		  if (!bus_service_remove_owner (service, connection,
-										 transaction, error))
-			goto out;
+      _dbus_assert (!bus_service_has_owner (service, connection));
+      *result = DBUS_RELEASE_NAME_REPLY_RELEASED;
+    }
 
-		  _dbus_assert (!bus_service_has_owner (service, connection));
-		  *result = DBUS_RELEASE_NAME_REPLY_RELEASED;
-		}
-  }
+  retval = TRUE;
+
+ out:
+  return retval;
+}
+
+dbus_bool_t
+bus_registry_release_service_kdbus (const char* sender_name,
+                              DBusConnection   *connection,
+                              const DBusString *service_name,
+                              dbus_uint32_t    *result,
+                              BusTransaction   *transaction,
+                              DBusError        *error)
+{
+  dbus_bool_t retval = FALSE;
+  __u64 sender_id;
+
+  if (!_dbus_validate_bus_name (service_name, 0,
+                                _dbus_string_get_length (service_name)))
+    {
+      dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
+                      "Given bus name \"%s\" is not valid",
+                      _dbus_string_get_const_data (service_name));
+
+      _dbus_verbose ("Attempt to release invalid service name\n");
+
+      goto out;
+    }
+
+  if (_dbus_string_get_byte (service_name, 0) == ':')
+    {
+      /* Not allowed; the base service name cannot be created or released */
+      dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
+                      "Cannot release a service starting with ':' such as \"%s\"",
+                      _dbus_string_get_const_data (service_name));
+
+      _dbus_verbose ("Attempt to release invalid base service name \"%s\"",
+                     _dbus_string_get_const_data (service_name));
+
+      goto out;
+    }
+
+   if (_dbus_string_equal_c_str (service_name, DBUS_SERVICE_DBUS))
+    {
+      /* Not allowed; the base service name cannot be created or released */
+      dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
+                      "Cannot release the %s service because it is owned by the bus",
+                     DBUS_SERVICE_DBUS);
+
+      _dbus_verbose ("Attempt to release service name \"%s\"",
+                     DBUS_SERVICE_DBUS);
+
+      goto out;
+    }
+
+    sender_id = sender_name_to_id(sender_name, error);
+    if(dbus_error_is_set(error))
+        return FALSE;
+
+    *result = kdbus_release_name(connection, service_name, sender_id);
+
+    if(*result == DBUS_RELEASE_NAME_REPLY_RELEASED)
+    {
+        BusRegistry* registry;
+        BusService *service;
+
+        registry = bus_connection_get_registry (connection);
+        service = bus_registry_lookup (registry, service_name);
+        if(service)
+        {
+            DBusConnection* phantom;
+
+            phantom = _bus_service_find_owner_connection(service, sender_name);
+            if(phantom)
+            {
+                bus_service_remove_owner (service, phantom, transaction, NULL);
+                dbus_connection_unref_phantom(phantom);  //todo if there will be one phantom for one id not for one name, than it must be changed
+            }
+            else
+                _dbus_verbose ("Didn't find phantom connection for released name!\n");
+        }
+   }
 
   retval = TRUE;
 

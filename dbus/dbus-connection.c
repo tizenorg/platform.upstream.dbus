@@ -2714,7 +2714,8 @@ _dbus_connection_last_unref_internal (DBusConnection *connection, dbus_bool_t un
   /* You have to disconnect the connection before unref:ing it. Otherwise
    * you won't get the disconnected message.
    */
-  _dbus_assert (!_dbus_transport_get_is_connected (connection->transport));
+  if(unref_transport)
+      _dbus_assert (!_dbus_transport_get_is_connected (connection->transport));
   _dbus_assert (connection->server_guid == NULL);
   
   /* ---- We're going to call various application callbacks here, hope it doesn't break anything... */

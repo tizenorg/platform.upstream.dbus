@@ -34,4 +34,5 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 
 DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name, DBusError* error);
 dbus_bool_t register_kdbus_starters(DBusConnection* connection);
+void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusConnection *connection);
 #endif /* KDBUS_H_ */

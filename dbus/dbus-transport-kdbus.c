@@ -31,7 +31,6 @@
 #include <sys/mman.h>
 #include <limits.h>
 #include <sys/stat.h>
-#include <openssl/md5.h>
 
 #define KDBUS_PART_FOREACH(part, head, first)				\
 	for (part = (head)->first;					\
@@ -662,6 +661,16 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
 		kernel_item = KDBUS_MATCH_NAME_ADD;
 		size += KDBUS_ITEM_SIZE(1);
 	}
+    else if(strstr(rule, "member='IdAdded'"))
+    {
+        kernel_item = KDBUS_MATCH_ID_ADD;
+        size += KDBUS_ITEM_SIZE(sizeof(__u64));
+    }
+    else if(strstr(rule, "member='IdRemoved'"))
+    {
+        kernel_item = KDBUS_MATCH_ID_REMOVE;
+        size += KDBUS_ITEM_SIZE(sizeof(__u64));
+    }
 
 	name_size = parse_match_key(rule, "interface='", &pInterface);
 	if((name_size == -1) && (kernel_item == 0))   //means org.freedesktop.DBus without specified member

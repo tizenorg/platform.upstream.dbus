@@ -69,6 +69,12 @@ dbus_bool_t  bus_registry_release_service (BusRegistry                 *registry
                                            dbus_uint32_t               *result,
                                            BusTransaction              *transaction,
                                            DBusError                   *error);
+dbus_bool_t bus_registry_release_service_kdbus (const char* sender_name,
+                                          DBusConnection   *connection,
+                                          const DBusString *service_name,
+                                          dbus_uint32_t    *result,
+                                          BusTransaction   *transaction,
+                                          DBusError        *error);
 dbus_bool_t  bus_registry_set_service_context_table (BusRegistry           *registry,
 						     DBusHashTable         *table);
 

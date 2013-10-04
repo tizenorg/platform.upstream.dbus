@@ -29,8 +29,6 @@
 #include "dbus-transport-protected.h"
 #include "dbus-watch.h"
 #include "dbus-credentials.h"
-#include <stdio.h>  //todo to remove
-
 
 /**
  * @defgroup DBusTransportSocket DBusTransport implementations for sockets

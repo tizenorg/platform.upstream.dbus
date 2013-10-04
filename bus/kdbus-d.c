@@ -111,11 +111,26 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
 	if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
 		goto failed;
 
-	if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "type='signal', member='NameLost'"))  //todo handle this in dispatch
-	{
-	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
-	      return FALSE;
-	}
+    if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='IdRemoved'"))
+    {
+          dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
+          return FALSE;
+    }
+    if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='NameChanged'"))
+    {
+          dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
+          return FALSE;
+    }
+    if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='NameLost'"))
+    {
+          dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
+          return FALSE;
+    }
+    if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='NameAcquired'"))
+    {
+          dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
+          return FALSE;
+    }
 
 	if(dbus_error_is_set(error))
 	{
@@ -301,7 +316,7 @@ DBusConnection* create_phantom_connection(DBusConnection* connection, const char
     }
     if(!bus_connection_complete(phantom_connection, &name, error))
     {
-        dbus_connection_unref_phantom(phantom_connection);
+        bus_connection_disconnected(phantom_connection);
         phantom_connection = NULL;
         goto out;
     }
@@ -337,4 +352,84 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
 out:
     dbus_free_string_array (services);
     return retval;
+}
+
+static dbus_bool_t remove_conn_if_name_match (DBusConnection *connection, void *data)
+{
+    if(!strcmp(bus_connection_get_name(connection), (char*)data))
+    {
+        bus_connection_disconnected(connection);
+//        return FALSE; //needed to break foreach function
+        /* todo should we brake? Now we create phantom for each name, so if someone acquire more than
+         * one name he will have more than one phantom. I think that there should be one phantom for one name
+         * but if so, name acquiring and releasing must be changed
+         */
+    }
+    return TRUE;
+}
+
+void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusConnection *connection)
+{
+    const char *name, *old, *new;
+
+    if(!dbus_message_get_args(msg, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_STRING, &old, DBUS_TYPE_STRING, &new, DBUS_TYPE_INVALID))
+    {
+        _dbus_verbose ("Couldn't get args of NameOwnerChanged signal: .\n");//, error.message);
+        return;
+    }
+
+    if(!strncmp(name, ":1.", 3))/*if it starts from :1. it is unique name - this might be IdRemoved info*/
+    {
+        if(!strcmp(name, old))  //yes it is - someone has disconnected
+        {
+            _dbus_verbose ("Connection %s has disconnected. Removing.\n", name);  //todo to remove at the end of development
+            bus_connections_foreach_active(bus_connection_get_connections(connection), remove_conn_if_name_match, (void*)name);
+        }
+    }
+    else //it is well-known name
+    {
+        if((*old != 0) && (strcmp(old, ":1.1")))
+        {
+            DBusMessage *message;
+
+            _dbus_verbose ("Owner '%s' lost name '%s'. Sending NameLost.\n", old, name);
+
+            message = dbus_message_new_signal (DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "NameLost");
+            if (message == NULL)
+                goto next;
+
+            if (!dbus_message_set_destination (message, old) || !dbus_message_append_args (message,
+                                                                 DBUS_TYPE_STRING, &name,
+                                                                 DBUS_TYPE_INVALID))
+            {
+                dbus_message_unref (message);
+                goto next;
+            }
+
+            bus_transaction_send_from_driver (transaction, connection, message);
+            dbus_message_unref (message);
+        }
+    next:
+        if((*new != 0) && (strcmp(new, ":1.1")))
+        {
+            DBusMessage *message;
+
+            _dbus_verbose ("Owner '%s' acquired name '%s'. Sending NameAcquired.\n", new, name);
+
+            message = dbus_message_new_signal (DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "NameAcquired");
+            if (message == NULL)
+                return;
+
+            if (!dbus_message_set_destination (message, new) || !dbus_message_append_args (message,
+                                                                 DBUS_TYPE_STRING, &name,
+                                                                 DBUS_TYPE_INVALID))
+            {
+                dbus_message_unref (message);
+                return;
+            }
+
+            bus_transaction_send_from_driver (transaction, connection, message);
+            dbus_message_unref (message);
+        }
+    }
 }

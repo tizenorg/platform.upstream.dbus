@@ -190,12 +190,16 @@ bus_connection_disconnected (DBusConnection *connection)
   BusConnectionData *d;
   BusService *service;
   BusMatchmaker *matchmaker;
+  dbus_bool_t is_phantom = FALSE;
   
   d = BUS_CONNECTION_DATA (connection);
   _dbus_assert (d != NULL);
 
   _dbus_verbose ("%s disconnected, dropping all service ownership and releasing\n",
                  d->name ? d->name : "(inactive)");
+
+  if(bus_context_is_kdbus(d->connections->context) && (strcmp(bus_connection_get_name(connection), ":1.1")))
+      is_phantom = TRUE;
 
   /* Delete our match rules */
   if (d->n_match_rules > 0)
@@ -305,8 +309,10 @@ bus_connection_disconnected (DBusConnection *connection)
   dbus_connection_set_data (connection,
                             connection_data_slot,
                             NULL, NULL);
-  
-  dbus_connection_unref (connection);
+  if(is_phantom)
+      dbus_connection_unref_phantom(connection);
+  else
+      dbus_connection_unref (connection);
 }
 
 static dbus_bool_t
@@ -2016,7 +2022,7 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
   if (!dbus_message_set_sender (message, DBUS_SERVICE_DBUS))
     return FALSE;
 
-  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction))) /* todo kdbus inclusion*/
+  if(!bus_context_is_kdbus(bus_transaction_get_context (transaction))) /* we can't set destination on the basis of connection when on kdbus*/
     if (bus_connection_is_active (connection))
     {
       if (!dbus_message_set_destination (message,

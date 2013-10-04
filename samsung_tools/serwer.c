@@ -34,7 +34,7 @@ handler_function(DBusConnection *conn, DBusMessage *msg, void *user_data)
 		fprintf(stderr, "Error - Invalid ping message!");
 		reply = dbus_message_new_error(msg, "com.misiek.pingpong.PingError","ping message corrupted");
 	} else {
-		//printf ("Received from client%s\n", ping);
+		printf ("Received from client%s\n", ping);
 		reply = dbus_message_new_method_return(msg);
 		dbus_message_append_args (reply, DBUS_TYPE_STRING, &ping, DBUS_TYPE_INVALID);
 	}
