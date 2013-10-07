@@ -29,6 +29,7 @@ Source4:        baselibs.conf
 Source5:        dbus-user.service
 Source6:        dbus-user.socket
 BuildRequires:  libcap-ng-devel
+BuildRequires:  pkgconfig(libsmack)
 # COMMON1-END
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 
@@ -84,7 +85,9 @@ export V=1
     --enable-systemd							\
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
-    --with-systemdsystemunitdir=%{_unitdir}                     
+    --with-systemdsystemunitdir=%{_unitdir}				\
+    --enable-smack
+
 make %{?_smp_mflags}
 
 %install
