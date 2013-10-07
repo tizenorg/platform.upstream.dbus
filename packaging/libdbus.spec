@@ -9,6 +9,7 @@ Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 
 BuildRequires:  expat-devel
 BuildRequires:  libtool
+BuildRequires:  pkgconfig(libsmack)
 
 
 
@@ -65,7 +66,8 @@ export V=1
     --with-init-scripts=suse						\
     --enable-inotify							\
     --with-console-auth-dir=/var/run/dbus/at_console/			\
-    --with-systemdsystemunitdir=%{_unitdir}
+    --with-systemdsystemunitdir=%{_unitdir}				\
+    --enable-smack
 
 make %{?_smp_mflags} -C dbus libdbus-1.la
 
