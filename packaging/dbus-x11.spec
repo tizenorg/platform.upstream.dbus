@@ -33,6 +33,7 @@ Source5:        dbus-user.service
 Source6:        dbus-user.socket
 Source1001: 	dbus-x11.manifest
 BuildRequires:  libcap-ng-devel
+BuildRequires:  pkgconfig(libsmack)
 # COMMON1-END
 # COMMON1-END
 
@@ -69,7 +70,9 @@ export V=1
     --enable-systemd							\
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
-    --with-systemdsystemunitdir=%{_unitdir}                     
+    --with-systemdsystemunitdir=%{_unitdir}				\
+    --enable-smack
+
 make %{?_smp_mflags}
 
 %install
