@@ -380,7 +380,13 @@ void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusC
     if(!strncmp(name, ":1.", 3))/*if it starts from :1. it is unique name - this might be IdRemoved info*/
     {
         if(!strcmp(name, old))  //yes it is - someone has disconnected
-            bus_connection_disconnected(bus_connections_find_conn_by_name(bus_connection_get_connections(connection), name));
+        {
+            DBusConnection* conn;
+
+            conn = bus_connections_find_conn_by_name(bus_connection_get_connections(connection), name);
+            if(conn)
+                bus_connection_disconnected(conn);
+        }
     }
     else //it is well-known name
     {
