@@ -1,0 +1,9 @@
+Verified+1: Patrick McCarty <patrick.mccarty@linux.intel.com>
+Code-Review+1: Michael Leibowitz <michael.leibowitz@intel.com>
+Code-Review+1: Mikko Ylinen <mikko.ylinen@intel.com>
+Code-Review+2: william douglas <william.douglas@intel.com>
+Submitted-by: Mikko Ylinen <mikko.ylinen@intel.com>
+Submitted-at: Mon, 07 Oct 2013 23:23:59 -0700
+Reviewed-on: https://review.tizen.org/gerrit/10596
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
