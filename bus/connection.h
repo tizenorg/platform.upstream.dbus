@@ -43,6 +43,8 @@ void            bus_connections_foreach           (BusConnections               
 void            bus_connections_foreach_active    (BusConnections               *connections,
                                                    BusConnectionForeachFunction  function,
                                                    void                         *data);
+DBusConnection* bus_connections_find_conn_by_name (BusConnections *connections,
+                                                   const char* name);
 BusContext*     bus_connections_get_context       (BusConnections               *connections);
 void            bus_connections_increment_stamp   (BusConnections               *connections);
 BusContext*     bus_connection_get_context        (DBusConnection               *connection);

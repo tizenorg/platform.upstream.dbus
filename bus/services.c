@@ -725,16 +725,16 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	if((*result == DBUS_REQUEST_NAME_REPLY_IN_QUEUE) || (*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER))
 	{
 	    DBusConnection* phantom;
+	    const char* name;
 
-	    //todo what if we already have phantom for that sender?
-	    phantom = create_phantom_connection(connection, dbus_message_get_sender(message), error);
+	    name = dbus_message_get_sender(message);
+	    phantom = bus_connections_find_conn_by_name(bus_connection_get_connections(connection), name);
+        if(phantom == NULL)
+            phantom = create_phantom_connection(connection, name, error);
 	    if(phantom == NULL)
 	        goto failed2;
 	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
-	    {
-	        bus_connection_disconnected(phantom);
 	        goto failed2;
-	    }
 	    if(*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
 	    {
             /* Here we are removing DBus daemon as an owner of the service,
@@ -911,7 +911,11 @@ bus_registry_release_service_kdbus (const char* sender_name,
             if(phantom)
             {
                 bus_service_remove_owner (service, phantom, transaction, NULL);
-                dbus_connection_unref_phantom(phantom);  //todo if there will be one phantom for one id not for one name, than it must be changed
+                /* todo we could remove phantom if he doesn't own any name
+                 * to do this we should write function in connection.c to check if
+                 * _dbus_list_get_last (&d->services_owned) returns not NULL
+                 *  or we can leave phantom - he will be removed when he disconnects from the bus
+                 */
             }
             else
                 _dbus_verbose ("Didn't find phantom connection for released name!\n");

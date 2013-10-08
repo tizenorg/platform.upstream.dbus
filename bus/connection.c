@@ -1001,6 +1001,26 @@ bus_connections_foreach (BusConnections               *connections,
   foreach_inactive (connections, function, data);
 }
 
+DBusConnection*
+bus_connections_find_conn_by_name(BusConnections *connections, const char* name)
+{
+    DBusList *link;
+
+    link = _dbus_list_get_first_link (&connections->completed);
+    while (link != NULL)
+      {
+        DBusConnection *connection = link->data;
+        DBusList *next = _dbus_list_get_next_link (&connections->completed, link);
+
+        if (!strcmp(bus_connection_get_name(connection), name))
+          return connection;
+
+        link = next;
+      }
+
+    return NULL;
+}
+
 BusContext*
 bus_connections_get_context (BusConnections *connections)
 {

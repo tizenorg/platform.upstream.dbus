@@ -354,19 +354,16 @@ out:
     return retval;
 }
 
+/*
 static dbus_bool_t remove_conn_if_name_match (DBusConnection *connection, void *data)
 {
     if(!strcmp(bus_connection_get_name(connection), (char*)data))
     {
         bus_connection_disconnected(connection);
-//        return FALSE; //needed to break foreach function
-        /* todo should we brake? Now we create phantom for each name, so if someone acquire more than
-         * one name he will have more than one phantom. I think that there should be one phantom for one name
-         * but if so, name acquiring and releasing must be changed
-         */
+        return FALSE; //this is to break foreach function
     }
     return TRUE;
-}
+}*/
 
 void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusConnection *connection)
 {
@@ -378,19 +375,21 @@ void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusC
         return;
     }
 
+    _dbus_verbose ("Got NameOwnerChanged signal:\nName: %s\nOld: %s\nNew: %s\n", name, old, new);
+
     if(!strncmp(name, ":1.", 3))/*if it starts from :1. it is unique name - this might be IdRemoved info*/
     {
         if(!strcmp(name, old))  //yes it is - someone has disconnected
-        {
-            _dbus_verbose ("Connection %s has disconnected. Removing.\n", name);  //todo to remove at the end of development
-            bus_connections_foreach_active(bus_connection_get_connections(connection), remove_conn_if_name_match, (void*)name);
-        }
+            bus_connection_disconnected(bus_connections_find_conn_by_name(bus_connection_get_connections(connection), name));
     }
     else //it is well-known name
     {
         if((*old != 0) && (strcmp(old, ":1.1")))
         {
             DBusMessage *message;
+
+            if(bus_connections_find_conn_by_name(bus_connection_get_connections(connection), old) == NULL)
+                goto next;
 
             _dbus_verbose ("Owner '%s' lost name '%s'. Sending NameLost.\n", old, name);
 
