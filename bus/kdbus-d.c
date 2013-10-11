@@ -68,7 +68,7 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
     if(type == DBUS_BUS_SYSTEM)
         snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%s", getuid(), "system");
     else
-        snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus", getuid());
+        snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%u", getuid(), getpid());
     bus_make.n_type = KDBUS_MAKE_NAME;
     bus_make.n_size = KDBUS_PART_HEADER_SIZE + strlen(bus_make.name) + 1;
     bus_make.head.size = sizeof(struct kdbus_cmd_bus_make) + bus_make.n_size;
