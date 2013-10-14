@@ -2258,6 +2258,13 @@ bus_transaction_execute_and_free (BusTransaction *transaction)
   dbus_free (transaction);
 }
 
+void
+bus_transaction_free (BusTransaction *transaction)
+{
+	  free_cancel_hooks (transaction);
+	  dbus_free (transaction);
+}
+
 static void
 bus_connection_remove_transactions (DBusConnection *connection)
 {

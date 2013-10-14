@@ -18,6 +18,7 @@
 #include <dbus/dbus-transport-kdbus.h>
 #include "connection.h"
 #include "activation.h"
+#include "services.h"
 
 #include <utils.h>
 #include <stdlib.h>
@@ -51,13 +52,13 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
     char *bus;
 
     /*TODO Distinguish session and system bus make*/
-    /*TODO Add dbus_set_error(error, DBUS_ERROR_FAILED,  "...") (?)*/
 
     _dbus_verbose("Opening /dev/kdbus/control\n");
     fdc = open("/dev/kdbus/control", O_RDWR|O_CLOEXEC);
     if (fdc < 0)
     {
         _dbus_verbose("--- error %d (%m)\n", fdc);
+        dbus_set_error(error, DBUS_ERROR_FAILED, "Opening /dev/kdbus/control failed: %d (%m)", fdc);
         return NULL;
     }
 
@@ -78,6 +79,7 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
     if (ret)
     {
         _dbus_verbose("--- error %d (%m)\n", ret);
+        dbus_set_error(error, DBUS_ERROR_FAILED, "Creating bus '%s' failed: %d (%m)", bus_make.name, fdc);
         return NULL;
     }
 
@@ -332,15 +334,22 @@ out:
 
 dbus_bool_t register_kdbus_starters(DBusConnection* connection)
 {
-    int i, len;
+    int i,j, len;
     char **services;
     dbus_bool_t retval = FALSE;
     int fd;
+    BusTransaction *transaction;
+    DBusString name;
+
+    transaction = bus_transaction_new (bus_connection_get_context(connection));
+    if (transaction == NULL)
+    	return FALSE;
 
     if (!bus_activation_list_services (bus_connection_get_activation (connection), &services, &len))
         return FALSE;
 
     _dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
+    _dbus_string_init(&name);
 
     for(i=0; i<len; i++)
     {
@@ -349,11 +358,23 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
 
         if (request_kdbus_name(fd, services[i], (DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER) , 0) < 0)
             goto out;
+
+        if(!_dbus_string_append(&name, services[i]))
+        	goto out;
+        if(!bus_registry_ensure (bus_connection_get_registry (connection), &name, connection,
+        		(DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER), transaction, NULL))
+        	goto out;
+        if(!_dbus_string_set_length(&name, 0))
+        	goto out;
     }
     retval = TRUE;
 
 out:
+	for(j=0; j<i; j++)
+		release_kdbus_name(fd, services[j], 0);
     dbus_free_string_array (services);
+    _dbus_string_free(&name);
+    bus_transaction_free(transaction);
     return retval;
 }
 
