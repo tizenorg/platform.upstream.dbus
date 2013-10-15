@@ -370,8 +370,11 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
     retval = TRUE;
 
 out:
-	for(j=0; j<i; j++)
-		release_kdbus_name(fd, services[j], 0);
+    if(retval == FALSE)
+    {
+        for(j=0; j<i; j++)
+            release_kdbus_name(fd, services[j], 0);
+    }
     dbus_free_string_array (services);
     _dbus_string_free(&name);
     bus_transaction_free(transaction);
