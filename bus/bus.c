@@ -1042,6 +1042,16 @@ bus_context_reload_config (BusContext *context,
       _DBUS_ASSERT_ERROR_IS_SET (error);
       goto failed;
     }
+
+  if(context->myKdbusConnection)
+  {
+      if(!update_kdbus_starters(context->myKdbusConnection))
+      {
+          _dbus_verbose ("Update kdbus starters for dbus activatable names failed.\n");
+          _DBUS_ASSERT_ERROR_IS_SET (error);
+          goto failed;
+      }
+  }
   ret = TRUE;
 
   bus_context_log (context, DBUS_SYSTEM_LOG_INFO, "Reloaded configuration");

@@ -381,6 +381,58 @@ out:
     return retval;
 }
 
+dbus_bool_t update_kdbus_starters(DBusConnection* connection)
+{
+    dbus_bool_t retval = FALSE;
+    DBusList **services_old;
+    DBusList *link;
+    BusService *service = NULL;
+    BusTransaction *transaction;
+    int fd;
+
+    transaction = bus_transaction_new (bus_connection_get_context(connection));
+    if (transaction == NULL)
+        return FALSE;
+
+    if(!_dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd))
+        goto out;
+
+    services_old = bus_connection_get_services_owned(connection);
+    link = _dbus_list_get_first_link(services_old);
+
+    while (link != NULL)
+    {
+        int ret;
+
+        service = (BusService*) link->data;
+        if(service == NULL)
+            goto out;
+
+        ret = release_kdbus_name(fd, bus_service_get_name(service), 0);
+
+        if (ret == DBUS_RELEASE_NAME_REPLY_RELEASED)
+        {
+            if(!bus_service_remove_owner(service, connection, transaction, NULL))
+                _dbus_verbose ("Unable to remove\n");
+        }
+        else if(ret < 0)
+            goto out;
+
+        link = _dbus_list_get_next_link (services_old, link);
+    }
+
+    if(!register_kdbus_starters(connection))
+    {
+        _dbus_verbose ("Registering kdbus starters for dbus activatable names failed!\n");
+        goto out;
+    }
+    retval = TRUE;
+
+out:
+    bus_transaction_free(transaction);
+    return retval;
+}
+
 /*
 static dbus_bool_t remove_conn_if_name_match (DBusConnection *connection, void *data)
 {

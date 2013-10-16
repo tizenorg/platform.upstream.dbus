@@ -1377,6 +1377,16 @@ bus_connection_get_n_services_owned (DBusConnection *connection)
   return d->n_services_owned;
 }
 
+DBusList**
+bus_connection_get_services_owned (DBusConnection *connection)
+{
+    BusConnectionData *d;
+    d = BUS_CONNECTION_DATA (connection);
+    _dbus_assert (d != NULL);
+
+    return &d->services_owned;
+}
+
 dbus_bool_t
 bus_connection_complete (DBusConnection   *connection,
 			 const DBusString *name,
