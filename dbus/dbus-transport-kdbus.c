@@ -264,11 +264,10 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
  * @param encoded flag if the message is encoded
  * @return size of data sent
  */
-static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message, dbus_bool_t encoded)
+static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message, const char* destination, dbus_bool_t encoded)
 {
     struct kdbus_msg *msg;
     struct kdbus_item *item;
-    const char *name;
     uint64_t dst_id = KDBUS_DST_ID_BROADCAST;
     const DBusString *header;
     const DBusString *body;
@@ -280,14 +279,14 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     unsigned fds_count;
     dbus_bool_t autostart;
 
-    // determine name and destination id
-    if((name = dbus_message_get_destination(message)))
+    // determine destination and destination id
+    if(destination)
     {
     	dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
-	  	if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
+	  	if((destination[0] == ':') && (destination[1] == '1') && (destination[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
     	{
-    		dst_id = strtoull(&name[3], NULL, 10);
-    		name = NULL;
+    		dst_id = strtoull(&destination[3], NULL, 10);
+    		destination = NULL;
     	}    
     }
     
@@ -309,7 +308,7 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);
 
     // init basic message fields
-    msg = kdbus_init_msg(name, dst_id, body_size, use_memfd, fds_count, transport);
+    msg = kdbus_init_msg(destination, dst_id, body_size, use_memfd, fds_count, transport);
     msg->cookie = dbus_message_get_serial(message);
     autostart = dbus_message_get_auto_start (message);
     if(!autostart)
@@ -387,12 +386,12 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
     	memcpy(item->fds, unix_fds, sizeof(int) * fds_count);
     }
 
-	if (name)
+	if (destination)
 	{
 		item = KDBUS_PART_NEXT(item);
 		item->type = KDBUS_MSG_DST_NAME;
-		item->size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
-		memcpy(item->str, name, item->size - KDBUS_PART_HEADER_SIZE);
+		item->size = KDBUS_PART_HEADER_SIZE + strlen(destination) + 1;
+		memcpy(item->str, destination, item->size - KDBUS_PART_HEADER_SIZE);
 	}
 	else if (dst_id == KDBUS_DST_ID_BROADCAST)
 	{
@@ -428,7 +427,8 @@ static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message,
 	}
 out:
     free(msg);
-    close(transport->memfd);
+    if(use_memfd)
+        close(transport->memfd);
 
     return ret_size;
 }
@@ -2115,7 +2115,7 @@ do_writing (DBusTransport *transport)
 
 		message = _dbus_connection_get_message_to_send (transport->connection);
 		_dbus_assert (message != NULL);
-		if(dbus_message_get_sender(message) == NULL)  //needed for daemon
+//		if(dbus_message_get_sender(message) == NULL)  //needed for daemon  todo check if really needed
 		{
             dbus_message_unlock(message);
             dbus_message_set_sender(message, socket_transport->sender);
@@ -2127,7 +2127,7 @@ do_writing (DBusTransport *transport)
 
 		if(pDestination)
 		{
-			if(!strcmp(pDestination, "org.freedesktop.DBus"))
+			if(!strcmp(pDestination, DBUS_SERVICE_DBUS))
 			{
 				if(!strcmp(dbus_message_get_interface(message), DBUS_INTERFACE_DBUS))
 				{
@@ -2172,14 +2172,14 @@ do_writing (DBusTransport *transport)
 			if(total_bytes_to_write > socket_transport->max_bytes_written_per_iteration)
 				return -E2BIG;
 
-			bytes_written = kdbus_write_msg(socket_transport, message, TRUE);
+			bytes_written = kdbus_write_msg(socket_transport, message, pDestination, TRUE);
         }
 		else
 		{
 			if(total_bytes_to_write > socket_transport->max_bytes_written_per_iteration)
 				return -E2BIG;
 
-			bytes_written = kdbus_write_msg(socket_transport, message, FALSE);
+			bytes_written = kdbus_write_msg(socket_transport, message, pDestination, FALSE);
 		}
 
 written:

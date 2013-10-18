@@ -107,7 +107,7 @@ dbus_bool_t register_kdbus_policy(const char* name, int fd)
 
 	if (ioctl(fd, KDBUS_CMD_EP_POLICY_SET, cmd_policy) < 0)
 	{
-		_dbus_verbose ("Error setting policy: %m, %d", errno);
+		_dbus_verbose ("Error setting policy: %m, %d\n", errno);
 		return FALSE;
 	}
 

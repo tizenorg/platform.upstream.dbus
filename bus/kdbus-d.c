@@ -51,8 +51,6 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
     int fdc, ret;
     char *bus;
 
-    /*TODO Distinguish session and system bus make*/
-
     _dbus_verbose("Opening /dev/kdbus/control\n");
     fdc = open("/dev/kdbus/control", O_RDWR|O_CLOEXEC);
     if (fdc < 0)
@@ -68,8 +66,11 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
 
     if(type == DBUS_BUS_SYSTEM)
         snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%s", getuid(), "system");
+    else if(type == DBUS_BUS_SESSION)
+        snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus", getuid());
     else
         snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%u", getuid(), getpid());
+
     bus_make.n_type = KDBUS_MAKE_NAME;
     bus_make.n_size = KDBUS_PART_HEADER_SIZE + strlen(bus_make.name) + 1;
     bus_make.head.size = sizeof(struct kdbus_cmd_bus_make) + bus_make.n_size;
