@@ -1226,6 +1226,41 @@ static int put_message_into_data(DBusMessage *message, char* data)
 
 	return ret_size;
 }
+
+/**
+ * Get the length of the kdbus message content.
+ *
+ * @param msg kdbus message
+ * @return the length of the kdbus message
+ */
+static int kdbus_message_size(const struct kdbus_msg* msg)
+{
+	const struct kdbus_item *item;
+	int ret_size = 0;
+
+	KDBUS_PART_FOREACH(item, msg, items)
+	{
+		if (item->size <= KDBUS_PART_HEADER_SIZE)
+		{
+			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
+			return -1;
+		}
+		switch (item->type)
+		{
+			case KDBUS_MSG_PAYLOAD_OFF:
+				ret_size += item->vec.size;
+				break;
+			case KDBUS_MSG_PAYLOAD_MEMFD:
+				ret_size += item->memfd.size;
+				break;
+			default:
+				break;
+		}
+	}
+
+	return ret_size;
+}
+
 /**
  * Decodes kdbus message in order to extract dbus message and put it into data and fds.
  * Also captures and decodes kdbus error messages and kdbus kernel broadcasts and converts
@@ -1275,7 +1310,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			case KDBUS_MSG_PAYLOAD_OFF:
 				memcpy(data, (char *)socket_transport->kdbus_mmap_ptr + item->vec.offset, item->vec.size);
 				data += item->vec.size;
-				ret_size += item->vec.size;			
+				ret_size += item->vec.size;
 
 				_dbus_verbose("  +%s (%llu bytes) off=%llu size=%llu\n",
 					enum_MSG(item->type), item->size,
@@ -1288,17 +1323,17 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 				char *buf;
 				uint64_t size;
 
-                size = item->memfd.size;
+				size = item->memfd.size;
 				_dbus_verbose("memfd.size : %llu\n", (unsigned long long)size);
-				
+
 				buf = mmap(NULL, size, PROT_READ , MAP_SHARED, item->memfd.fd, 0);
-				if (buf == MAP_FAILED) 
+				if (buf == MAP_FAILED)
 				{
 					_dbus_verbose("mmap() fd=%i failed:%m", item->memfd.fd);
 					return -1;
 				}
 
-				memcpy(data, buf, size); 
+				memcpy(data, buf, size);
 				data += size;
 				ret_size += size;
 
@@ -1586,19 +1621,13 @@ out:
  */
 static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer, int* fds, int* n_fds)
 {
-	int ret_size;
+	int ret_size, buf_size;
 	uint64_t __attribute__ ((__aligned__(8))) offset;
 	struct kdbus_msg *msg;
 	char *data;
 	int start;
 
 	start = _dbus_string_get_length (buffer);
-	if (!_dbus_string_lengthen (buffer, socket_transport->max_bytes_read_per_iteration))
-	{
-		errno = ENOMEM;
-	    return -1;
-	}
-	data = _dbus_string_get_data_len (buffer, start, socket_transport->max_bytes_read_per_iteration);
 
 	again:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RECV, &offset) < 0)
@@ -1612,6 +1641,24 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 
 	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
 
+	buf_size = kdbus_message_size(msg);
+	if (buf_size == -1)
+	{
+		_dbus_verbose("kdbus error - too short message: %d (%m)\n", errno);
+		return -1;
+	}
+
+	/* What is the maximum size of the locally generated message?
+	   I just assume 2048 bytes */
+	buf_size = MAX(buf_size, 2048);
+
+	if (!_dbus_string_lengthen (buffer, buf_size))
+	{
+		errno = ENOMEM;
+		return -1;
+	}
+	data = _dbus_string_get_data_len (buffer, start, buf_size);
+
 	ret_size = kdbus_decode_msg(msg, data, socket_transport, fds, n_fds);
 
 	if(ret_size == -1) /* error */
@@ -1619,9 +1666,10 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 		_dbus_string_set_length (buffer, start);
 		return -1;
 	}
-	else
+	else if (buf_size != ret_size) /* case of locally generated message */
+	{
 		_dbus_string_set_length (buffer, start + ret_size);
-	
+	}
 
 	again2:
 	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RELEASE, &offset) < 0)
