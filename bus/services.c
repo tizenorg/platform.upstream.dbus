@@ -41,6 +41,7 @@
 #include "bus.h"
 #include "selinux.h"
 #include "kdbus-d.h"
+#include "dbus/kdbus.h"
 
 struct BusService
 {
@@ -60,6 +61,7 @@ struct BusOwner
 
   unsigned int allow_replacement : 1;
   unsigned int do_not_queue : 1;
+  unsigned int is_kdbus_starter : 1;
 };
 
 struct BusRegistry
@@ -208,6 +210,9 @@ bus_owner_set_flags (BusOwner *owner,
 
    owner->do_not_queue =
         (flags & DBUS_NAME_FLAG_DO_NOT_QUEUE) != FALSE;
+
+   owner->is_kdbus_starter =
+        (flags & KDBUS_NAME_STARTER) != FALSE;
 }
 
 static BusOwner *
@@ -633,12 +638,12 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
   dbus_bool_t retval;
   BusService *service;
   BusActivation  *activation;
-
   DBusString service_name_real;
   const DBusString *service_name = &service_name_real;
   char* name;
   dbus_uint32_t flags;
   __u64 sender_id;
+  dbus_bool_t rm_owner_daemon = FALSE;
 
   if (!dbus_message_get_args (message, error,
                               DBUS_TYPE_STRING, &name,
@@ -695,6 +700,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 		if (service == NULL)
 		  goto out;
 
+		rm_owner_daemon = TRUE;
 		if(!kdbus_register_policy(service_name, connection))
 		{
 			dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
@@ -726,6 +732,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	{
 	    DBusConnection* phantom;
 	    const char* name;
+//	    DBusList *link;
 
 	    name = dbus_message_get_sender(message);
 	    phantom = bus_connections_find_conn_by_name(bus_connection_get_connections(connection), name);
@@ -735,7 +742,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	        goto failed2;
 	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
 	        goto failed2;
-	    if(*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
+	    if((*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER) && rm_owner_daemon)
 	    {
             /* Here we are removing DBus daemon as an owner of the service,
              * which is set by bus_registry_ensure.
@@ -745,6 +752,17 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	        if(_bus_service_find_owner_link (service, connection))
                 bus_service_remove_owner (service, connection, transaction, NULL);
 	    }
+	    /*if(bus_service_get_is_kdbus_starter(service))
+	    {
+	        if (!bus_service_swap_owner (service, bus_service_get_primary_owners_connection(service),
+	                                       transaction, error))
+	            goto failed2;
+	    }*/
+	/*   if((link = _bus_service_find_owner_link (service, connection)))  //if daemon is a starter
+	    {
+	        _dbus_list_unlink (&service->owners, link);
+	        _dbus_list_append_link (&service->owners, link);  //it must be moved at the end of the queue
+	    }*/
 	}
 
   activation = bus_context_get_activation (registry->context);
@@ -1512,6 +1530,20 @@ bus_service_get_allow_replacement (BusService *service)
 }
 
 dbus_bool_t
+bus_service_get_is_kdbus_starter (BusService *service)
+{
+  BusOwner *owner;
+  DBusList *link;
+
+  _dbus_assert (service->owners != NULL);
+
+  link = _dbus_list_get_first_link (&service->owners);
+  owner = (BusOwner *) link->data;
+
+  return owner->is_kdbus_starter;
+}
+
+dbus_bool_t
 bus_service_has_owner (BusService     *service,
 		       DBusConnection *connection)
 {
@@ -1545,8 +1577,9 @@ bus_service_list_queued_owners (BusService *service,
       owner = (BusOwner *) link->data;
       uname = bus_connection_get_name (owner->conn);
 
-      if (!_dbus_list_append (return_list, (char *)uname))
-        goto oom;
+      if(!owner->is_kdbus_starter)
+          if (!_dbus_list_append (return_list, (char *)uname))
+              goto oom;
 
       link = _dbus_list_get_next_link (&service->owners, link);
     }

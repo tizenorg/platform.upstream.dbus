@@ -102,7 +102,6 @@ DBusServer* empty_server_init(char* address)
 DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *error)
 {
 	DBusConnection* connection;
-	DBusString daemon_name;
 
 	dbus_bus_set_bus_connection_address(type, address);
 
@@ -110,32 +109,25 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
 	if(connection == NULL)
 		return NULL;
 
-	_dbus_string_init_const(&daemon_name, DBUS_SERVICE_DBUS);
-	if(!kdbus_register_policy (&daemon_name, connection))
-		goto failed;
-
-	if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
-		goto failed;
-
-    if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='IdRemoved'"))
+	if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='IdRemoved'"))
     {
           dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
-          return FALSE;
+          goto failed;
     }
     if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='NameChanged'"))
     {
           dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
-          return FALSE;
+          goto failed;
     }
     if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='NameLost'"))
     {
           dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
-          return FALSE;
+          goto failed;
     }
     if(!add_match_kdbus (dbus_connection_get_transport(connection), 1, "member='NameAcquired'"))
     {
           dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:1, %s", _dbus_strerror_from_errno ());
-          return FALSE;
+          goto failed;
     }
 
 	if(dbus_error_is_set(error))
@@ -149,6 +141,39 @@ failed:
 		_dbus_verbose ("Daemon connected as kdbus client.\n");
 
 	return connection;
+}
+
+dbus_bool_t register_daemon_name(DBusConnection* connection)
+{
+    DBusString daemon_name;
+    dbus_bool_t retval = FALSE;
+    BusTransaction *transaction;
+
+    _dbus_string_init_const(&daemon_name, DBUS_SERVICE_DBUS);
+    if(!kdbus_register_policy (&daemon_name, connection))
+        return FALSE;
+
+    if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
+       return FALSE;
+
+    transaction = bus_transaction_new (bus_connection_get_context(connection));
+    if (transaction == NULL)
+    {
+        kdbus_release_name(connection, &daemon_name, 0);
+        goto out;
+    }
+
+    if(!bus_registry_ensure (bus_connection_get_registry (connection), &daemon_name, connection, 0, transaction, NULL))
+    {
+        kdbus_release_name(connection, &daemon_name, 0);
+        goto out;
+    }
+
+    retval = TRUE;
+
+out:
+    bus_transaction_free(transaction);
+    return retval;
 }
 
 dbus_bool_t kdbus_register_policy (const DBusString *service_name, DBusConnection* connection)
@@ -349,7 +374,7 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
     if (!bus_activation_list_services (bus_connection_get_activation (connection), &services, &len))
         return FALSE;
 
-    _dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
+    _dbus_transport_get_socket_fd (dbus_connection_get_transport(connection), &fd);
     _dbus_string_init(&name);
 
     for(i=0; i<len; i++)
@@ -400,6 +425,7 @@ dbus_bool_t update_kdbus_starters(DBusConnection* connection)
 
     services_old = bus_connection_get_services_owned(connection);
     link = _dbus_list_get_first_link(services_old);
+    link = _dbus_list_get_next_link (services_old, link); //skip org.freedesktop.DBus which is not starter
 
     while (link != NULL)
     {

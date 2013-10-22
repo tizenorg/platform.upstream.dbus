@@ -973,17 +973,26 @@ bus_context_new (const DBusString *config_file,
   {
 	  DBusString unique_name;
 
-	  bus_connections_setup_connection(context->connections, context->myKdbusConnection);
-	  dbus_connection_set_route_peer_messages (context->myKdbusConnection, FALSE);
-	  _dbus_string_init_const(&unique_name, ":1.1"); //dbus_bus_get_unique_name(context->myConnection)); this is without :1.
-	  if(!bus_connection_complete(context->myKdbusConnection, &unique_name, error))
+	  if(!bus_connections_setup_connection(context->connections, context->myKdbusConnection))
 	  {
-		  _dbus_verbose ("Bus connection complete failed for kdbus!\n");
-		  _dbus_string_free(&unique_name);
+          _dbus_verbose ("Bus connections setup connection failed for myKdbusConnection!\n");
+          dbus_connection_close (context->myKdbusConnection);
+          dbus_connection_unref (context->myKdbusConnection);
+          goto failed;
+	  }
+	  dbus_connection_set_route_peer_messages (context->myKdbusConnection, FALSE);
+	  _dbus_string_init_const (&unique_name, ":1.1"); //dbus_bus_get_unique_name(context->myConnection)); this is without :1.
+	  if(!bus_connection_complete (context->myKdbusConnection, &unique_name, error))
+	  {
+		  _dbus_verbose ("Bus connection complete failed for myKdbusConnection!\n");
 		  goto failed;
 	  }
-	  _dbus_string_free(&unique_name);
 
+	  if(!register_daemon_name(context->myKdbusConnection))
+	  {
+	      _dbus_verbose ("Registering org.freedesktop.DBus name for daemon failed!\n");
+	      goto failed;
+	  }
 	  if(!register_kdbus_starters(context->myKdbusConnection))
 	  {
           _dbus_verbose ("Registering kdbus starters for dbus activatable names failed!\n");

@@ -2115,7 +2115,7 @@ do_writing (DBusTransport *transport)
 
 		message = _dbus_connection_get_message_to_send (transport->connection);
 		_dbus_assert (message != NULL);
-//		if(dbus_message_get_sender(message) == NULL)  //needed for daemon  todo check if really needed
+		if(dbus_message_get_sender(message) == NULL)  //needed for daemon to pass pending activation messages
 		{
             dbus_message_unlock(message);
             dbus_message_set_sender(message, socket_transport->sender);

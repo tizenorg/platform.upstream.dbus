@@ -314,7 +314,7 @@ bus_dispatch (DBusConnection *connection,
       _dbus_string_init_const (&service_string, service_name);
       service = bus_registry_lookup (registry, &service_string);
 
-      if (service == NULL && dbus_message_get_auto_start (message))
+      if (dbus_message_get_auto_start (message) && (service == NULL || bus_service_get_is_kdbus_starter(service)))
         {
           BusActivation *activation;
           /* We can't do the security policy check here, since the addressed

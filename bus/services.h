@@ -97,6 +97,7 @@ dbus_bool_t     bus_service_has_owner                 (BusService     *service,
                                                        DBusConnection *connection);
 BusOwner*       bus_service_get_primary_owner         (BusService     *service);
 dbus_bool_t     bus_service_get_allow_replacement     (BusService     *service);
+dbus_bool_t     bus_service_get_is_kdbus_starter      (BusService     *service);
 const char*     bus_service_get_name                  (BusService     *service);
 dbus_bool_t     bus_service_list_queued_owners        (BusService *service,
                                                        DBusList  **return_list,
