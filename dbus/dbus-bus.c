@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2003  CodeFactory AB
  * Copyright (C) 2003  Red Hat, Inc.
+ * Copyright (C) 2013  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  * 

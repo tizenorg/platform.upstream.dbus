@@ -2,6 +2,7 @@
 /* dbus-auth.h Authentication
  *
  * Copyright (C) 2002  Red Hat Inc.
+ * Copyright (C) 2013  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  * 

@@ -2,6 +2,7 @@
 /* bus.c  message bus context object
  *
  * Copyright (C) 2003, 2004 Red Hat, Inc.
+ * Copyright (C) 2013  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  *
@@ -426,7 +427,7 @@ process_config_first_time_only (BusContext       *context,
 
   if (address)
     {
-      if(!strcmp(_dbus_string_get_const_data(address), "kdbus"))
+      if(!strcmp(_dbus_string_get_const_data(address), "kdbus:"))
       {
     	  DBusBusType type;
     	  DBusServer* server;
