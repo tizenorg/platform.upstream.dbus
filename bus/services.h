@@ -57,24 +57,28 @@ dbus_bool_t  bus_registry_acquire_service (BusRegistry                 *registry
                                            dbus_uint32_t               *result,
                                            BusTransaction              *transaction,
                                            DBusError                   *error);
-dbus_bool_t bus_registry_acquire_kdbus_service (BusRegistry      *registry,
-                              	  	  	  DBusConnection   *connection,
-                              	  	  	  DBusMessage *message,
-                              	  	  	  dbus_uint32_t    *result,
-                              	  	  	  BusTransaction   *transaction,
-                              	  	  	  DBusError        *error);
 dbus_bool_t  bus_registry_release_service (BusRegistry                 *registry,
                                            DBusConnection              *connection,
                                            const DBusString            *service_name,
                                            dbus_uint32_t               *result,
                                            BusTransaction              *transaction,
                                            DBusError                   *error);
+#ifdef ENABLE_KDBUS_TRANSPORT
+dbus_bool_t bus_registry_acquire_kdbus_service (BusRegistry      *registry,
+                                                 DBusConnection   *connection,
+                                                 DBusMessage *message,
+                                                 dbus_uint32_t    *result,
+                                                 BusTransaction   *transaction,
+                                                 DBusError        *error);
+
+
 dbus_bool_t bus_registry_release_service_kdbus (const char* sender_name,
                                           DBusConnection   *connection,
                                           const DBusString *service_name,
                                           dbus_uint32_t    *result,
                                           BusTransaction   *transaction,
                                           DBusError        *error);
+#endif
 dbus_bool_t  bus_registry_set_service_context_table (BusRegistry           *registry,
 						     DBusHashTable         *table);
 
@@ -97,7 +101,9 @@ dbus_bool_t     bus_service_has_owner                 (BusService     *service,
                                                        DBusConnection *connection);
 BusOwner*       bus_service_get_primary_owner         (BusService     *service);
 dbus_bool_t     bus_service_get_allow_replacement     (BusService     *service);
+#ifdef ENABLE_KDBUS_TRANSPORT
 dbus_bool_t     bus_service_get_is_kdbus_starter      (BusService     *service);
+#endif
 const char*     bus_service_get_name                  (BusService     *service);
 dbus_bool_t     bus_service_list_queued_owners        (BusService *service,
                                                        DBusList  **return_list,

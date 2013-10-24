@@ -28,7 +28,9 @@
 #define DBUS_BUS_H
 
 #include <dbus/dbus-connection.h>
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-address.h"
+#endif
 
 DBUS_BEGIN_DECLS
 
@@ -37,8 +39,10 @@ DBUS_BEGIN_DECLS
  * @{
  */
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBUS_EXPORT
 void			dbus_bus_set_bus_connection_address(DBusBusType address_type, char* address);
+#endif
 
 DBUS_EXPORT
 DBusConnection *dbus_bus_get              (DBusBusType     type,

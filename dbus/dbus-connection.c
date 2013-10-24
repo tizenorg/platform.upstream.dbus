@@ -45,8 +45,10 @@
 #include "dbus-threads-internal.h"
 #include "dbus-bus.h"
 #include "dbus-marshal-basic.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-transport-kdbus.h"
 #include <stdlib.h>
+#endif
 
 #ifdef DBUS_DISABLE_CHECKS
 #define TOOK_LOCK_CHECK(connection)
@@ -1248,8 +1250,13 @@ _dbus_connection_do_iteration_unlocked (DBusConnection *connection,
  * @param transport the transport.
  * @returns the new connection, or #NULL on failure.
 */
+#ifdef ENABLE_KDBUS_TRANSPORT
 static DBusConnection*
 _dbus_connection_new_for_transport_internal (DBusTransport *transport, dbus_bool_t exists)
+#else
+DBusConnection*
+_dbus_connection_new_for_transport (DBusTransport *transport)
+#endif
 {
   DBusConnection *connection;
   DBusWatchList *watch_list;
@@ -1360,7 +1367,9 @@ _dbus_connection_new_for_transport_internal (DBusTransport *transport, dbus_bool
 
   connection->disconnect_message_link = disconnect_link;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(!exists)
+#endif
   {
       CONNECTION_LOCK (connection);
 
@@ -1414,6 +1423,7 @@ _dbus_connection_new_for_transport_internal (DBusTransport *transport, dbus_bool
   return NULL;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 /**
  * Creates a new connection for the given transport.  A transport
  * represents a message stream that uses some concrete mechanism, such
@@ -1434,6 +1444,7 @@ _dbus_connection_new_for_used_transport (DBusTransport *transport)
 {
     return _dbus_connection_new_for_transport_internal(transport, TRUE);
 }
+#endif
 
 /**
  * Increments the reference count of a DBusConnection.
@@ -2703,8 +2714,13 @@ free_outgoing_message (void *element,
   dbus_message_unref (message);
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 static void
 _dbus_connection_last_unref_internal (DBusConnection *connection, dbus_bool_t unref_transport)
+#else
+static void
+_dbus_connection_last_unref (DBusConnection *connection)
+#endif
 {
   DBusList *link;
 
@@ -2715,7 +2731,9 @@ _dbus_connection_last_unref_internal (DBusConnection *connection, dbus_bool_t un
   /* You have to disconnect the connection before unref:ing it. Otherwise
    * you won't get the disconnected message.
    */
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(unref_transport)
+#endif
       _dbus_assert (!_dbus_transport_get_is_connected (connection->transport));
   _dbus_assert (connection->server_guid == NULL);
   
@@ -2770,7 +2788,9 @@ _dbus_connection_last_unref_internal (DBusConnection *connection, dbus_bool_t un
 
   _dbus_counter_unref (connection->outgoing_counter);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(unref_transport)
+#endif
       _dbus_transport_unref (connection->transport);
 
   if (connection->disconnect_message_link)
@@ -2793,6 +2813,7 @@ _dbus_connection_last_unref_internal (DBusConnection *connection, dbus_bool_t un
   dbus_free (connection);
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 /* This is run without the mutex held, but after the last reference
  * to the connection has been dropped we should have no thread-related
  * problems
@@ -2802,6 +2823,7 @@ _dbus_connection_last_unref (DBusConnection *connection)
 {
     _dbus_connection_last_unref_internal(connection, TRUE);
 }
+#endif
 
 /**
  * Decrements the reference count of a DBusConnection, and finalizes
@@ -2851,6 +2873,7 @@ dbus_connection_unref (DBusConnection *connection)
     }
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 void
 dbus_connection_unref_phantom (DBusConnection *connection)
 {
@@ -2866,6 +2889,7 @@ dbus_connection_unref_phantom (DBusConnection *connection)
   if (old_refcount == 1)
       _dbus_connection_last_unref_internal(connection, FALSE);
 }
+#endif
 
 /*
  * Note that the transport can disconnect itself (other end drops us)
@@ -3030,6 +3054,7 @@ dbus_connection_get_is_authenticated (DBusConnection *connection)
   return res;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 /**
  * Sets authenticated status for connection. Needed for kdbus, where authentication is
  * made in different manner.
@@ -3047,6 +3072,7 @@ dbus_connection_set_is_authenticated (DBusConnection *connection)
 
   return TRUE;
 }
+#endif
 
 /**
  * Gets whether the connection is not authenticated as a specific
@@ -6360,6 +6386,7 @@ _dbus_connection_get_address (DBusConnection *connection)
   return _dbus_transport_get_address (connection->transport);
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusTransport*
 dbus_connection_get_transport(DBusConnection *connection)
 {
@@ -6367,5 +6394,6 @@ dbus_connection_get_transport(DBusConnection *connection)
 
 	return connection->transport;
 }
+#endif
 
 /** @} */

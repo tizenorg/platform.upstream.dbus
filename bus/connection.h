@@ -43,8 +43,10 @@ void            bus_connections_foreach           (BusConnections               
 void            bus_connections_foreach_active    (BusConnections               *connections,
                                                    BusConnectionForeachFunction  function,
                                                    void                         *data);
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusConnection* bus_connections_find_conn_by_name (BusConnections *connections,
                                                    const char* name);
+#endif
 BusContext*     bus_connections_get_context       (BusConnections               *connections);
 void            bus_connections_increment_stamp   (BusConnections               *connections);
 BusContext*     bus_connection_get_context        (DBusConnection               *connection);
@@ -81,7 +83,9 @@ dbus_bool_t bus_connection_preallocate_oom_error (DBusConnection *connection);
 void        bus_connection_send_oom_error        (DBusConnection *connection,
                                                   DBusMessage    *in_reply_to);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusList** bus_connection_get_services_owned (DBusConnection *connection);
+#endif
 
 /* called by signals.c */
 dbus_bool_t bus_connection_add_match_rule      (DBusConnection *connection,
@@ -137,7 +141,9 @@ dbus_bool_t     bus_transaction_send_error_reply (BusTransaction               *
                                                   DBusMessage                  *in_reply_to);
 void            bus_transaction_cancel_and_free  (BusTransaction               *transaction);
 void            bus_transaction_execute_and_free (BusTransaction               *transaction);
+#ifdef ENABLE_KDBUS_TRANSPORT
 void 			bus_transaction_free 			 (BusTransaction *transaction);
+#endif
 dbus_bool_t     bus_transaction_add_cancel_hook  (BusTransaction               *transaction,
                                                   BusTransactionCancelFunction  cancel_function,
                                                   void                         *data,

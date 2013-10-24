@@ -183,6 +183,7 @@ _dbus_server_init_base (DBusServer             *server,
   return FALSE;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 static void mini_vtable_dummy_func(DBusServer *server)
 {
     // Used to prevent assert errors. Pointer to function is passed to
@@ -228,6 +229,7 @@ failed:
 	dbus_free(server);
 	return NULL;
 }
+#endif
 
 
 /**

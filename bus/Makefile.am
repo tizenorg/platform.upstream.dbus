@@ -76,8 +76,6 @@ BUS_SOURCES=					\
 	driver.h				\
 	expirelist.c				\
 	expirelist.h				\
-	kdbus-d.c					\
-	kdbus-d.h					\	
 	policy.c				\
 	policy.h				\
 	selinux.h				\
@@ -93,6 +91,13 @@ BUS_SOURCES=					\
 	utils.c					\
 	utils.h					\
 	$(XML_SOURCES)
+
+if ENABLE_KDBUS_TRANSPORT
+BUS_SOURCES+= 				\
+	kdbus-d.c				\
+	kdbus-d.h
+endif
+
 
 dbus_daemon_SOURCES=				\
 	$(BUS_SOURCES)				\

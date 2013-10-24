@@ -33,10 +33,12 @@
 #include "dbus-threads-internal.h"
 #include "dbus-connection-internal.h"
 #include "dbus-string.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-transport-kdbus.h"
 #include <stdlib.h>
 #include <limits.h>
 #include <stdio.h>
+#endif
 
 /**
  * @defgroup DBusBus Message bus APIs
@@ -140,12 +142,14 @@ get_from_env (char           **connection_p,
     }
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 void dbus_bus_set_bus_connection_address(DBusBusType address_type, char* address)
 {
 	if(bus_connection_addresses[address_type] != NULL)
 		free(bus_connection_addresses[address_type]);
 	bus_connection_addresses[address_type] = address;
 }
+#endif
 
 static dbus_bool_t
 init_session_address (void)
@@ -726,7 +730,7 @@ dbus_bus_register (DBusConnection *connection,
       _DBUS_SET_OOM (error);
       goto out;
     }
-  //_dbus_verbose("-- Our uniqe name is: %s\n", bd->unique_name);
+
   retval = TRUE;
   
  out:
@@ -734,8 +738,6 @@ dbus_bus_register (DBusConnection *connection,
 
   if (message)
     dbus_message_unref (message);
-  else if (name)
-	  free(name);
 
   if (reply)
     dbus_message_unref (reply);

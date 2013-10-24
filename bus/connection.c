@@ -191,7 +191,9 @@ bus_connection_disconnected (DBusConnection *connection)
   BusConnectionData *d;
   BusService *service;
   BusMatchmaker *matchmaker;
+#ifdef ENABLE_KDBUS_TRANSPORT
   dbus_bool_t is_phantom = FALSE;
+#endif
   
   d = BUS_CONNECTION_DATA (connection);
   _dbus_assert (d != NULL);
@@ -199,8 +201,10 @@ bus_connection_disconnected (DBusConnection *connection)
   _dbus_verbose ("%s disconnected, dropping all service ownership and releasing\n",
                  d->name ? d->name : "(inactive)");
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(d->connections->context) && (strcmp(bus_connection_get_name(connection), ":1.1")))
       is_phantom = TRUE;
+#endif
 
   /* Delete our match rules */
   if (d->n_match_rules > 0)
@@ -310,9 +314,12 @@ bus_connection_disconnected (DBusConnection *connection)
   dbus_connection_set_data (connection,
                             connection_data_slot,
                             NULL, NULL);
+
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(is_phantom)
       dbus_connection_unref_phantom(connection);
   else
+#endif
       dbus_connection_unref (connection);
 }
 
@@ -1002,6 +1009,7 @@ bus_connections_foreach (BusConnections               *connections,
   foreach_inactive (connections, function, data);
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusConnection*
 bus_connections_find_conn_by_name(BusConnections *connections, const char* name)
 {
@@ -1021,6 +1029,7 @@ bus_connections_find_conn_by_name(BusConnections *connections, const char* name)
 
     return NULL;
 }
+#endif
 
 BusContext*
 bus_connections_get_context (BusConnections *connections)
@@ -1378,6 +1387,7 @@ bus_connection_get_n_services_owned (DBusConnection *connection)
   return d->n_services_owned;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusList**
 bus_connection_get_services_owned (DBusConnection *connection)
 {
@@ -1387,6 +1397,7 @@ bus_connection_get_services_owned (DBusConnection *connection)
 
     return &d->services_owned;
 }
+#endif
 
 dbus_bool_t
 bus_connection_complete (DBusConnection   *connection,
@@ -2053,7 +2064,9 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
   if (!dbus_message_set_sender (message, DBUS_SERVICE_DBUS))
     return FALSE;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(!bus_context_is_kdbus(bus_transaction_get_context (transaction))) /* we can't set destination on the basis of connection when on kdbus*/
+#endif
     if (bus_connection_is_active (connection))
     {
       if (!dbus_message_set_destination (message,
@@ -2269,12 +2282,14 @@ bus_transaction_execute_and_free (BusTransaction *transaction)
   dbus_free (transaction);
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 void
 bus_transaction_free (BusTransaction *transaction)
 {
 	  free_cancel_hooks (transaction);
 	  dbus_free (transaction);
 }
+#endif
 
 static void
 bus_connection_remove_transactions (DBusConnection *connection)

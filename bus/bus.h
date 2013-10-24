@@ -95,7 +95,9 @@ BusConnections*   bus_context_get_connections                    (BusContext    
 BusActivation*    bus_context_get_activation                     (BusContext       *context);
 BusMatchmaker*    bus_context_get_matchmaker                     (BusContext       *context);
 DBusLoop*         bus_context_get_loop                           (BusContext       *context);
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusConnection*   bus_context_get_myConnection					 (BusContext       *context);
+#endif
 dbus_bool_t       bus_context_allow_unix_user                    (BusContext       *context,
                                                                   unsigned long     uid);
 dbus_bool_t       bus_context_allow_windows_user                 (BusContext       *context,
@@ -115,7 +117,11 @@ int               bus_context_get_max_services_per_connection    (BusContext    
 int               bus_context_get_max_match_rules_per_connection (BusContext       *context);
 int               bus_context_get_max_replies_per_connection     (BusContext       *context);
 int               bus_context_get_reply_timeout                  (BusContext       *context);
+
+#ifdef ENABLE_KDBUS_TRANSPORT
 dbus_bool_t 	  bus_context_is_kdbus							 (BusContext	   *context);
+#endif
+
 void              bus_context_log                                (BusContext       *context,
                                                                   DBusSystemLogSeverity severity,
                                                                   const char       *msg,

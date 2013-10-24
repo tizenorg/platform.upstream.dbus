@@ -72,7 +72,9 @@ void              _dbus_connection_toggle_timeout_unlocked     (DBusConnection  
                                                                 DBusTimeout        *timeout,
                                                                 dbus_bool_t         enabled);
 DBusConnection*   _dbus_connection_new_for_transport           (DBusTransport      *transport);
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusConnection*   _dbus_connection_new_for_used_transport       (DBusTransport *transport);
+#endif
 void              _dbus_connection_do_iteration_unlocked       (DBusConnection     *connection,
                                                                 DBusPendingCall    *pending,
                                                                 unsigned int        flags,
