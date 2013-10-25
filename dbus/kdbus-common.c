@@ -92,8 +92,7 @@ static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_poli
  * Name of the policy equals name on the bus.
  *
  * @param name name of the policy = name of the connection
- * @param connection the connection
- * @param error place to store errors
+ * @param fd - file descriptor of the connection
  *
  * @returns #TRUE on success
  */
@@ -131,6 +130,9 @@ dbus_bool_t register_kdbus_policy(const char* name, int fd)
 	return TRUE;
 }
 
+/*
+ * Asks kdbus for well-known names registered on the bus
+ */
 dbus_bool_t list_kdbus_names(int fd, char ***listp, int *array_len)
 {
 	struct kdbus_cmd_names* pCmd;
@@ -206,20 +208,19 @@ out:
 }
 
 /**
- * kdbus version of dbus_bus_request_name.
  *
- * Asks the bus to assign the given name to this connection.
+ * Asks the bus to assign the given name to the connection.
  *
  * Use same flags as original dbus version with one exception below.
  * Result flag #DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER is currently
  * never returned by kdbus, instead DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
  * is returned by kdbus.
  *
- * @param connection the connection
+ * @param fd - file descriptor of the connection
  * @param name the name to request
  * @param flags flags
- * @param error location to store the error
- * @returns a result code, -1 if error is set
+ * @param id unique id of the connection for which the name is being registered
+ * @returns a DBus result code on success, -errno on error
  */
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
 {
@@ -230,7 +231,6 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
 
 	cmd_name = alloca(size);
 
-//	memset(cmd_name, 0, size);
 	strcpy(cmd_name->name, name);
 	cmd_name->size = size;
 
@@ -268,6 +268,17 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
 	 */
 }
 
+/**
+ *
+ * Releases well-known name - the connections resign from the name
+ * which can be then assigned to another connection or the connection
+ * is being removed from the queue for that name
+ *
+ * @param fd - file descriptor of the connection
+ * @param name the name to request
+ * @param id unique id of the connection for which the name is being released
+ * @returns a DBus result code on success, -errno on error
+ */
 int release_kdbus_name(int fd, const char *name, __u64 id)
 {
 	struct kdbus_cmd_name *cmd_name;

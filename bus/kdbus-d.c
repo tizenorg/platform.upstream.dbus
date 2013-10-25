@@ -43,6 +43,9 @@
 #include <unistd.h>
 #include <errno.h>
 
+/*
+ * Converts string with unique name into __u64 id number. If the name is not unique, sets error.
+ */
 __u64 sender_name_to_id(const char* name, DBusError* error)
 {
 	__u64 sender_id = 0;
@@ -55,6 +58,9 @@ __u64 sender_name_to_id(const char* name, DBusError* error)
 	return sender_id;
 }
 
+/*
+ * Creates kdbus bus of given type.
+ */
 char* make_kdbus_bus(DBusBusType type, DBusError *error)
 {
     struct {
@@ -110,11 +116,19 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
 	return bus;
 }
 
+/*
+ * Minimal server init needed by context to go further.
+ */
 DBusServer* empty_server_init(char* address)
 {
 	return dbus_server_init_mini(address);
 }
 
+/*
+ * Connects daemon to bus created by him and adds matches for "system" broadcasts.
+ * Do not requests org.freedesktop.DBus name, because it's to early
+ * (some structures of BusContext are not ready yet).
+ */
 DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *error)
 {
 	DBusConnection* connection;
@@ -159,6 +173,9 @@ failed:
 	return connection;
 }
 
+/*
+ * Asks bus for org.freedesktop.DBus well-known name.
+ */
 dbus_bool_t register_daemon_name(DBusConnection* connection)
 {
     DBusString daemon_name;
@@ -228,6 +245,9 @@ dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int 
 	return list_kdbus_names(fd, listp, array_len);
 }
 
+/*
+ *  Register match rule in kdbus on behalf of sender of the message
+ */
 dbus_bool_t kdbus_add_match_rule (DBusConnection* connection, DBusMessage* message, const char* text, DBusError* error)
 {
 	__u64 sender_id;
@@ -246,6 +266,9 @@ dbus_bool_t kdbus_add_match_rule (DBusConnection* connection, DBusMessage* messa
 	return TRUE;
 }
 
+/*
+ *  Removes match rule in kdbus on behalf of sender of the message
+ */
 dbus_bool_t kdbus_remove_match (DBusConnection* connection, DBusMessage* message, DBusError* error)
 {
 	__u64 sender_id;
@@ -263,6 +286,9 @@ dbus_bool_t kdbus_remove_match (DBusConnection* connection, DBusMessage* message
 	return TRUE;
 }
 
+/*
+ *  Asks kdbus for uid of the owner of the name given in the message
+ */
 dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, DBusMessage* message, unsigned long* uid, DBusError* error)
 {
 	char* name = NULL;
@@ -289,6 +315,9 @@ dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, DBusMessa
 	return ret;
 }
 
+/*
+ *  Asks kdbus for pid of the owner of the name given in the message
+ */
 dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, DBusMessage* message, unsigned long* pid, DBusError* error)
 {
 	char* name = NULL;
@@ -315,6 +344,9 @@ dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, DBu
 	return ret;
 }
 
+/*
+ *  Asks kdbus for selinux_security_context of the owner of the name given in the message
+ */
 dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* connection, DBusMessage* message, DBusMessage* reply, DBusError* error)
 {
 	char* name = NULL;
@@ -344,12 +376,17 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 	return ret;
 }
 
-DBusConnection* create_phantom_connection(DBusConnection* connection, const char* unique_name, DBusError* error)
+/*
+ * Create connection structure for given name. It is needed to control starters - activatable services
+ * and for ListQueued method (as long as kdbus is not supporting it). This connections don't have it's own
+ * fd so it is set up on the basis of daemon's transport. Functionality of such connection is limited.
+ */
+DBusConnection* create_phantom_connection(DBusConnection* connection, const char* name, DBusError* error)
 {
     DBusConnection *phantom_connection;
-    DBusString name;
+    DBusString Sname;
 
-    _dbus_string_init_const(&name, unique_name);
+    _dbus_string_init_const(&Sname, name);
 
     phantom_connection = _dbus_connection_new_for_used_transport (dbus_connection_get_transport(connection));
     if(phantom_connection == NULL)
@@ -358,10 +395,10 @@ DBusConnection* create_phantom_connection(DBusConnection* connection, const char
     {
         dbus_connection_unref_phantom(phantom_connection);
         phantom_connection = NULL;
-        dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", unique_name);
+        dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
         goto out;
     }
-    if(!bus_connection_complete(phantom_connection, &name, error))
+    if(!bus_connection_complete(phantom_connection, &Sname, error))
     {
         bus_connection_disconnected(phantom_connection);
         phantom_connection = NULL;
@@ -374,6 +411,9 @@ out:
     return phantom_connection;
 }
 
+/*
+ * Registers activatable services as kdbus starters.
+ */
 dbus_bool_t register_kdbus_starters(DBusConnection* connection)
 {
     int i,j, len;
@@ -423,6 +463,10 @@ out:
     return retval;
 }
 
+/*
+ * Updates kdbus starters (activatable services) after configuration was reloaded.
+ * It releases all previous starters and registers all new.
+ */
 dbus_bool_t update_kdbus_starters(DBusConnection* connection)
 {
     dbus_bool_t retval = FALSE;
@@ -487,6 +531,10 @@ static dbus_bool_t remove_conn_if_name_match (DBusConnection *connection, void *
     return TRUE;
 }*/
 
+/*
+ * Analyzes system broadcasts about id and name changes.
+ * Basing on this it sends NameAcquired and NameLost signals and clear phantom connections.
+ */
 void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusConnection *connection)
 {
     const char *name, *old, *new;
