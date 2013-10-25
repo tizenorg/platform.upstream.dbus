@@ -70,14 +70,15 @@ if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
         item->vec.size = datasize;
 
 /**
- * Opaque object representing a socket file descriptor transport.
+ * Opaque object representing a transport. In kdbus transport it has nothing common
+ * with socket, but the name was preserved to comply with  upper functions.
  */
-typedef struct DBusTransportSocket DBusTransportSocket;
+typedef struct DBusTransportKdbus DBusTransportKdbus;
 
 /**
  * Implementation details of DBusTransportSocket. All members are private.
  */
-struct DBusTransportSocket
+struct DBusTransportKdbus
 {
   DBusTransport base;                   /**< Parent instance */
   int fd;                               /**< File descriptor. */
@@ -110,12 +111,12 @@ struct DBusTransportSocket
 };
 
 static dbus_bool_t
-socket_get_socket_fd (DBusTransport *transport,
+kdbus_get_kdbus_fd (DBusTransport *transport,
                       int           *fd_p)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
-  *fd_p = socket_transport->fd;
+  *fd_p = kdbus_transport->fd;
 
   return TRUE;
 }
@@ -140,6 +141,10 @@ static dbus_bool_t add_message_to_received(DBusMessage *message, DBusConnection*
 	return TRUE;
 }
 
+/*
+ * Generates local error message as a reply to message given as parameter
+ * and adds generated error message to received messages queue.
+ */
 static int reply_with_error(char* error_type, const char* template, const char* object, DBusMessage *message, DBusConnection* connection)
 {
 	DBusMessage *errMessage;
@@ -162,6 +167,10 @@ static int reply_with_error(char* error_type, const char* template, const char* 
 	return -1;
 }
 
+/*
+ *  Generates reply to the message given as a parameter with one item in the reply body
+ *  and adds generated reply message to received messages queue.
+ */
 static int reply_1_data(DBusMessage *message, int data_type, void* pData, DBusConnection* connection)
 {
 	DBusMessageIter args;
@@ -202,7 +211,7 @@ static int reply_ack(DBusMessage *message, DBusConnection* connection)
  * Triggered when message payload is over MEMFD_SIZE_THRESHOLD
  * 
  */
-static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
+static int kdbus_init_memfd(DBusTransportKdbus* socket_transport)
 {
 	int memfd;
 	
@@ -227,7 +236,7 @@ static int kdbus_init_memfd(DBusTransportSocket* socket_transport)
  * @param transport transport
  * @return initialized kdbus message
  */
-static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd, int fds_count, DBusTransportSocket *transport)
+static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd, int fds_count, DBusTransportKdbus *transport)
 {
     struct kdbus_msg* msg;
     uint64_t msg_size;
@@ -267,7 +276,7 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
 }
 
 /**
- * Builds and sends kdbus message using Dbus message.
+ * Builds and sends kdbus message using DBus message.
  * Decide whether used payload vector or memfd memory pool.
  * Handles broadcasts and unicast messages, and passing of Unix fds.
  * Does error handling.
@@ -278,7 +287,7 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
  * @param encoded flag if the message is encoded
  * @return size of data sent
  */
-static int kdbus_write_msg(DBusTransportSocket *transport, DBusMessage *message, const char* destination, dbus_bool_t encoded)
+static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, const char* destination, dbus_bool_t encoded)
 {
     struct kdbus_msg *msg;
     struct kdbus_item *item;
@@ -451,8 +460,8 @@ out:
  * Performs kdbus query of id of the given name
  *
  * @param name name to query for
- * @param fd bus file
- * @param ownerID place to store id of the name
+ * @param transport transport
+ * @param pInfo nameInfo structure address to store info about the name
  * @return 0 on success, -errno if failed
  */
 int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo* pInfo)
@@ -474,7 +483,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 	if (!msg)
 	{
 		_dbus_verbose("Error allocating memory for: %s,%s\n", _dbus_strerror (errno), _dbus_error_from_errno (errno));
-		return -1;
+		return -errno;
 	}
 
 	memset(msg, 0, size);
@@ -490,7 +499,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 	memcpy(item->str, name, strlen(name) + 1);
 
 	again:
-	ret = ioctl(((DBusTransportSocket*)transport)->fd, KDBUS_CMD_NAME_QUERY, msg);
+	ret = ioctl(((DBusTransportKdbus*)transport)->fd, KDBUS_CMD_NAME_QUERY, msg);
 	if (ret < 0)
 	{
 		if(errno == EINTR)
@@ -536,16 +545,13 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 }
 
 /**
- * Kdbus part of dbus_bus_register.
- * Shouldn't be used separately because it needs to be surrounded
- * by other functions as it is done in dbus_bus_register.
+ * Performs kdbus hello - registration on the kdbus bus
  *
  * @param name place to store unique name given by bus
- * @param connection the connection
- * @param error place to store errors
+ * @param transportS transport structure
  * @returns #TRUE on success
  */
-static dbus_bool_t bus_register_kdbus(char* name, DBusTransportSocket* transportS)
+static dbus_bool_t bus_register_kdbus(char* name, DBusTransportKdbus* transportS)
 {
 	struct kdbus_cmd_hello __attribute__ ((__aligned__(8))) hello;
 
@@ -624,21 +630,17 @@ static int parse_match_key(const char *rule, const char* key, char** pValue)
  *
  * The "rule" argument is the string form of a match rule.
  *
- * In kdbus function do not blocks.
- *
- * Upper function returns nothing because of blocking issues
- * so there is no point to return true or false here.
- *
  * Only part of the dbus's matching capabilities is implemented in kdbus now, because of different mechanism.
  * Current mapping:
  * interface match key mapped to bloom
  * sender match key mapped to src_name
- * also handled org.freedesktop.dbus members: NameOwnerChanged, NameLost, NameAcquired
+ * also handled org.freedesktop.dbus member: NameOwnerChanged
+ * and separately NameLost, NameAcquired, IdAdded, IdRemoved
  *
- * @param connection connection to the message bus
+ * @param transport transport
+ * @param id id of connection for which the rule is to be added
  * @param rule textual form of match rule
- * @param error location to store any errors - may be NULL
- */
+  */
 dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rule)
 {
 	struct kdbus_cmd_match* pCmd_match;
@@ -650,7 +652,7 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
 	char* pName = NULL;
 	char* pInterface = NULL;
 	dbus_bool_t ret_value = FALSE;
-	DBusTransportSocket* transportS = (DBusTransportSocket*)transport;
+	DBusTransportKdbus* transportS = (DBusTransportKdbus*)transport;
 
 	/*parsing rule and calculating size of command*/
 	size = sizeof(struct kdbus_cmd_match);
@@ -783,17 +785,15 @@ out:
 
 /**
  * Opposing to dbus, in kdbus removes all match rules with given
- * cookie, which now is equal to uniqe id.
+ * cookie, which in this implementation is equal to uniqe id.
  *
- * In kdbus this function will not block
- *
- * @param connection connection to the message bus
- * @param error location to store any errors - may be NULL
+ * @param transport transport
+ * @param id connection id for which rules are to be removed
  */
 dbus_bool_t remove_match_kdbus (DBusTransport* transport, __u64 id)
 {
 	struct kdbus_cmd_match __attribute__ ((__aligned__(8))) cmd;
-	DBusTransportSocket* transportS = (DBusTransportSocket*) transport;
+	DBusTransportKdbus* transportS = (DBusTransportKdbus*) transport;
 
 	cmd.cookie = id;
 	cmd.id = id;
@@ -815,20 +815,8 @@ dbus_bool_t remove_match_kdbus (DBusTransport* transport, __u64 id)
  * Handles messages sent to bus daemon - "org.freedesktop.DBus" and translates them to appropriate
  * kdbus ioctl commands. Than translate kdbus reply into dbus message and put it into recived messages queue.
  *
- * !!! Not all methods are handled !!! Doubt if it is even possible.
- * If method is not handled, returns error reply org.freedesktop.DBus.Error.UnknownMethod
- *
- * Handled methods:
- * - GetNameOwner
- * - NameHasOwner
- * - ListNames
- *
- * Not handled methods:
- * - ListActivatableNames
- * - StartServiceByName
- * - UpdateActivationEnvironment
- * - GetConnectionUnixUser
- * - GetId
+ * Now it captures only Hello message, which must be handled locally.
+ * All the rest is passed to dbus-daemon.
  */
 static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *message)
 {
@@ -846,16 +834,16 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 		name = malloc(snprintf(name, 0, "%llu", ULLONG_MAX) + 1);
 		if(name == NULL)
 			return -1;
-		if(!bus_register_kdbus(name, (DBusTransportSocket*)transport))
+		if(!bus_register_kdbus(name, (DBusTransportKdbus*)transport))
 			goto outH1;
-		if(!register_kdbus_policy(name, ((DBusTransportSocket*)transport)->fd))
+		if(!register_kdbus_policy(name, ((DBusTransportKdbus*)transport)->fd))
 			goto outH1;
 
 		sender = malloc (strlen(name) + 4);
 		if(!sender)
 			goto outH1;
 		sprintf(sender, ":1.%s", name);
-		((DBusTransportSocket*)transport)->sender = sender;
+		((DBusTransportKdbus*)transport)->sender = sender;
 
 		if(!reply_1_data(message, DBUS_TYPE_STRING, &name, transport->connection))
 			return 0;  //todo why we cannot free name after sending reply, shouldn't we?
@@ -875,10 +863,10 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 		if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_UINT32, &flags, DBUS_TYPE_INVALID))
 			return -1;
 
-		if(!register_kdbus_policy(name, ((DBusTransportSocket*)transport)->fd))
+		if(!register_kdbus_policy(name, ((DBusTransportKdbus*)transport)->fd))
 			return -1;
 
-		result = request_kdbus_name(((DBusTransportSocket*)transport)->fd, name, flags, 0);
+		result = request_kdbus_name(((DBusTransportKdbus*)transport)->fd, name, flags, 0);
 		if(result == -EPERM)
 			return reply_with_error(DBUS_ERROR_ACCESS_DENIED,
 					  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
@@ -995,7 +983,7 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 
   again:
 		cmd_size = 0;
-		if(ioctl(((DBusTransportSocket*)transport)->fd, KDBUS_CMD_NAME_LIST, pCmd))
+		if(ioctl(((DBusTransportKdbus*)transport)->fd, KDBUS_CMD_NAME_LIST, pCmd))
 		{
 			if(errno == EINTR)
 				goto again;
@@ -1268,12 +1256,12 @@ static int kdbus_message_size(const struct kdbus_msg* msg)
  *
  * @param msg kdbus message
  * @param data place to copy dbus message to
- * @param socket_transport transport
+ * @param kdbus_transport transport
  * @param fds place to store file descriptors received
  * @param n_fds place to store quantity of file descriptor
  * @return number of dbus message's bytes received or -1 on error
  */
-static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTransportSocket* socket_transport, int* fds, int* n_fds)
+static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTransportKdbus* kdbus_transport, int* fds, int* n_fds)
 {
 	const struct kdbus_item *item;
 	int ret_size = 0;
@@ -1308,7 +1296,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 		switch (item->type)
 		{
 			case KDBUS_MSG_PAYLOAD_OFF:
-				memcpy(data, (char *)socket_transport->kdbus_mmap_ptr + item->vec.offset, item->vec.size);
+				memcpy(data, (char *)kdbus_transport->kdbus_mmap_ptr + item->vec.offset, item->vec.size);
 				data += item->vec.size;
 				ret_size += item->vec.size;
 
@@ -1619,7 +1607,7 @@ out:
  * @param n_fds place  to store number of file descriptors
  * @return size of received message on success, -1 on error
  */
-static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString *buffer, int* fds, int* n_fds)
+static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *buffer, int* fds, int* n_fds)
 {
 	int ret_size, buf_size;
 	uint64_t __attribute__ ((__aligned__(8))) offset;
@@ -1682,61 +1670,69 @@ static int kdbus_read_message(DBusTransportSocket *socket_transport, DBusString 
 
 	return ret_size;
 }
-
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static void
 free_watches (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
   _dbus_verbose ("start\n");
 
-  if (socket_transport->read_watch)
+  if (kdbus_transport->read_watch)
     {
       if (transport->connection)
         _dbus_connection_remove_watch_unlocked (transport->connection,
-                                                socket_transport->read_watch);
-      _dbus_watch_invalidate (socket_transport->read_watch);
-      _dbus_watch_unref (socket_transport->read_watch);
-      socket_transport->read_watch = NULL;
+                                                kdbus_transport->read_watch);
+      _dbus_watch_invalidate (kdbus_transport->read_watch);
+      _dbus_watch_unref (kdbus_transport->read_watch);
+      kdbus_transport->read_watch = NULL;
     }
 
-  if (socket_transport->write_watch)
+  if (kdbus_transport->write_watch)
     {
       if (transport->connection)
         _dbus_connection_remove_watch_unlocked (transport->connection,
-                                                socket_transport->write_watch);
-      _dbus_watch_invalidate (socket_transport->write_watch);
-      _dbus_watch_unref (socket_transport->write_watch);
-      socket_transport->write_watch = NULL;
+                                                kdbus_transport->write_watch);
+      _dbus_watch_invalidate (kdbus_transport->write_watch);
+      _dbus_watch_unref (kdbus_transport->write_watch);
+      kdbus_transport->write_watch = NULL;
     }
 
   _dbus_verbose ("end\n");
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static void
-socket_finalize (DBusTransport *transport)
+transport_finalize (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
   _dbus_verbose ("\n");
 
   free_watches (transport);
 
-  _dbus_string_free (&socket_transport->encoded_outgoing);
-  _dbus_string_free (&socket_transport->encoded_incoming);
+  _dbus_string_free (&kdbus_transport->encoded_outgoing);
+  _dbus_string_free (&kdbus_transport->encoded_incoming);
 
   _dbus_transport_finalize_base (transport);
 
-  _dbus_assert (socket_transport->read_watch == NULL);
-  _dbus_assert (socket_transport->write_watch == NULL);
+  _dbus_assert (kdbus_transport->read_watch == NULL);
+  _dbus_assert (kdbus_transport->write_watch == NULL);
 
   dbus_free (transport);
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static void
 check_write_watch (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
   dbus_bool_t needed;
 
   if (transport->connection == NULL)
@@ -1744,7 +1740,7 @@ check_write_watch (DBusTransport *transport)
 
   if (transport->disconnected)
     {
-      _dbus_assert (socket_transport->write_watch == NULL);
+      _dbus_assert (kdbus_transport->write_watch == NULL);
       return;
     }
 
@@ -1778,31 +1774,34 @@ check_write_watch (DBusTransport *transport)
     }
 #endif
   _dbus_verbose ("check_write_watch(): needed = %d on connection %p watch %p fd = %d outgoing messages exist %d\n",
-                 needed, transport->connection, socket_transport->write_watch,
-                 socket_transport->fd,
+                 needed, transport->connection, kdbus_transport->write_watch,
+                 kdbus_transport->fd,
                  _dbus_connection_has_messages_to_send_unlocked (transport->connection));
 
   _dbus_connection_toggle_watch_unlocked (transport->connection,
-                                          socket_transport->write_watch,
+                                          kdbus_transport->write_watch,
                                           needed);
 
   _dbus_transport_unref (transport);
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static void
 check_read_watch (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
   dbus_bool_t need_read_watch;
 
-  _dbus_verbose ("fd = %d\n",socket_transport->fd);
+  _dbus_verbose ("fd = %d\n",kdbus_transport->fd);
 
   if (transport->connection == NULL)
     return;
 
   if (transport->disconnected)
     {
-      _dbus_assert (socket_transport->read_watch == NULL);
+      _dbus_assert (kdbus_transport->read_watch == NULL);
       return;
     }
 
@@ -1847,12 +1846,15 @@ check_read_watch (DBusTransport *transport)
 
   _dbus_verbose ("  setting read watch enabled = %d\n", need_read_watch);
   _dbus_connection_toggle_watch_unlocked (transport->connection,
-                                          socket_transport->read_watch,
+                                          kdbus_transport->read_watch,
                                           need_read_watch);
 
   _dbus_transport_unref (transport);
 }
 
+/*
+ * copy-paste from socket transport.
+ */
 static void
 do_io_error (DBusTransport *transport)
 {
@@ -1867,7 +1869,7 @@ static dbus_bool_t
 read_data_into_auth (DBusTransport *transport,
                      dbus_bool_t   *oom)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *socket_transport = (DBusTransportKdbus*) transport;
   DBusString *buffer;
   int bytes_read;
   int *fds, n_fds;
@@ -1926,12 +1928,12 @@ static int kdbus_send_auth (DBusTransport *transport,  const DBusString *buffer)
 	len = _dbus_string_get_length (buffer);
 //	data = _dbus_string_get_const_data_len (buffer, 0, len);
 
-	msg = kdbus_init_msg(NULL, 1, 0, FALSE, 0, (DBusTransportSocket*)transport);
+	msg = kdbus_init_msg(NULL, 1, 0, FALSE, 0, (DBusTransportKdbus*)transport);
 	item = msg->items;
 	MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data_len (buffer, 0, len), len);
 
     again:
-    if(ioctl(((DBusTransportSocket*)transport)->fd, KDBUS_CMD_MSG_SEND, msg))
+    if(ioctl(((DBusTransportKdbus*)transport)->fd, KDBUS_CMD_MSG_SEND, msg))
     {
         if(errno == EINTR)
             goto again;
@@ -1947,7 +1949,7 @@ static int kdbus_send_auth (DBusTransport *transport,  const DBusString *buffer)
 static dbus_bool_t
 write_data_from_auth (DBusTransport *transport)
 {
-//  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+//  DBusTransportKdbus *socket_transport = (DBusTransportSocket*) transport;
   int bytes_written;
   const DBusString *buffer;
 
@@ -1985,7 +1987,7 @@ exchange_credentials (DBusTransport *transport,
                       dbus_bool_t    do_reading,
                       dbus_bool_t    do_writing)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *socket_transport = (DBusTransportKdbus*) transport;
   DBusError error = DBUS_ERROR_INIT;
 
   _dbus_verbose ("exchange_credentials: do_reading = %d, do_writing = %d\n",
@@ -2140,7 +2142,7 @@ do_authentication (DBusTransport *transport,
 static dbus_bool_t
 do_writing (DBusTransport *transport)
 {
-	DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+	DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 	dbus_bool_t oom;
 
 #ifdef DBUS_AUTHENTICATION
@@ -2161,7 +2163,7 @@ do_writing (DBusTransport *transport)
 #if 1
 	_dbus_verbose ("do_writing(), have_messages = %d, fd = %d\n",
                  _dbus_connection_has_messages_to_send_unlocked (transport->connection),
-                 socket_transport->fd);
+                 kdbus_transport->fd);
 #endif
 
 	oom = FALSE;
@@ -2180,7 +2182,7 @@ do_writing (DBusTransport *transport)
 		if(dbus_message_get_sender(message) == NULL)  //needed for daemon to pass pending activation messages
 		{
             dbus_message_unlock(message);
-            dbus_message_set_sender(message, socket_transport->sender);
+            dbus_message_set_sender(message, kdbus_transport->sender);
             dbus_message_lock (message);
 		}
 		_dbus_message_get_network_data (message, &header, &body);
@@ -2212,36 +2214,36 @@ do_writing (DBusTransport *transport)
 		}
 		if (_dbus_auth_needs_encoding (transport->auth))
         {
-			if (_dbus_string_get_length (&socket_transport->encoded_outgoing) == 0)
+			if (_dbus_string_get_length (&kdbus_transport->encoded_outgoing) == 0)
             {
 				if (!_dbus_auth_encode_data (transport->auth,
-                                           header, &socket_transport->encoded_outgoing))
+                                           header, &kdbus_transport->encoded_outgoing))
                 {
 					oom = TRUE;
 					goto out;
                 }
 
 				if (!_dbus_auth_encode_data (transport->auth,
-                                           body, &socket_transport->encoded_outgoing))
+                                           body, &kdbus_transport->encoded_outgoing))
                 {
-					_dbus_string_set_length (&socket_transport->encoded_outgoing, 0);
+					_dbus_string_set_length (&kdbus_transport->encoded_outgoing, 0);
 					oom = TRUE;
 					goto out;
                 }
             }
 
-			total_bytes_to_write = _dbus_string_get_length (&socket_transport->encoded_outgoing);
-			if(total_bytes_to_write > socket_transport->max_bytes_written_per_iteration)
+			total_bytes_to_write = _dbus_string_get_length (&kdbus_transport->encoded_outgoing);
+			if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
 				return -E2BIG;
 
-			bytes_written = kdbus_write_msg(socket_transport, message, pDestination, TRUE);
+			bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination, TRUE);
         }
 		else
 		{
-			if(total_bytes_to_write > socket_transport->max_bytes_written_per_iteration)
+			if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
 				return -E2BIG;
 
-			bytes_written = kdbus_write_msg(socket_transport, message, pDestination, FALSE);
+			bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination, FALSE);
 		}
 
 written:
@@ -2267,16 +2269,16 @@ written:
 			_dbus_verbose (" wrote %d bytes of %d\n", bytes_written,
                          total_bytes_to_write);
 
-			socket_transport->message_bytes_written += bytes_written;
+			kdbus_transport->message_bytes_written += bytes_written;
 
-			_dbus_assert (socket_transport->message_bytes_written <=
+			_dbus_assert (kdbus_transport->message_bytes_written <=
                         total_bytes_to_write);
 
-			  if (socket_transport->message_bytes_written == total_bytes_to_write)
+			  if (kdbus_transport->message_bytes_written == total_bytes_to_write)
 			  {
-				  socket_transport->message_bytes_written = 0;
-				  _dbus_string_set_length (&socket_transport->encoded_outgoing, 0);
-				  _dbus_string_compact (&socket_transport->encoded_outgoing, 2048);
+				  kdbus_transport->message_bytes_written = 0;
+				  _dbus_string_set_length (&kdbus_transport->encoded_outgoing, 0);
+				  _dbus_string_compact (&kdbus_transport->encoded_outgoing, 2048);
 
 				  _dbus_connection_message_sent_unlocked (transport->connection,
 														  message);
@@ -2294,13 +2296,13 @@ written:
 static dbus_bool_t
 do_reading (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
   DBusString *buffer;
   int bytes_read;
   dbus_bool_t oom = FALSE;
   int *fds, n_fds;
 
-  _dbus_verbose ("fd = %d\n",socket_transport->fd);
+  _dbus_verbose ("fd = %d\n",kdbus_transport->fd);
 
 #ifdef DBUS_AUTHENTICATION
   /* No messages without authentication! */
@@ -2313,13 +2315,13 @@ do_reading (DBusTransport *transport)
   /* See if we've exceeded max messages and need to disable reading */
   check_read_watch (transport);
 
-  _dbus_assert (socket_transport->read_watch != NULL ||
+  _dbus_assert (kdbus_transport->read_watch != NULL ||
                 transport->disconnected);
 
   if (transport->disconnected)
     goto out;
 
-  if (!dbus_watch_get_enabled (socket_transport->read_watch))
+  if (!dbus_watch_get_enabled (kdbus_transport->read_watch))
     return TRUE;
 
   if (!_dbus_message_loader_get_unix_fds(transport->loader, &fds, &n_fds))
@@ -2332,14 +2334,14 @@ do_reading (DBusTransport *transport)
 
   if (_dbus_auth_needs_decoding (transport->auth))
   {
-	  bytes_read = kdbus_read_message(socket_transport,  &socket_transport->encoded_incoming, fds, &n_fds);
+	  bytes_read = kdbus_read_message(kdbus_transport,  &kdbus_transport->encoded_incoming, fds, &n_fds);
 
-      _dbus_assert (_dbus_string_get_length (&socket_transport->encoded_incoming) == bytes_read);
+      _dbus_assert (_dbus_string_get_length (&kdbus_transport->encoded_incoming) == bytes_read);
 
       if (bytes_read > 0)
       {
           if (!_dbus_auth_decode_data (transport->auth,
-                                       &socket_transport->encoded_incoming,
+                                       &kdbus_transport->encoded_incoming,
                                        buffer))
           {
               _dbus_verbose ("Out of memory decoding incoming data\n");
@@ -2350,12 +2352,12 @@ do_reading (DBusTransport *transport)
               goto out;
           }
 
-          _dbus_string_set_length (&socket_transport->encoded_incoming, 0);
-          _dbus_string_compact (&socket_transport->encoded_incoming, 2048);
+          _dbus_string_set_length (&kdbus_transport->encoded_incoming, 0);
+          _dbus_string_compact (&kdbus_transport->encoded_incoming, 2048);
       }
   }
   else
-	  bytes_read = kdbus_read_message(socket_transport, buffer, fds, &n_fds);
+	  bytes_read = kdbus_read_message(kdbus_transport, buffer, fds, &n_fds);
 
   if (bytes_read >= 0 && n_fds > 0)
     _dbus_verbose("Read %i unix fds\n", n_fds);
@@ -2415,12 +2417,15 @@ do_reading (DBusTransport *transport)
   return TRUE;
 }
 
+/*
+ * copy-paste from socket transport.
+ */
 static dbus_bool_t
 unix_error_with_read_to_come (DBusTransport *itransport,
                               DBusWatch     *watch,
                               unsigned int   flags)
 {
-   DBusTransportSocket *transport = (DBusTransportSocket *) itransport;
+   DBusTransportKdbus *transport = (DBusTransportKdbus *) itransport;
 
    if (!((flags & DBUS_WATCH_HANGUP) || (flags & DBUS_WATCH_ERROR)))
       return FALSE;
@@ -2433,15 +2438,18 @@ unix_error_with_read_to_come (DBusTransport *itransport,
    return TRUE;
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static dbus_bool_t
-socket_handle_watch (DBusTransport *transport,
+kdbus_handle_watch (DBusTransport *transport,
                    DBusWatch     *watch,
                    unsigned int   flags)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
-  _dbus_assert (watch == socket_transport->read_watch ||
-                watch == socket_transport->write_watch);
+  _dbus_assert (watch == kdbus_transport->read_watch ||
+                watch == kdbus_transport->write_watch);
   _dbus_assert (watch != NULL);
 
   /* If we hit an error here on a write watch, don't disconnect the transport yet because data can
@@ -2455,7 +2463,7 @@ socket_handle_watch (DBusTransport *transport,
       return TRUE;
     }
 
-  if (watch == socket_transport->read_watch &&
+  if (watch == kdbus_transport->read_watch &&
       (flags & DBUS_WATCH_READABLE))
     {
 #ifdef DBUS_AUTHENTICATION
@@ -2491,7 +2499,7 @@ socket_handle_watch (DBusTransport *transport,
         }
 #endif
     }
-  else if (watch == socket_transport->write_watch &&
+  else if (watch == kdbus_transport->write_watch &&
            (flags & DBUS_WATCH_WRITABLE))
     {
 #if 1
@@ -2514,10 +2522,10 @@ socket_handle_watch (DBusTransport *transport,
 #ifdef DBUS_ENABLE_VERBOSE_MODE
   else
     {
-      if (watch == socket_transport->read_watch)
+      if (watch == kdbus_transport->read_watch)
         _dbus_verbose ("asked to handle read watch with non-read condition 0x%x\n",
                        flags);
-      else if (watch == socket_transport->write_watch)
+      else if (watch == kdbus_transport->write_watch)
         _dbus_verbose ("asked to handle write watch with non-write condition 0x%x\n",
                        flags);
       else
@@ -2529,43 +2537,49 @@ socket_handle_watch (DBusTransport *transport,
   return TRUE;
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static void
-socket_disconnect (DBusTransport *transport)
+kdbus_disconnect (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
   _dbus_verbose ("\n");
 
   free_watches (transport);
 
-  _dbus_close_socket (socket_transport->fd, NULL);
-  socket_transport->fd = -1;
+  _dbus_close_socket (kdbus_transport->fd, NULL);
+  kdbus_transport->fd = -1;
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static dbus_bool_t
 kdbus_connection_set (DBusTransport *transport)
 {
-  DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
   dbus_connection_set_is_authenticated(transport->connection); //now we don't have authentication in kdbus
 
-  _dbus_watch_set_handler (socket_transport->write_watch,
+  _dbus_watch_set_handler (kdbus_transport->write_watch,
                            _dbus_connection_handle_watch,
                            transport->connection, NULL);
 
-  _dbus_watch_set_handler (socket_transport->read_watch,
+  _dbus_watch_set_handler (kdbus_transport->read_watch,
                            _dbus_connection_handle_watch,
                            transport->connection, NULL);
 
   if (!_dbus_connection_add_watch_unlocked (transport->connection,
-                                            socket_transport->write_watch))
+                                            kdbus_transport->write_watch))
     return FALSE;
 
   if (!_dbus_connection_add_watch_unlocked (transport->connection,
-                                            socket_transport->read_watch))
+                                            kdbus_transport->read_watch))
     {
       _dbus_connection_remove_watch_unlocked (transport->connection,
-                                              socket_transport->write_watch);
+                                              kdbus_transport->write_watch);
       return FALSE;
     }
 
@@ -2575,7 +2589,7 @@ kdbus_connection_set (DBusTransport *transport)
   return TRUE;
 }
 
-/**  original dbus copy-pasted
+/**  original dbus copy-pasted comment
  * @todo We need to have a way to wake up the select sleep if
  * a new iteration request comes in with a flag (read/write) that
  * we're not currently serving. Otherwise a call that just reads
@@ -2587,7 +2601,7 @@ kdbus_do_iteration (DBusTransport *transport,
                    unsigned int   flags,
                    int            timeout_milliseconds)
 {
-	DBusTransportSocket *socket_transport = (DBusTransportSocket*) transport;
+	DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 	DBusPollFD poll_fd;
 	int poll_res;
 	int poll_timeout;
@@ -2596,9 +2610,9 @@ kdbus_do_iteration (DBusTransport *transport,
                  flags & DBUS_ITERATION_DO_READING ? "read" : "",
                  flags & DBUS_ITERATION_DO_WRITING ? "write" : "",
                  timeout_milliseconds,
-                 socket_transport->read_watch,
-                 socket_transport->write_watch,
-                 socket_transport->fd);
+                 kdbus_transport->read_watch,
+                 kdbus_transport->write_watch,
+                 kdbus_transport->fd);
 
   /* the passed in DO_READING/DO_WRITING flags indicate whether to
    * read/write messages, but regardless of those we may need to block
@@ -2606,7 +2620,7 @@ kdbus_do_iteration (DBusTransport *transport,
    * we don't want to read any messages yet if not given DO_READING.
    */
 
-   poll_fd.fd = socket_transport->fd;
+   poll_fd.fd = kdbus_transport->fd;
    poll_fd.events = 0;
 
    if (_dbus_transport_try_to_authenticate (transport))
@@ -2634,11 +2648,11 @@ kdbus_do_iteration (DBusTransport *transport,
       }
 
       /* If we get here, we decided to do the poll() after all */
-      _dbus_assert (socket_transport->read_watch);
+      _dbus_assert (kdbus_transport->read_watch);
       if (flags & DBUS_ITERATION_DO_READING)
 	     poll_fd.events |= _DBUS_POLLIN;
 
-      _dbus_assert (socket_transport->write_watch);
+      _dbus_assert (kdbus_transport->write_watch);
       if (flags & DBUS_ITERATION_DO_WRITING)
          poll_fd.events |= _DBUS_POLLOUT;
    }
@@ -2742,21 +2756,24 @@ kdbus_do_iteration (DBusTransport *transport,
    _dbus_verbose (" ... leaving do_iteration()\n");
 }
 
+/*
+ * copy-paste from socket transport with needed renames only.
+ */
 static void
-socket_live_messages_changed (DBusTransport *transport)
+kdbus_live_messages_changed (DBusTransport *transport)
 {
   /* See if we should look for incoming messages again */
   check_read_watch (transport);
 }
 
 static const DBusTransportVTable kdbus_vtable = {
-  socket_finalize,
-  socket_handle_watch,
-  socket_disconnect,
+  transport_finalize,
+  kdbus_handle_watch,
+  kdbus_disconnect,
   kdbus_connection_set,
   kdbus_do_iteration,
-  socket_live_messages_changed,
-  socket_get_socket_fd
+  kdbus_live_messages_changed,
+  kdbus_get_kdbus_fd
 };
 
 /**
@@ -2768,73 +2785,71 @@ static const DBusTransportVTable kdbus_vtable = {
  * @returns the new transport, or #NULL if no memory.
  */
 static DBusTransport*
-_dbus_transport_new_for_socket_kdbus (int	fd,
-                                	  const DBusString *address)
+_dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
 {
-	DBusTransportSocket *socket_transport;
+	DBusTransportKdbus *kdbus_transport;
 
-  socket_transport = dbus_new0 (DBusTransportSocket, 1);
-  if (socket_transport == NULL)
+  kdbus_transport = dbus_new0 (DBusTransportKdbus, 1);
+  if (kdbus_transport == NULL)
     return NULL;
 
-  if (!_dbus_string_init (&socket_transport->encoded_outgoing))
+  if (!_dbus_string_init (&kdbus_transport->encoded_outgoing))
     goto failed_0;
 
-  if (!_dbus_string_init (&socket_transport->encoded_incoming))
+  if (!_dbus_string_init (&kdbus_transport->encoded_incoming))
     goto failed_1;
 
-  socket_transport->write_watch = _dbus_watch_new (fd,
+  kdbus_transport->write_watch = _dbus_watch_new (fd,
                                                  DBUS_WATCH_WRITABLE,
                                                  FALSE,
                                                  NULL, NULL, NULL);
-  if (socket_transport->write_watch == NULL)
+  if (kdbus_transport->write_watch == NULL)
     goto failed_2;
 
-  socket_transport->read_watch = _dbus_watch_new (fd,
+  kdbus_transport->read_watch = _dbus_watch_new (fd,
                                                 DBUS_WATCH_READABLE,
                                                 FALSE,
                                                 NULL, NULL, NULL);
-  if (socket_transport->read_watch == NULL)
+  if (kdbus_transport->read_watch == NULL)
     goto failed_3;
 
-  if (!_dbus_transport_init_base (&socket_transport->base,
+  if (!_dbus_transport_init_base (&kdbus_transport->base,
                                   &kdbus_vtable,
                                   NULL, address))
     goto failed_4;
 
 #ifdef DBUS_AUTHENTICATION
 #ifdef HAVE_UNIX_FD_PASSING
-  _dbus_auth_set_unix_fd_possible(socket_transport->base.auth, _dbus_socket_can_pass_unix_fd(fd));
+  _dbus_auth_set_unix_fd_possible(kdbus_transport->base.auth, _dbus_socket_can_pass_unix_fd(fd));
 #endif
 #endif
 
-  socket_transport->fd = fd;
-  socket_transport->message_bytes_written = 0;
+  kdbus_transport->fd = fd;
+  kdbus_transport->message_bytes_written = 0;
 
   /* These values should probably be tunable or something. */
-  socket_transport->max_bytes_read_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
-  socket_transport->max_bytes_written_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
+  kdbus_transport->max_bytes_read_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
+  kdbus_transport->max_bytes_written_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
 
-  socket_transport->kdbus_mmap_ptr = NULL;
-  socket_transport->memfd = -1;
+  kdbus_transport->kdbus_mmap_ptr = NULL;
+  kdbus_transport->memfd = -1;
   
-  return (DBusTransport*) socket_transport;
+  return (DBusTransport*) kdbus_transport;
 
  failed_4:
-  _dbus_watch_invalidate (socket_transport->read_watch);
-  _dbus_watch_unref (socket_transport->read_watch);
+  _dbus_watch_invalidate (kdbus_transport->read_watch);
+  _dbus_watch_unref (kdbus_transport->read_watch);
  failed_3:
-  _dbus_watch_invalidate (socket_transport->write_watch);
-  _dbus_watch_unref (socket_transport->write_watch);
+  _dbus_watch_invalidate (kdbus_transport->write_watch);
+  _dbus_watch_unref (kdbus_transport->write_watch);
  failed_2:
-  _dbus_string_free (&socket_transport->encoded_incoming);
+  _dbus_string_free (&kdbus_transport->encoded_incoming);
  failed_1:
-  _dbus_string_free (&socket_transport->encoded_outgoing);
+  _dbus_string_free (&kdbus_transport->encoded_outgoing);
  failed_0:
-  dbus_free (socket_transport);
+  dbus_free (kdbus_transport);
   return NULL;
 }
-
 
 /**
  * Opens a connection to the kdbus bus
@@ -2898,7 +2913,7 @@ static DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError
 
 	_dbus_verbose ("Successfully connected to kdbus bus %s\n", path);
 
-	transport = _dbus_transport_new_for_socket_kdbus (fd, &address);
+	transport = _dbus_transport_new_kdbus_transport (fd, &address);
 	if (transport == NULL)
     {
 		dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);

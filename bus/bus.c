@@ -1273,13 +1273,6 @@ bus_context_get_loop (BusContext *context)
   return context->loop;
 }
 
-#ifdef ENABLE_KDBUS_TRANSPORT
-DBusConnection* bus_context_get_myConnection(BusContext *context)
-{
-  return context->myKdbusConnection;
-}
-#endif
-
 dbus_bool_t
 bus_context_allow_unix_user (BusContext   *context,
                              unsigned long uid)

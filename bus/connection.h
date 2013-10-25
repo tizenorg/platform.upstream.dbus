@@ -141,9 +141,6 @@ dbus_bool_t     bus_transaction_send_error_reply (BusTransaction               *
                                                   DBusMessage                  *in_reply_to);
 void            bus_transaction_cancel_and_free  (BusTransaction               *transaction);
 void            bus_transaction_execute_and_free (BusTransaction               *transaction);
-#ifdef ENABLE_KDBUS_TRANSPORT
-void 			bus_transaction_free 			 (BusTransaction *transaction);
-#endif
 dbus_bool_t     bus_transaction_add_cancel_hook  (BusTransaction               *transaction,
                                                   BusTransactionCancelFunction  cancel_function,
                                                   void                         *data,

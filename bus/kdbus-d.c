@@ -188,7 +188,7 @@ dbus_bool_t register_daemon_name(DBusConnection* connection)
     retval = TRUE;
 
 out:
-    bus_transaction_free(transaction);
+	bus_transaction_cancel_and_free(transaction);
     return retval;
 }
 
@@ -419,7 +419,7 @@ out:
     }
     dbus_free_string_array (services);
     _dbus_string_free(&name);
-    bus_transaction_free(transaction);
+    bus_transaction_cancel_and_free(transaction);
     return retval;
 }
 
@@ -472,7 +472,7 @@ dbus_bool_t update_kdbus_starters(DBusConnection* connection)
     retval = TRUE;
 
 out:
-    bus_transaction_free(transaction);
+	bus_transaction_cancel_and_free(transaction);
     return retval;
 }
 
