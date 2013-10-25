@@ -37,7 +37,9 @@
 #include <dbus/dbus-internals.h>
 #include <dbus/dbus-misc.h>
 #include <string.h>
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "kdbus-d.h"
+#endif
 
 #ifdef HAVE_UNIX_FD_PASSING
 #include <dbus/dbus-sysdeps-unix.h>
@@ -251,6 +253,7 @@ bus_dispatch (DBusConnection *connection,
           goto out;
         }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
       if(bus_context_is_kdbus(context))
       {
           if (dbus_message_is_signal (message, DBUS_INTERFACE_DBUS, "NameOwnerChanged"))
@@ -259,10 +262,14 @@ bus_dispatch (DBusConnection *connection,
               goto out;
           }
       }
+#endif
     }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   /* Assign a sender to the message */
   if(bus_context_is_kdbus(context) == FALSE)  //if using kdbus, sender must be set on library side
+#endif
+  {
     if (bus_connection_is_active (connection))
     {
       sender = bus_connection_get_name (connection);
@@ -281,6 +288,7 @@ bus_dispatch (DBusConnection *connection,
        */
       service_name = dbus_message_get_destination (message);
     }
+  }
 
   if (service_name &&
       strcmp (service_name, DBUS_SERVICE_DBUS) == 0) /* to bus driver */
@@ -315,7 +323,11 @@ bus_dispatch (DBusConnection *connection,
       _dbus_string_init_const (&service_string, service_name);
       service = bus_registry_lookup (registry, &service_string);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
       if (dbus_message_get_auto_start (message) && (service == NULL || bus_service_get_is_kdbus_starter(service)))
+#else
+      if (service == NULL && dbus_message_get_auto_start (message))
+#endif
         {
           BusActivation *activation;
           /* We can't do the security policy check here, since the addressed

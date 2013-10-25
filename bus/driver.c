@@ -41,10 +41,12 @@
 #include <dbus/dbus-marshal-recursive.h>
 #include <string.h>
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "kdbus-d.h"
 #include <stdio.h>
 #include <errno.h>
 #include <limits.h>
+#endif
 
 static DBusConnection *
 bus_driver_get_conn_helper (DBusConnection  *connection,
@@ -104,8 +106,10 @@ bus_driver_send_service_owner_changed (const char     *service_name,
   dbus_bool_t retval;
   const char *null_service;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  return TRUE;
+#endif
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -156,8 +160,10 @@ bus_driver_send_service_lost (DBusConnection *connection,
 {
   DBusMessage *message;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  return TRUE;
+#endif
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -202,8 +208,10 @@ bus_driver_send_service_acquired (DBusConnection *connection,
 {
   DBusMessage *message;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  return TRUE;
+#endif
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -452,7 +460,7 @@ bus_driver_handle_list_services (DBusConnection *connection,
       return FALSE;
     }
 
-
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_list_services (connection, &services, &len))
@@ -463,12 +471,16 @@ bus_driver_handle_list_services (DBusConnection *connection,
 	    }
   }
   else
-  if (!bus_registry_list_services (registry, &services, &len))
-    {
-      dbus_message_unref (reply);
-      BUS_SET_OOM (error);
-      return FALSE;
-    }
+#endif
+  {
+
+      if (!bus_registry_list_services (registry, &services, &len))
+        {
+          dbus_message_unref (reply);
+          BUS_SET_OOM (error);
+          return FALSE;
+        }
+  }
 
   dbus_message_iter_init_append (reply, &iter);
 
@@ -482,8 +494,11 @@ bus_driver_handle_list_services (DBusConnection *connection,
       return FALSE;
     }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(!bus_context_is_kdbus(bus_transaction_get_context (transaction))) //not needed for kdbus, we got it from kdbus_list_services
+#endif
   {
+
     /* Include the bus driver in the list */
     const char *v_STRING = DBUS_SERVICE_DBUS;
     if (!dbus_message_iter_append_basic (&sub, DBUS_TYPE_STRING,
@@ -654,6 +669,7 @@ bus_driver_handle_acquire_service (DBusConnection *connection,
   retval = FALSE;
   reply = NULL;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if (!bus_registry_acquire_kdbus_service (registry, connection,
@@ -663,7 +679,9 @@ bus_driver_handle_acquire_service (DBusConnection *connection,
 	    goto out;
   }
   else
+#endif
   {
+
 	  _dbus_string_init_const (&service_name, name);
 
 	  if (!bus_registry_acquire_service (registry, connection,
@@ -671,7 +689,6 @@ bus_driver_handle_acquire_service (DBusConnection *connection,
 	                                     &service_reply, transaction,
 	                                     error))
 	    goto out;
-
   }
 
   reply = dbus_message_new_method_return (message);
@@ -729,6 +746,7 @@ bus_driver_handle_release_service (DBusConnection *connection,
   _dbus_string_init_const (&service_name, name);
   registry = bus_connection_get_registry (connection);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if (!bus_registry_release_service_kdbus (dbus_message_get_sender(message), connection,
@@ -736,7 +754,9 @@ bus_driver_handle_release_service (DBusConnection *connection,
 	                                     transaction, error))
 	      goto out;
   }
-  else if (!bus_registry_release_service (registry, connection,
+  else
+#endif
+  if (!bus_registry_release_service (registry, connection,
                                      &service_name, &service_reply,
                                      transaction, error))
     goto out;
@@ -799,6 +819,7 @@ bus_driver_handle_service_exists (DBusConnection *connection,
     }
   else
     {
+#ifdef ENABLE_KDBUS_TRANSPORT
 	  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
 	  {
 		  int inter_ret;
@@ -815,6 +836,7 @@ bus_driver_handle_service_exists (DBusConnection *connection,
 			}
 	  }
 	  else
+#endif
 	  {
 	      _dbus_string_init_const (&service_name, name);
 	      service = bus_registry_lookup (registry, &service_name);
@@ -1089,6 +1111,7 @@ bus_driver_handle_add_match (DBusConnection *connection,
   if (rule == NULL)
     goto failed;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 
@@ -1100,7 +1123,9 @@ bus_driver_handle_add_match (DBusConnection *connection,
 	      goto failed;
   }
   else
+#endif
   {
+
 	  matchmaker = bus_connection_get_matchmaker (connection);
 
 	  if (!bus_matchmaker_add_rule (matchmaker, rule))
@@ -1158,11 +1183,13 @@ bus_driver_handle_remove_match (DBusConnection *connection,
   if (rule == NULL)
     goto failed;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_remove_match(connection, message, error))
 		  goto failed;
   }
+#endif
 
   /* Send the ack before we remove the rule, since the ack is undone
    * on transaction cancel, but rule removal isn't.
@@ -1171,7 +1198,9 @@ bus_driver_handle_remove_match (DBusConnection *connection,
                        message, error))
     goto failed;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))
+#endif
   {
 	  matchmaker = bus_connection_get_matchmaker (connection);
 
@@ -1202,7 +1231,6 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
   BusRegistry *registry;
   BusService *service;
   DBusMessage *reply;
-  char unique_name[(unsigned int)(snprintf((char*)base_name, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -1216,10 +1244,12 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
 			       DBUS_TYPE_INVALID))
       goto failed;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  int ret;
 	  struct nameInfo info;
+	  char unique_name[(unsigned int)(snprintf((char*)base_name, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
 
 	  ret = kdbus_NameQuery(text, dbus_connection_get_transport(connection), &info);
 		if(ret == 0) //unique id of the name
@@ -1243,7 +1273,8 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
 		}
   }
   else
-  {
+#endif
+    {
 	  _dbus_string_init_const (&str, text);
 	  service = bus_registry_lookup (registry, &str);
 	  if (service == NULL &&
@@ -1426,12 +1457,14 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_get_connection_unix_user(connection, message, &uid, error))
 		  goto failed;
   }
   else
+#endif
   {
 	  conn = bus_driver_get_conn_helper (connection, message, "UID", &service,
                                      error);
@@ -1489,12 +1522,14 @@ bus_driver_handle_get_connection_unix_process_id (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_get_connection_unix_process_id(connection, message, &pid, error))
 		  goto failed;
   }
   else
+#endif
   {
 	  conn = bus_driver_get_conn_helper (connection, message, "PID", &service,
 										 error);
@@ -1609,12 +1644,14 @@ bus_driver_handle_get_connection_selinux_security_context (DBusConnection *conne
   if (reply == NULL)
     goto oom;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
 	  if(!kdbus_get_connection_unix_selinux_security_context(connection, message, reply, error))
 		  goto failed;
   }
   else
+#endif
   {
 	  conn = bus_driver_get_conn_helper (connection, message, "security context",
 										 &service, error);
@@ -1671,8 +1708,10 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(!bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
+#endif
 	  conn = bus_driver_get_conn_helper (connection, message, "credentials",
 										 &service, error);
 
@@ -1696,6 +1735,7 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
 		  if (!_dbus_asv_add_uint32 (&array_iter, "UnixUserID", ulong_val))
 			goto oom;
 		}
+#ifdef ENABLE_KDBUS_TRANSPORT
   }
   else
   {
@@ -1715,6 +1755,7 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
 	  else
 		  goto failed;
   }
+#endif
 
   if (!_dbus_asv_close (&reply_iter, &array_iter))
     goto oom;

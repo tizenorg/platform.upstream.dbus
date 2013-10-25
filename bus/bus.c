@@ -40,8 +40,11 @@
 #include <dbus/dbus-hash.h>
 #include <dbus/dbus-credentials.h>
 #include <dbus/dbus-internals.h>
+
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "kdbus-d.h"
 #include <stdlib.h>
+#endif
 
 #ifdef DBUS_CYGWIN
 #include <signal.h>
@@ -71,7 +74,9 @@ struct BusContext
   unsigned int keep_umask : 1;
   unsigned int allow_anonymous : 1;
   unsigned int systemd_activation : 1;
+#ifdef ENABLE_KDBUS_TRANSPORT
   DBusConnection *myKdbusConnection;  //todo maybe can be rafctored and removed
+#endif
 };
 
 static dbus_int32_t server_data_slot = -1;
@@ -427,7 +432,8 @@ process_config_first_time_only (BusContext       *context,
 
   if (address)
     {
-      if(!strcmp(_dbus_string_get_const_data(address), "kdbus:"))
+#ifdef ENABLE_KDBUS_TRANSPORT
+      if(!strcmp(_dbus_string_get_const_data(address), "kdbus"))
       {
     	  DBusBusType type;
     	  DBusServer* server;
@@ -462,7 +468,8 @@ process_config_first_time_only (BusContext       *context,
     		  goto failed;
       }
       else
-      {
+#endif
+        {
 		  DBusServer *server;
 
 		  server = dbus_server_listen (_dbus_string_get_const_data(address), error);
@@ -771,7 +778,10 @@ bus_context_new (const DBusString *config_file,
       goto failed;
     }
   context->refcount = 1;
+
+#ifdef ENABLE_KDBUS_TRANSPORT
   context->myKdbusConnection = NULL;
+#endif
 
   _dbus_generate_uuid (&context->uuid);
 
@@ -970,6 +980,7 @@ bus_context_new (const DBusString *config_file,
 
   dbus_server_free_data_slot (&server_data_slot);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(context->myKdbusConnection)
   {
 	  DBusString unique_name;
@@ -1000,6 +1011,7 @@ bus_context_new (const DBusString *config_file,
           goto failed;
 	  }
   }
+#endif
 
   return context;
 
@@ -1053,6 +1065,7 @@ bus_context_reload_config (BusContext *context,
       goto failed;
     }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(context->myKdbusConnection)
   {
       if(!update_kdbus_starters(context->myKdbusConnection))
@@ -1062,6 +1075,8 @@ bus_context_reload_config (BusContext *context,
           goto failed;
       }
   }
+#endif
+
   ret = TRUE;
 
   bus_context_log (context, DBUS_SYSTEM_LOG_INFO, "Reloaded configuration");
@@ -1258,10 +1273,12 @@ bus_context_get_loop (BusContext *context)
   return context->loop;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBusConnection* bus_context_get_myConnection(BusContext *context)
 {
   return context->myKdbusConnection;
 }
+#endif
 
 dbus_bool_t
 bus_context_allow_unix_user (BusContext   *context,
@@ -1360,10 +1377,12 @@ bus_context_get_reply_timeout (BusContext *context)
   return context->limits.reply_timeout;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 dbus_bool_t bus_context_is_kdbus(BusContext* context)
 {
 	return context->myKdbusConnection != NULL;
 }
+#endif
 
 void
 bus_context_log (BusContext *context, DBusSystemLogSeverity severity, const char *msg, ...) _DBUS_GNUC_PRINTF (3, 4);

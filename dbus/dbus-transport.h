@@ -97,8 +97,11 @@ dbus_bool_t        _dbus_transport_set_auth_mechanisms    (DBusTransport        
                                                            const char                **mechanisms);
 void               _dbus_transport_set_allow_anonymous    (DBusTransport              *transport,
                                                            dbus_bool_t                 value);
+
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBUS_EXPORT
 DBusTransport* 	dbus_connection_get_transport	   (DBusConnection *connection);
+#endif
 
 /* if DBUS_ENABLE_STATS */
 void _dbus_transport_get_stats (DBusTransport  *transport,

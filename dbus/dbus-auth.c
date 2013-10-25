@@ -2322,6 +2322,7 @@ _dbus_auth_client_new (void)
   return auth;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 /**
  * Creates a new auth conversation object for the client side of kdbus.
  * In fact it only initialize structures and sets authenticated state
@@ -2362,6 +2363,7 @@ _dbus_auth_client_new_kdbus (void)
 
   return auth;
 }
+#endif
 
 /**
  * Increments the refcount of an auth object.

@@ -28,10 +28,11 @@
 #include <dbus/dbus-list.h>
 #include <dbus/dbus-mempool.h>
 #include <dbus/dbus-marshal-validate.h>
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include <linux/types.h>
 #include <errno.h>
 #include <stdlib.h>
-
+#endif
 
 #include "driver.h"
 #include "services.h"
@@ -41,8 +42,10 @@
 #include "policy.h"
 #include "bus.h"
 #include "selinux.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "kdbus-d.h"
 #include "dbus/kdbus.h"
+#endif
 
 struct BusService
 {
@@ -62,7 +65,9 @@ struct BusOwner
 
   unsigned int allow_replacement : 1;
   unsigned int do_not_queue : 1;
+#ifdef ENABLE_KDBUS_TRANSPORT
   unsigned int is_kdbus_starter : 1;
+#endif
 };
 
 struct BusRegistry
@@ -180,6 +185,7 @@ _bus_service_find_owner_link (BusService *service,
   return link;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 static DBusConnection *
 _bus_service_find_owner_connection (BusService *service,
                                    const char* unique_name)
@@ -201,6 +207,7 @@ _bus_service_find_owner_connection (BusService *service,
 
   return NULL;
 }
+#endif
 
 static void
 bus_owner_set_flags (BusOwner *owner,
@@ -212,8 +219,10 @@ bus_owner_set_flags (BusOwner *owner,
    owner->do_not_queue =
         (flags & DBUS_NAME_FLAG_DO_NOT_QUEUE) != FALSE;
 
+#ifdef ENABLE_KDBUS_TRANSPORT
    owner->is_kdbus_starter =
         (flags & KDBUS_NAME_STARTER) != FALSE;
+#endif
 }
 
 static BusOwner *
@@ -628,6 +637,7 @@ bus_registry_acquire_service (BusRegistry      *registry,
   return retval;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 dbus_bool_t
 bus_registry_acquire_kdbus_service (BusRegistry      *registry,
                               DBusConnection   *connection,
@@ -639,6 +649,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
   dbus_bool_t retval;
   BusService *service;
   BusActivation  *activation;
+
   DBusString service_name_real;
   const DBusString *service_name = &service_name_real;
   char* name;
@@ -759,7 +770,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	                                       transaction, error))
 	            goto failed2;
 	    }*/
-	/*   if((link = _bus_service_find_owner_link (service, connection)))  //if daemon is a starter
+	    /*if((link = _bus_service_find_owner_link (service, connection)))  //if daemon is a starter
 	    {
 	        _dbus_list_unlink (&service->owners, link);
 	        _dbus_list_append_link (&service->owners, link);  //it must be moved at the end of the queue
@@ -782,6 +793,7 @@ failed:
 
   return FALSE;
 }
+#endif
 
 dbus_bool_t
 bus_registry_release_service (BusRegistry      *registry,
@@ -860,6 +872,7 @@ bus_registry_release_service (BusRegistry      *registry,
   return retval;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 dbus_bool_t
 bus_registry_release_service_kdbus (const char* sender_name,
                               DBusConnection   *connection,
@@ -946,6 +959,7 @@ bus_registry_release_service_kdbus (const char* sender_name,
  out:
   return retval;
 }
+#endif
 
 dbus_bool_t
 bus_registry_set_service_context_table (BusRegistry   *registry,
@@ -1530,6 +1544,7 @@ bus_service_get_allow_replacement (BusService *service)
   return owner->allow_replacement;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 dbus_bool_t
 bus_service_get_is_kdbus_starter (BusService *service)
 {
@@ -1543,6 +1558,7 @@ bus_service_get_is_kdbus_starter (BusService *service)
 
   return owner->is_kdbus_starter;
 }
+#endif
 
 dbus_bool_t
 bus_service_has_owner (BusService     *service,
@@ -1578,7 +1594,9 @@ bus_service_list_queued_owners (BusService *service,
       owner = (BusOwner *) link->data;
       uname = bus_connection_get_name (owner->conn);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
       if(!owner->is_kdbus_starter)
+#endif
           if (!_dbus_list_append (return_list, (char *)uname))
               goto oom;
 

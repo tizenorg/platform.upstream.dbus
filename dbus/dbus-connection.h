@@ -184,16 +184,20 @@ DBUS_EXPORT
 DBusConnection*    dbus_connection_ref                          (DBusConnection             *connection);
 DBUS_EXPORT
 void               dbus_connection_unref                        (DBusConnection             *connection);
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBUS_EXPORT
 void               dbus_connection_unref_phantom               (DBusConnection             *connection);
+#endif
 DBUS_EXPORT
 void               dbus_connection_close                        (DBusConnection             *connection);
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_connected             (DBusConnection             *connection);
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_authenticated         (DBusConnection             *connection);
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_set_is_authenticated         (DBusConnection             *connection);
+#endif
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_is_anonymous             (DBusConnection             *connection);
 DBUS_EXPORT

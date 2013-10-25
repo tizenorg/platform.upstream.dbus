@@ -22,6 +22,7 @@
  *
  */
 
+
 #include <../config.h>
 #include "dbus-transport-protected.h"
 #include "dbus-transport-unix.h"
@@ -33,7 +34,9 @@
 #include "dbus-credentials.h"
 #include "dbus-mainloop.h"
 #include "dbus-message.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-transport-kdbus.h"
+#endif
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 #include "dbus-server-debug-pipe.h"
 #endif
@@ -126,9 +129,11 @@ _dbus_transport_init_base (DBusTransport             *transport,
           _dbus_message_loader_unref (loader);
           return FALSE;
         }
+#ifdef ENABLE_KDBUS_TRANSPORT
       if(address_copy == strstr(address_copy, "kdbus:path="))
       	  auth = _dbus_auth_client_new_kdbus();
 	  else
+#endif
 		  auth = _dbus_auth_client_new ();
   }
 
@@ -348,7 +353,9 @@ static const struct {
                                     DBusTransport   **transport_p,
                                     DBusError        *error);
 } open_funcs[] = {
+#ifdef ENABLE_KDBUS_TRANSPORT
   { _dbus_transport_open_kdbus },
+#endif
   { _dbus_transport_open_socket },
   { _dbus_transport_open_platform_specific },
   { _dbus_transport_open_autolaunch }

@@ -106,14 +106,18 @@ DBUS_SHARED_arch_sources = 			\
 	dbus-sysdeps-pthread.c			\
 	dbus-transport-unix.c			\
 	dbus-transport-unix.h			\
-	dbus-transport-kdbus.c			\
-	dbus-transport-kdbus.h			\
-	kdbus-common.c			\
-	kdbus-common.h			\
 	dbus-userdb.c				\
 	dbus-userdb.h 				\
 	sd-daemon.c                             \
 	sd-daemon.h
+
+if ENABLE_KDBUS_TRANSPORT
+DBUS_SHARED_arch_sources += \
+    dbus-transport-kdbus.c  \
+    dbus-transport-kdbus.h  \
+    kdbus-common.c          \
+    kdbus-common.h
+endif
 
 DBUS_UTIL_arch_sources = 			\
 	dbus-sysdeps-util-unix.c		\

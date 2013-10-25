@@ -266,8 +266,10 @@ void        dbus_message_iter_abandon_container  (DBusMessageIter *iter,
 DBUS_EXPORT
 void dbus_message_lock    (DBusMessage  *message);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 DBUS_EXPORT
 void dbus_message_unlock  (DBusMessage  *message);
+#endif
 
 DBUS_EXPORT
 dbus_bool_t  dbus_set_error_from_message  (DBusError    *error,

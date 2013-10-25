@@ -396,11 +396,13 @@ dbus_message_lock (DBusMessage  *message)
     }
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
 void
 dbus_message_unlock (DBusMessage  *message)
 {
 	message->locked = FALSE;
 }
+#endif
 
 static dbus_bool_t
 set_or_delete_string_field (DBusMessage *message,

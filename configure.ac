@@ -156,6 +156,7 @@ AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[
 AC_ARG_ENABLE(userdb-cache, AS_HELP_STRING([--enable-userdb-cache],[build with userdb-cache support]),enable_userdb_cache=$enableval,enable_userdb_cache=yes)
 AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
 AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
+AC_ARG_ENABLE(kdbus-transport, AS_HELP_STRING([--enable-kdbus-transport],[build with kdbus transport support]),enable_kdbus_transport=$enableval,enable_kdbus_transport=no)
 
 AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
 AC_ARG_WITH(session-socket-dir, AS_HELP_STRING([--with-session-socket-dir=[dirname]],[Where to put sockets for the per-login-session message bus]))
@@ -1271,11 +1272,17 @@ AC_DEFINE_UNQUOTED([DBUS_DEFAULT_MESSAGE_UNIX_FDS],
   [Default for dbus_connection_get_max_message_unix_fds()])
 AC_SUBST([DEFAULT_MESSAGE_UNIX_FDS])
 
-### kdbus related libs
+### kdbus support
+if test x$enable_kdbus_transport = xyes; then
+    KDBUS_LIBS=
+    #"-lcrypto"
+    #AC_SUBST([KDBUS_LIBS])
+    AC_DEFINE(ENABLE_KDBUS_TRANSPORT,1,[Enable kdbus transport support])
+else
+    KDBUS_LIBS=
+fi
 
-KDBUS_LIBS=
-#"-lcrypto"
-#AC_SUBST([KDBUS_LIBS])             
+AM_CONDITIONAL([ENABLE_KDBUS_TRANSPORT], [test x$enable_kdbus_transport = xyes])
 
 #### Set up final flags
 LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs $KDBUS_LIBS"
