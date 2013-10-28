@@ -433,7 +433,7 @@ process_config_first_time_only (BusContext       *context,
   if (address)
     {
 #ifdef ENABLE_KDBUS_TRANSPORT
-      if(!strcmp(_dbus_string_get_const_data(address), "kdbus"))
+      if(!strcmp(_dbus_string_get_const_data(address), "kdbus:"))
       {
     	  DBusBusType type;
     	  DBusServer* server;
