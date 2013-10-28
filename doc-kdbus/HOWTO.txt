@@ -1,0 +1,65 @@
+IMPORTANT!!!
+------------
+Modified version of kdbus (from tizen.org) is required to run kdbus transport in dbus.
+
+
+
+
+kdbus-root : directory where kdbus project is
+dbus-root  : directory where dbus project is
+
+
+----------KDBUS----------
+
+[Build kdbus project]
+#cd /kdbus-root/
+#make
+
+[Load kdbus kernel module]
+#sudo insmod kdbus.ko
+
+
+----------LIBDBUS--------
+
+[Build libdbus project]
+#./autogen.sh
+(resolve missing dependencies)
+#make
+
+[Run custom dbus-daemon]
+#dbus-root/bus/dbus-daemon --config-file=/etc/dbus-1/session.conf --nofork --address=kdbus
+
+[Check if kdbus bus is created and has permissions to read-write]
+#ls -la /dev/kdbus/`id -u`-kdbus/bus
+
+[Copy built libdbus shared library to test directory]
+#cp /dbus-root/dbus/.libs/libdbus-1.so.3.8.2 /test/directory/
+
+[Make symbolic link to shared library]
+#ln -s /test/directory/libdbus-1.so.3.8.2 /test/directory/libdbus-1.so.3
+
+[Set variable to use custom library instead of system one]
+#export LD_LIBRARY_PATH=/test/directory/libdbus-1.so.3
+
+[Set variable to use kdbus as session bus]
+#export DBUS_SESSION_BUS_ADDRESS=kdbus:path=/dev/kdbus/`id -u`-kdbus/bus
+
+----------TEST -----------
+
+[Build test binaries]
+#cd /dbus-root/samsung_tools
+#make
+
+[Check if test binary correctly links custom libdbus]
+#ldd ping-server
+
+[Run test binary server in terminal 1]
+#./ping-server
+
+[Run test binary client in terminal 2]
+#./ping-client
+
+-------OPTIONAL--------
+
+[set variable to see debug info]
+#export DBUS_VERBOSE=1
