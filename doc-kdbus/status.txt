@@ -1,0 +1,30 @@
+Status given below covers intentional coding progress. Extensive testing and bug
+fixing is still ahead.
+
+Please observe known limitations in architecture desciption.
+
+
+
+2013-10-23
+----------
+* Modified libdbus – 100%
+  All expected functions are already there. Code is confirmed to work on x86
+  and ARM.
+
+* Modified libgio – 80%
+  First working code is available (tested on x86 and ARM), however it has to
+  be cleaned a bit before upload.
+
+* DBus daemon – 100%
+  Accompanying tools (like dbus-launch) have to be reviewed and adjusted
+  if necessary. Code is successfully tested on both x86 and ARM.
+
+* Kdbus – 100%
+  Possibility to run on 3.8.2 kernel is provided. Code is successfully tested
+  on both x86 and ARM.
+
+
+2013-10-28
+----------
+* Modified libgio – 90%
+  Code uploaded.
