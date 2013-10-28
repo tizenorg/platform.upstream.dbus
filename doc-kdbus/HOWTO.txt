@@ -22,24 +22,18 @@ dbus-root  : directory where dbus project is
 ----------LIBDBUS--------
 
 [Build libdbus project]
-#./autogen.sh
+#./autogen.sh --enable-kdbus-transport
 (resolve missing dependencies)
 #make
 
 [Run custom dbus-daemon]
-#dbus-root/bus/dbus-daemon --config-file=/etc/dbus-1/session.conf --nofork --address=kdbus
+#dbus-root/bus/dbus-daemon --config-file=/etc/dbus-1/session.conf --address=kdbus:
 
 [Check if kdbus bus is created and has permissions to read-write]
 #ls -la /dev/kdbus/`id -u`-kdbus/bus
 
-[Copy built libdbus shared library to test directory]
-#cp /dbus-root/dbus/.libs/libdbus-1.so.3.8.2 /test/directory/
-
-[Make symbolic link to shared library]
-#ln -s /test/directory/libdbus-1.so.3.8.2 /test/directory/libdbus-1.so.3
-
 [Set variable to use custom library instead of system one]
-#export LD_LIBRARY_PATH=/test/directory/libdbus-1.so.3
+#export LD_LIBRARY_PATH=/dbus-root/dbus/.libs/
 
 [Set variable to use kdbus as session bus]
 #export DBUS_SESSION_BUS_ADDRESS=kdbus:path=/dev/kdbus/`id -u`-kdbus/bus
@@ -62,4 +56,7 @@ dbus-root  : directory where dbus project is
 -------OPTIONAL--------
 
 [set variable to see debug info]
+[Build libdbus project]
+#./autogen.sh --enable-kdbus-transport --enable-verbose-mode
+#make
 #export DBUS_VERBOSE=1
