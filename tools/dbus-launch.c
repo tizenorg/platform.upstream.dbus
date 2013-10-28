@@ -823,6 +823,7 @@ main (int argc, char **argv)
   int autolaunch = FALSE;
   int requires_arg = FALSE;
   int close_stderr = FALSE;
+  int kdbus = FALSE;
   int i;
   int ret;
   int bus_pid_to_launcher_pipe[2];
@@ -859,6 +860,8 @@ main (int argc, char **argv)
         exit_with_session = TRUE;
       else if (strcmp (arg, "--close-stderr") == 0)
         close_stderr = TRUE;
+      else if (strcmp (arg, "--kdbus") == 0)
+        kdbus = TRUE;
       else if (strstr (arg, "--autolaunch=") == arg)
         {
           const char *s;
@@ -1130,6 +1133,7 @@ main (int argc, char **argv)
              "--fork",
              "--print-pid", write_pid_fd_as_string,
              "--print-address", write_address_fd_as_string,
+             kdbus ? "--address=kdbus:" : "",
              config_file ? "--config-file" : "--session",
              config_file, /* has to be last in this varargs list */
              NULL);
@@ -1149,6 +1153,7 @@ main (int argc, char **argv)
               "--fork",
               "--print-pid", write_pid_fd_as_string,
               "--print-address", write_address_fd_as_string,
+              kdbus ? "--address=kdbus:" : "",
               config_file ? "--config-file" : "--session",
               config_file, /* has to be last in this varargs list */
               NULL);

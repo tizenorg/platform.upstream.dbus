@@ -1753,6 +1753,9 @@ elif test x$dbus_win = xyes; then
         # branch of the conditional because the default might conceivably
         # change (see #38201)
         DBUS_SESSION_BUS_CONNECT_ADDRESS="autolaunch:"
+elif test x$enable_kdbus_transport = xyes; then
+        # Autolaunching kdbus bus instead of the ordinary socket
+        DBUS_SESSION_BUS_CONNECT_ADDRESS="autolaunch:scope=kdbus"
 else
         # The default on all other Unix platforms (notably Linux)
         # is to use auto-launching - this works a bit differently on Mac OS X
@@ -1877,6 +1880,7 @@ echo "
         Building XML docs:        ${enable_xml_docs}
         Building cache support:   ${enable_userdb_cache}
         Building launchd support: ${have_launchd}
+	Building kdbus support:   ${enable_kdbus_transport}
         Init scripts style:       ${with_init_scripts}
         Abstract socket names:    ${ac_cv_have_abstract_sockets}
         System bus socket:        ${DBUS_SYSTEM_SOCKET}
