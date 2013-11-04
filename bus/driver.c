@@ -1249,31 +1249,25 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
 
 #ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
-  {
-	  int ret;
-	  struct nameInfo info;
+    {
+      int ret;
 
-	  ret = kdbus_NameQuery(text, dbus_connection_get_transport(connection), &info);
-		if(ret == 0) //unique id of the name
-		{
-			sprintf(unique_name, ":1.%llu", (unsigned long long int)info.uniqueId);
-			_dbus_verbose("Unique name discovered:%s\n", unique_name);
-			base_name = unique_name;
-		}
-		else if(ret == -ENOENT)  //name has no owner
-		{
-			  dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
-							  "Could not get owner of name '%s': no such name", text);
-			  goto failed;
-		}
-		else
-		{
-			_dbus_verbose("kdbus error sending name query: err %d (%m)\n", errno);
-			dbus_set_error (error, DBUS_ERROR_FAILED,
-							  "Could not determine unique name for '%s'", text);
-			goto failed;
-		}
-  }
+      ret = kdbus_get_name_owner(connection, text, unique_name);
+      if(ret == 0)
+        base_name = unique_name;
+      else if(ret == -ENOENT)  //name has no owner
+        {
+          dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
+                  "Could not get owner of name '%s': no such name", text);
+          goto failed;
+        }
+      else
+        {
+          dbus_set_error (error, DBUS_ERROR_FAILED,
+                  "Could not determine unique name for '%s'", text);
+          goto failed;
+        }
+    }
   else
 #endif
     {

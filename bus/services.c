@@ -650,14 +650,13 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
   dbus_bool_t retval;
   BusService *service;
   BusActivation  *activation;
-
   DBusString service_name_real;
   const DBusString *service_name = &service_name_real;
   char* name;
   dbus_uint32_t flags;
   __u64 sender_id;
-  dbus_bool_t rm_owner_daemon = FALSE;
   const char* conn_unique_name;
+  DBusConnection* phantom;
 
   if (!dbus_message_get_args (message, error,
                               DBUS_TYPE_STRING, &name,
@@ -678,7 +677,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 
       _dbus_verbose ("Attempt to acquire invalid service name\n");
 
-      goto out;
+      return FALSE;
     }
 
   if (_dbus_string_get_byte (service_name, 0) == ':')
@@ -691,7 +690,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
       _dbus_verbose ("Attempt to acquire invalid base service name \"%s\"",
                      _dbus_string_get_const_data (service_name));
 
-      goto out;
+      return FALSE;
     }
 
   conn_unique_name = dbus_message_get_sender(message);
@@ -702,46 +701,44 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
                       "Connection \"%s\" is not allowed to own the service \"%s\"because "
                       "it is reserved for D-Bus' use only",
                       conn_unique_name, DBUS_SERVICE_DBUS);
-      goto out;
+      return FALSE;
     }
 
-  if (!bus_client_policy_check_can_own (bus_connection_get_policy (connection), service_name))
+  sender_id = sender_name_to_id(conn_unique_name, error);
+  if(dbus_error_is_set(error))
+    return FALSE;
+
+  phantom = bus_connections_find_conn_by_name(bus_connection_get_connections(connection), conn_unique_name);
+  if(phantom == NULL)
+    {
+      phantom = create_phantom_connection(connection, conn_unique_name, error);
+      if(phantom == NULL)
+        return FALSE;
+    }
+
+  if (!bus_client_policy_check_can_own (bus_connection_get_policy (phantom), service_name))
 	{
 	  dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
 					  "Connection \"%s\" is not allowed to own the service \"%s\" due "
 					  "to security policies in the configuration file",
 					  conn_unique_name, _dbus_string_get_const_data (service_name));
-	  goto out;
+	  goto failed;
 	}
 
-	service = bus_registry_lookup (registry, service_name);
-	if (service == NULL)
-	{
-		service = bus_registry_ensure (registry, service_name, connection, flags,
-									 transaction, error);  //adds daemon to service owners list - must be removed after right owner is set
-		if (service == NULL)
-		  goto out;
-
-		rm_owner_daemon = TRUE;
-		if(!kdbus_register_policy(service_name, connection))
-		{
-			dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-						  "Kdbus error when setting policy for connection \"%s\" and  service name \"%s\"",
-						  conn_unique_name, _dbus_string_get_const_data (service_name));
-			goto failed;
-		}
-	}
-
-	sender_id = sender_name_to_id(conn_unique_name, error);
-	if(dbus_error_is_set(error))
-		goto failed;
+  if(!kdbus_register_policy(service_name, phantom))
+  {
+    dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+            "Kdbus error when setting policy for connection \"%s\" and  service name \"%s\"",
+            conn_unique_name, _dbus_string_get_const_data (service_name));
+    goto failed;
+  }
 
 	*result = kdbus_request_name(connection, service_name, flags, sender_id);
 	if(*result == -EPERM)
 	{
 		dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-					  "Kdbus not allowed to own the service \"%s\"",
-					  _dbus_string_get_const_data (service_name));
+					  "Kdbus not allowed %s to own the service \"%s\"",
+					  conn_unique_name, _dbus_string_get_const_data (service_name));
 		goto failed;
 	}
 	else if(*result < 0)
@@ -752,54 +749,35 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 
 	if((*result == DBUS_REQUEST_NAME_REPLY_IN_QUEUE) || (*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER))
 	{
-	    DBusConnection* phantom;
-	    const char* name;
-//	    DBusList *link;
+    service = bus_registry_lookup (registry, service_name);
+    if (service == NULL)
+      {
+        service = bus_registry_ensure (registry, service_name, phantom, flags,
+                       transaction, error);
+        if (service == NULL)
+          goto failed2;
+      }
+    else
+      {
+        if (!bus_service_add_owner (service, phantom, flags, transaction, error))
+          goto failed2;
+      }
 
-	    name = dbus_message_get_sender(message);
-	    phantom = bus_connections_find_conn_by_name(bus_connection_get_connections(connection), name);
-        if(phantom == NULL)
-            phantom = create_phantom_connection(connection, name, error);
-	    if(phantom == NULL)
-	        goto failed2;
-	    if (!bus_service_add_owner (service, phantom, flags, transaction, error))
-	        goto failed2;
-	    if((*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER) && rm_owner_daemon)
-	    {
-            /* Here we are removing DBus daemon as an owner of the service,
-             * which is set by bus_registry_ensure.
-             * If bus_service_remove_owner fail, we ignore it, because it has
-             * almost none impact on the usage
-             */
-	        if(_bus_service_find_owner_link (service, connection))
-                bus_service_remove_owner (service, connection, transaction, NULL);
-	    }
-	    /*if(bus_service_get_is_kdbus_starter(service))
-	    {
-	        if (!bus_service_swap_owner (service, bus_service_get_primary_owners_connection(service),
-	                                       transaction, error))
-	            goto failed2;
-	    }*/
-	    /*if((link = _bus_service_find_owner_link (service, connection)))  //if daemon is a starter
-	    {
-	        _dbus_list_unlink (&service->owners, link);
-	        _dbus_list_append_link (&service->owners, link);  //it must be moved at the end of the queue
-	    }*/
+    activation = bus_context_get_activation (registry->context);
+    retval = bus_activation_send_pending_auto_activation_messages (activation,
+                   service,
+                   transaction,
+                   error);
 	}
+	else
+	  retval = TRUE;
 
-  activation = bus_context_get_activation (registry->context);
-  retval = bus_activation_send_pending_auto_activation_messages (activation,
-								 service,
-								 transaction,
-								 error);
- out:
-     return retval;
+  return retval;
   
 failed2:
-    kdbus_release_name(connection, service_name, sender_id);
+  kdbus_release_name(phantom, service_name, sender_id);
 failed:
-    if(_bus_service_find_owner_link (service, connection))
-        bus_service_remove_owner (service, connection, transaction, NULL);
+  bus_connection_disconnected(phantom);
 
   return FALSE;
 }
