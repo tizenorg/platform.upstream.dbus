@@ -1231,6 +1231,9 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
   BusRegistry *registry;
   BusService *service;
   DBusMessage *reply;
+#ifdef ENABLE_KDBUS_TRANSPORT
+  char unique_name[(unsigned int)(snprintf((char*)base_name, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
+#endif
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -1249,7 +1252,6 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
   {
 	  int ret;
 	  struct nameInfo info;
-	  char unique_name[(unsigned int)(snprintf((char*)base_name, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
 
 	  ret = kdbus_NameQuery(text, dbus_connection_get_transport(connection), &info);
 		if(ret == 0) //unique id of the name
@@ -1460,7 +1462,11 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
 #ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
   {
-	  if(!kdbus_get_connection_unix_user(connection, message, &uid, error))
+	  const char* name;
+
+	  if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
+		  goto failed;
+	  if(!kdbus_get_connection_unix_user(connection, name, &uid, error))
 		  goto failed;
   }
   else
@@ -1521,31 +1527,31 @@ bus_driver_handle_get_connection_unix_process_id (DBusConnection *connection,
   reply = dbus_message_new_method_return (message);
   if (reply == NULL)
     goto oom;
-
 #ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
-  {
-	  if(!kdbus_get_connection_unix_process_id(connection, message, &pid, error))
-		  goto failed;
-  }
-  else
+    {
+      const char* name;
+
+      if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
+        goto failed;
+      if(!kdbus_get_connection_unix_process_id(connection, name, &pid, error))
+        goto failed;
+    }
+    else
 #endif
   {
-	  conn = bus_driver_get_conn_helper (connection, message, "PID", &service,
-										 error);
+    conn = bus_driver_get_conn_helper (connection, message, "PID", &service,
+                       error);
+    if (conn == NULL)
+      goto failed;
 
-	  if (conn == NULL)
-		goto failed;
-
-
-
-	  if (!dbus_connection_get_unix_process_id (conn, &pid))
-		{
-		  dbus_set_error (error,
-						  DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,
-						  "Could not determine PID for '%s'", service);
-		  goto failed;
-		}
+    if (!dbus_connection_get_unix_process_id (conn, &pid))
+    {
+      dbus_set_error (error,
+                DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,
+                "Could not determine PID for '%s'", service);
+      goto failed;
+    }
   }
 
   pid32 = pid;
@@ -1739,7 +1745,11 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
   }
   else
   {
-	  if(kdbus_get_connection_unix_process_id(connection, message, &ulong_val, error))
+	  const char* name;
+
+	  if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
+		  goto failed;
+	  if(kdbus_get_connection_unix_process_id(connection, name, &ulong_val, error))
 	  {
 		  if (!_dbus_asv_add_uint32 (&array_iter, "ProcessID", ulong_val))
 			goto oom;
@@ -1747,7 +1757,7 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
 	  else
 		  goto failed;
 
-	  if(kdbus_get_connection_unix_user(connection, message, &ulong_val, error))
+	  if(kdbus_get_connection_unix_user(connection, name, &ulong_val, error))
 	  {
 		  if (!_dbus_asv_add_uint32 (&array_iter, "UnixUserID", ulong_val))
 			goto oom;

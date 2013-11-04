@@ -236,13 +236,84 @@ dbus_uint32_t kdbus_release_name(DBusConnection* connection, const DBusString *s
 	return release_kdbus_name(fd, _dbus_string_get_const_data(service_name), sender_id);
 }
 
+/*
+ * Asks kdbus for well-known names registered on the bus
+ */
 dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int *array_len)
 {
 	int fd;
+	struct kdbus_cmd_names* pCmd;
+	__u64 cmd_size;
+	dbus_bool_t ret_val = FALSE;
+	char** list;
+	int list_len = 0;
+	int i = 0;
+	int j;
+
+	cmd_size = sizeof(struct kdbus_cmd_names) + KDBUS_ITEM_SIZE(1);
+	pCmd = malloc(cmd_size);
+	if(pCmd == NULL)
+		goto out;
+	pCmd->size = cmd_size;
 
 	_dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
 
-	return list_kdbus_names(fd, listp, array_len);
+again:
+	cmd_size = 0;
+	if(ioctl(fd, KDBUS_CMD_NAME_LIST, pCmd))
+	{
+		if(errno == EINTR)
+			goto again;
+		if(errno == ENOBUFS)			//buffer to small to put all names into it
+			cmd_size = pCmd->size;		//here kernel tells how much memory it needs
+		else
+		{
+			_dbus_verbose("kdbus error asking for name list: err %d (%m)\n",errno);
+			goto out;
+		}
+	}
+	if(cmd_size)  //kernel needs more memory
+	{
+		pCmd = realloc(pCmd, cmd_size);  //prepare memory
+		if(pCmd == NULL)
+			return FALSE;
+		goto again;						//and try again
+	}
+	else
+	{
+		struct kdbus_cmd_name* pCmd_name;
+
+		for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
+			list_len++;
+
+		list = malloc(sizeof(char*) * (list_len + 1));
+		if(list == NULL)
+			goto out;
+
+		for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
+		{
+			list[i] = strdup(pCmd_name->name);
+			if(list[i] == NULL)
+			{
+				for(j=0; j<i; j++)
+					free(list[j]);
+				free(list);
+				goto out;
+			}
+			_dbus_verbose ("Name %d: %s\n", i, list[i]);
+			++i;
+		}
+		list[i] = NULL;
+	}
+
+	*array_len = list_len;
+	*listp = list;
+	ret_val = TRUE;
+
+out:
+	if(pCmd)
+		free(pCmd);
+	return ret_val;
 }
 
 /*
@@ -286,17 +357,32 @@ dbus_bool_t kdbus_remove_match (DBusConnection* connection, DBusMessage* message
 	return TRUE;
 }
 
+int kdbus_get_name_owner(DBusConnection* connection, const char* name, char* owner)
+{
+  int ret;
+  struct nameInfo info;
+
+  ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
+  if(ret == 0) //unique id of the name
+  {
+    sprintf(owner, ":1.%llu", (unsigned long long int)info.uniqueId);
+    _dbus_verbose("Unique name discovered:%s\n", owner);
+  }
+  else if(ret != -ENOENT)
+    _dbus_verbose("kdbus error sending name query: err %d (%m)\n", errno);
+
+  return ret;
+}
+
 /*
  *  Asks kdbus for uid of the owner of the name given in the message
  */
-dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, DBusMessage* message, unsigned long* uid, DBusError* error)
+dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, const char* name, unsigned long* uid, DBusError* error)
 {
-	char* name = NULL;
 	struct nameInfo info;
 	int inter_ret;
 	dbus_bool_t ret = FALSE;
 
-	dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
 	inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
 	if(inter_ret == 0) //name found
 	{
@@ -318,14 +404,12 @@ dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, DBusMessa
 /*
  *  Asks kdbus for pid of the owner of the name given in the message
  */
-dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, DBusMessage* message, unsigned long* pid, DBusError* error)
+dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, const char* name, unsigned long* pid, DBusError* error)
 {
-	char* name = NULL;
 	struct nameInfo info;
 	int inter_ret;
 	dbus_bool_t ret = FALSE;
 
-	dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
 	inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
 	if(inter_ret == 0) //name found
 	{
@@ -374,6 +458,51 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 	}
 
 	return ret;
+}
+
+/**
+ * Gets the UNIX user ID of the connection from kdbus, if known. Returns #TRUE if
+ * the uid is filled in.  Always returns #FALSE on non-UNIX platforms
+ * for now., though in theory someone could hook Windows to NIS or
+ * something.  Always returns #FALSE prior to authenticating the
+ * connection.
+ *
+ * The UID of is only read by bus daemon from kdbus. You can not
+ * call this function from client side of the connection.
+ *
+ * You can ask the bus to tell you the UID of another connection though
+ * if you like; this is done with dbus_bus_get_unix_user().
+ *
+ * @param connection the connection
+ * @param uid return location for the user ID
+ * @returns #TRUE if uid is filled in with a valid user ID
+ */
+dbus_bool_t
+dbus_connection_get_unix_user (DBusConnection *connection,
+                               unsigned long  *uid)
+{
+  _dbus_return_val_if_fail (connection != NULL, FALSE);
+  _dbus_return_val_if_fail (uid != NULL, FALSE);
+
+  return kdbus_get_connection_unix_user(connection, bus_connection_get_name(connection), uid, NULL);
+}
+
+/**
+ * Gets the process ID of the connection if any.
+ * Returns #TRUE if the pid is filled in.
+ *
+ * @param connection the connection
+ * @param pid return location for the process ID
+ * @returns #TRUE if uid is filled in with a valid process ID
+ */
+dbus_bool_t
+dbus_connection_get_unix_process_id (DBusConnection *connection,
+             unsigned long  *pid)
+{
+  _dbus_return_val_if_fail (connection != NULL, FALSE);
+  _dbus_return_val_if_fail (pid != NULL, FALSE);
+
+  return kdbus_get_connection_unix_process_id(connection, bus_connection_get_name(connection), pid, NULL);
 }
 
 /*
@@ -519,17 +648,6 @@ out:
 	bus_transaction_cancel_and_free(transaction);
     return retval;
 }
-
-/*
-static dbus_bool_t remove_conn_if_name_match (DBusConnection *connection, void *data)
-{
-    if(!strcmp(bus_connection_get_name(connection), (char*)data))
-    {
-        bus_connection_disconnected(connection);
-        return FALSE; //this is to break foreach function
-    }
-    return TRUE;
-}*/
 
 /*
  * Analyzes system broadcasts about id and name changes.

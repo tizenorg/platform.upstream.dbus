@@ -25,6 +25,7 @@
  */
 #include "kdbus.h"
 #include "kdbus-common.h"
+#include "dbus-transport-kdbus.h"
 #include <string.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -128,83 +129,6 @@ dbus_bool_t register_kdbus_policy(const char* name, int fd)
 
 	_dbus_verbose("Policy %s set correctly\n", name);
 	return TRUE;
-}
-
-/*
- * Asks kdbus for well-known names registered on the bus
- */
-dbus_bool_t list_kdbus_names(int fd, char ***listp, int *array_len)
-{
-	struct kdbus_cmd_names* pCmd;
-	__u64 cmd_size;
-	dbus_bool_t ret_val = FALSE;
-	char** list;
-	int list_len = 0;
-	int i = 0;
-	int j;
-
-	cmd_size = sizeof(struct kdbus_cmd_names) + KDBUS_ITEM_SIZE(1);
-	pCmd = malloc(cmd_size);
-	if(pCmd == NULL)
-		goto out;
-	pCmd->size = cmd_size;
-
-again:
-	cmd_size = 0;
-	if(ioctl(fd, KDBUS_CMD_NAME_LIST, pCmd))
-	{
-		if(errno == EINTR)
-			goto again;
-		if(errno == ENOBUFS)			//buffer to small to put all names into it
-			cmd_size = pCmd->size;		//here kernel tells how much memory it needs
-		else
-		{
-			_dbus_verbose("kdbus error asking for name list: err %d (%m)\n",errno);
-			goto out;
-		}
-	}
-	if(cmd_size)  //kernel needs more memory
-	{
-		pCmd = realloc(pCmd, cmd_size);  //prepare memory
-		if(pCmd == NULL)
-			return FALSE;
-		goto again;						//and try again
-	}
-	else
-	{
-		struct kdbus_cmd_name* pCmd_name;
-
-		for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
-			list_len++;
-
-		list = malloc(sizeof(char*) * (list_len + 1));
-		if(list == NULL)
-			goto out;
-
-		for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
-		{
-			list[i] = strdup(pCmd_name->name);
-			if(list[i] == NULL)
-			{
-				for(j=0; j<i; j++)
-					free(list[j]);
-				free(list);
-				goto out;
-			}
-			_dbus_verbose ("Name %d: %s\n", i, list[i]);
-			++i;
-		}
-		list[i] = NULL;
-	}
-
-	*array_len = list_len;
-	*listp = list;
-	ret_val = TRUE;
-
-out:
-	if(pCmd)
-		free(pCmd);
-	return ret_val;
 }
 
 /**

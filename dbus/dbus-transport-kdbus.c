@@ -475,9 +475,9 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 	pInfo->sec_label_len = 0;
 	pInfo->sec_label = NULL;
 	
-    item_size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
+  item_size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
 	item_size = (item_size < 56) ? 56 : item_size;  //at least 56 bytes are needed by kernel to place info about name, otherwise error
-    size = sizeof(struct kdbus_cmd_name_info) + item_size;
+  size = sizeof(struct kdbus_cmd_name_info) + item_size;
 
 	msg = malloc(size);
 	if (!msg)

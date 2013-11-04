@@ -28,12 +28,6 @@
 #include <dbus/dbus-list.h>
 #include <dbus/dbus-mempool.h>
 #include <dbus/dbus-marshal-validate.h>
-#ifdef ENABLE_KDBUS_TRANSPORT
-#include <linux/types.h>
-#include <errno.h>
-#include <stdlib.h>
-#endif
-
 #include "driver.h"
 #include "services.h"
 #include "connection.h"
@@ -42,7 +36,14 @@
 #include "policy.h"
 #include "bus.h"
 #include "selinux.h"
+
 #ifdef ENABLE_KDBUS_TRANSPORT
+#include <linux/types.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <limits.h>
+
 #include "kdbus-d.h"
 #include "dbus/kdbus.h"
 #endif
@@ -656,6 +657,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
   dbus_uint32_t flags;
   __u64 sender_id;
   dbus_bool_t rm_owner_daemon = FALSE;
+  const char* conn_unique_name;
 
   if (!dbus_message_get_args (message, error,
                               DBUS_TYPE_STRING, &name,
@@ -692,17 +694,25 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
       goto out;
     }
 
+  conn_unique_name = dbus_message_get_sender(message);
+
   if (_dbus_string_equal_c_str (service_name, DBUS_SERVICE_DBUS))
     {
       dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
                       "Connection \"%s\" is not allowed to own the service \"%s\"because "
                       "it is reserved for D-Bus' use only",
-                      bus_connection_is_active (connection) ?
-                      bus_connection_get_name (connection) :
-                      "(inactive)",
-                      DBUS_SERVICE_DBUS);
+                      conn_unique_name, DBUS_SERVICE_DBUS);
       goto out;
     }
+
+  if (!bus_client_policy_check_can_own (bus_connection_get_policy (connection), service_name))
+	{
+	  dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+					  "Connection \"%s\" is not allowed to own the service \"%s\" due "
+					  "to security policies in the configuration file",
+					  conn_unique_name, _dbus_string_get_const_data (service_name));
+	  goto out;
+	}
 
 	service = bus_registry_lookup (registry, service_name);
 	if (service == NULL)
@@ -716,13 +726,13 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 		if(!kdbus_register_policy(service_name, connection))
 		{
 			dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-						  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
-						  _dbus_string_get_const_data (service_name));
+						  "Kdbus error when setting policy for connection \"%s\" and  service name \"%s\"",
+						  conn_unique_name, _dbus_string_get_const_data (service_name));
 			goto failed;
 		}
 	}
 
-	sender_id = sender_name_to_id(dbus_message_get_sender(message), error);
+	sender_id = sender_name_to_id(conn_unique_name, error);
 	if(dbus_error_is_set(error))
 		goto failed;
 
@@ -730,7 +740,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
 	if(*result == -EPERM)
 	{
 		dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-					  "Connection is not allowed to own the service \"%s\" due to security policies in the configuration file",
+					  "Kdbus not allowed to own the service \"%s\"",
 					  _dbus_string_get_const_data (service_name));
 		goto failed;
 	}
@@ -1509,13 +1519,22 @@ DBusConnection *
 bus_service_get_primary_owners_connection (BusService *service)
 {
   BusOwner *owner;
+#ifdef ENABLE_KDBUS_TRANSPORT
+  char unique_name[(unsigned int)(snprintf((char*)NULL, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
+#endif
 
   owner = bus_service_get_primary_owner (service);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
+  if(kdbus_get_name_owner(owner->conn, bus_service_get_name(service), unique_name) < 0)
+    return NULL;
+  return _bus_service_find_owner_connection(service, unique_name);  //bus_connections_find_conn_by_name would be safer? but slower
+#else
   if (owner != NULL)
     return owner->conn;
   else
     return NULL;
+#endif
 }
 
 BusOwner*
