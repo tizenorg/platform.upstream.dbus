@@ -183,8 +183,8 @@ dbus_bool_t register_daemon_name(DBusConnection* connection)
     BusTransaction *transaction;
 
     _dbus_string_init_const(&daemon_name, DBUS_SERVICE_DBUS);
-    if(!kdbus_register_policy (&daemon_name, connection))
-        return FALSE;
+    if(!register_kdbus_policy(DBUS_SERVICE_DBUS, dbus_connection_get_transport(connection), geteuid()))
+      return FALSE;
 
     if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
        return FALSE;
@@ -207,15 +207,6 @@ dbus_bool_t register_daemon_name(DBusConnection* connection)
 out:
 	bus_transaction_cancel_and_free(transaction);
     return retval;
-}
-
-dbus_bool_t kdbus_register_policy (const DBusString *service_name, DBusConnection* connection)
-{
-	int fd;
-
-	_dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
-
-	return register_kdbus_policy(_dbus_string_get_const_data(service_name), fd);
 }
 
 dbus_uint32_t kdbus_request_name(DBusConnection* connection, const DBusString *service_name, dbus_uint32_t flags, __u64 sender_id)
@@ -377,28 +368,32 @@ int kdbus_get_name_owner(DBusConnection* connection, const char* name, char* own
 /*
  *  Asks kdbus for uid of the owner of the name given in the message
  */
-dbus_bool_t kdbus_get_connection_unix_user(DBusConnection* connection, const char* name, unsigned long* uid, DBusError* error)
+dbus_bool_t kdbus_get_unix_user(DBusConnection* connection, const char* name, unsigned long* uid, DBusError* error)
 {
-	struct nameInfo info;
-	int inter_ret;
-	dbus_bool_t ret = FALSE;
+  struct nameInfo info;
+  int inter_ret;
+  dbus_bool_t ret = FALSE;
 
-	inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
-	if(inter_ret == 0) //name found
-	{
-		_dbus_verbose("User id:%llu\n", (unsigned long long) info.userId);
-		*uid = info.userId;
-		return TRUE;
-	}
-	else if(inter_ret == -ENOENT)  //name has no owner
-		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get UID of name '%s': no such name", name);
-	else
-	{
-		_dbus_verbose("kdbus error determining UID: err %d (%m)\n", errno);
-		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name);
-	}
+  inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
+  if(inter_ret == 0) //name found
+  {
+    _dbus_verbose("User id:%llu\n", (unsigned long long) info.userId);
+    *uid = info.userId;
+    return TRUE;
+  }
+  else if(inter_ret == -ENOENT)  //name has no owner
+    {
+      _dbus_verbose ("Name %s has no owner.\n", name);
+      dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get UID of name '%s': no such name", name);
+    }
 
-	return ret;
+  else
+  {
+    _dbus_verbose("kdbus error determining UID: err %d (%m)\n", errno);
+    dbus_set_error (error, DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name);
+  }
+
+  return ret;
 }
 
 /*
@@ -484,7 +479,7 @@ dbus_connection_get_unix_user (DBusConnection *connection,
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (uid != NULL, FALSE);
 
-  return kdbus_get_connection_unix_user(connection, bus_connection_get_name(connection), uid, NULL);
+  return kdbus_get_unix_user(connection, bus_connection_get_name(connection), uid, NULL);
 }
 
 /**
@@ -551,6 +546,8 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
     int fd;
     BusTransaction *transaction;
     DBusString name;
+    DBusTransport* transport;
+    unsigned long int euid;
 
     transaction = bus_transaction_new (bus_connection_get_context(connection));
     if (transaction == NULL)
@@ -559,13 +556,18 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
     if (!bus_activation_list_services (bus_connection_get_activation (connection), &services, &len))
         return FALSE;
 
-    _dbus_transport_get_socket_fd (dbus_connection_get_transport(connection), &fd);
+    transport = dbus_connection_get_transport(connection);
+    euid = geteuid();
+
+    if(!_dbus_transport_get_socket_fd (transport, &fd))
+      return FALSE;
+
     _dbus_string_init(&name);
 
     for(i=0; i<len; i++)
     {
-        if(!register_kdbus_policy(services[i], fd))
-            goto out;
+        if(!register_kdbus_policy(services[i], transport, euid))
+          goto out;
 
         if (request_kdbus_name(fd, services[i], (DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER) , 0) < 0)
             goto out;

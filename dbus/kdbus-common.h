@@ -35,7 +35,7 @@
 	(typeof(part))(((uint8_t *)part) + KDBUS_ALIGN8((part)->size))
 #define KDBUS_ITEM_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
 
-dbus_bool_t register_kdbus_policy(const char* name, int fd);
+dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int uid);
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id);
 int release_kdbus_name(int fd, const char *name, __u64 id);
 

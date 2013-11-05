@@ -836,7 +836,7 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
 			return -1;
 		if(!bus_register_kdbus(name, (DBusTransportKdbus*)transport))
 			goto outH1;
-		if(!register_kdbus_policy(name, ((DBusTransportKdbus*)transport)->fd))
+		if(!register_kdbus_policy(name, transport, geteuid()))
 			goto outH1;
 
 		sender = malloc (strlen(name) + 4);

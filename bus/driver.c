@@ -1460,7 +1460,7 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
 
 	  if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
 		  goto failed;
-	  if(!kdbus_get_connection_unix_user(connection, name, &uid, error))
+	  if(!kdbus_get_unix_user(connection, name, &uid, error))
 		  goto failed;
   }
   else
@@ -1751,7 +1751,7 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
 	  else
 		  goto failed;
 
-	  if(kdbus_get_connection_unix_user(connection, name, &ulong_val, error))
+	  if(kdbus_get_unix_user(connection, name, &ulong_val, error))
 	  {
 		  if (!_dbus_asv_add_uint32 (&array_iter, "UnixUserID", ulong_val))
 			goto oom;

@@ -46,6 +46,7 @@
 
 #include "kdbus-d.h"
 #include "dbus/kdbus.h"
+#include "dbus/kdbus-common.h"
 #endif
 
 struct BusService
@@ -657,6 +658,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
   __u64 sender_id;
   const char* conn_unique_name;
   DBusConnection* phantom;
+  unsigned long int uid;
 
   if (!dbus_message_get_args (message, error,
                               DBUS_TYPE_STRING, &name,
@@ -672,8 +674,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
                                 _dbus_string_get_length (service_name)))
     {
       dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
-                      "Requested bus name \"%s\" is not valid",
-                      _dbus_string_get_const_data (service_name));
+                      "Requested bus name \"%s\" is not valid", name);
 
       _dbus_verbose ("Attempt to acquire invalid service name\n");
 
@@ -684,11 +685,9 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
     {
       /* Not allowed; only base services can start with ':' */
       dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
-                      "Cannot acquire a service starting with ':' such as \"%s\"",
-                      _dbus_string_get_const_data (service_name));
+                      "Cannot acquire a service starting with ':' such as \"%s\"", name);
 
-      _dbus_verbose ("Attempt to acquire invalid base service name \"%s\"",
-                     _dbus_string_get_const_data (service_name));
+      _dbus_verbose ("Attempt to acquire invalid base service name \"%s\"", name);
 
       return FALSE;
     }
@@ -717,60 +716,62 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
     }
 
   if (!bus_client_policy_check_can_own (bus_connection_get_policy (phantom), service_name))
-	{
-	  dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-					  "Connection \"%s\" is not allowed to own the service \"%s\" due "
-					  "to security policies in the configuration file",
-					  conn_unique_name, _dbus_string_get_const_data (service_name));
-	  goto failed;
-	}
+    {
+      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+          "Connection \"%s\" is not allowed to own the service \"%s\" due "
+          "to security policies in the configuration file", conn_unique_name, name);
+      goto failed;
+    }
 
-  if(!kdbus_register_policy(service_name, phantom))
+  if (!kdbus_get_unix_user(phantom, conn_unique_name, &uid, NULL))
+    goto failed;
+
+  if (!register_kdbus_policy(name, dbus_connection_get_transport(phantom), uid))
   {
     dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
             "Kdbus error when setting policy for connection \"%s\" and  service name \"%s\"",
-            conn_unique_name, _dbus_string_get_const_data (service_name));
+            conn_unique_name, name);
     goto failed;
   }
 
-	*result = kdbus_request_name(connection, service_name, flags, sender_id);
-	if(*result == -EPERM)
-	{
-		dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-					  "Kdbus not allowed %s to own the service \"%s\"",
-					  conn_unique_name, _dbus_string_get_const_data (service_name));
-		goto failed;
-	}
-	else if(*result < 0)
-	{
-		dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
-		goto failed;
-	}
+  *result = kdbus_request_name(connection, service_name, flags, sender_id);
+  if(*result == -EPERM)
+    {
+      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+          "Kdbus not allowed %s to own the service \"%s\"",
+          conn_unique_name, _dbus_string_get_const_data (service_name));
+      goto failed;
+    }
+  else if(*result < 0)
+    {
+      dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
+      goto failed;
+    }
 
-	if((*result == DBUS_REQUEST_NAME_REPLY_IN_QUEUE) || (*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER))
-	{
-    service = bus_registry_lookup (registry, service_name);
-    if (service == NULL)
-      {
-        service = bus_registry_ensure (registry, service_name, phantom, flags,
+  if((*result == DBUS_REQUEST_NAME_REPLY_IN_QUEUE) || (*result == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER))
+    {
+      service = bus_registry_lookup (registry, service_name);
+      if (service == NULL)
+        {
+          service = bus_registry_ensure (registry, service_name, phantom, flags,
                        transaction, error);
-        if (service == NULL)
-          goto failed2;
-      }
-    else
-      {
-        if (!bus_service_add_owner (service, phantom, flags, transaction, error))
-          goto failed2;
-      }
+          if (service == NULL)
+            goto failed2;
+        }
+      else
+        {
+          if (!bus_service_add_owner (service, phantom, flags, transaction, error))
+            goto failed2;
+        }
 
-    activation = bus_context_get_activation (registry->context);
-    retval = bus_activation_send_pending_auto_activation_messages (activation,
+      activation = bus_context_get_activation (registry->context);
+      retval = bus_activation_send_pending_auto_activation_messages (activation,
                    service,
                    transaction,
                    error);
-	}
-	else
-	  retval = TRUE;
+    }
+  else
+    retval = TRUE;
 
   return retval;
   

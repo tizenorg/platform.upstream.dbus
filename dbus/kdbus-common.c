@@ -36,50 +36,50 @@
 
 static struct kdbus_policy *make_policy_name(const char *name)
 {
-	struct kdbus_policy *p;
-	__u64 size;
+  struct kdbus_policy *p;
+  __u64 size;
 
-	size = offsetof(struct kdbus_policy, name) + strlen(name) + 1;
-	p = malloc(size);
-	if (!p)
-		return NULL;
-	memset(p, 0, size);
-	p->size = size;
-	p->type = KDBUS_POLICY_NAME;
-	strcpy(p->name, name);
+  size = offsetof(struct kdbus_policy, name) + strlen(name) + 1;
+  p = malloc(size);
+  if (!p)
+    return NULL;
+  memset(p, 0, size);
+  p->size = size;
+  p->type = KDBUS_POLICY_NAME;
+  strcpy(p->name, name);
 
-	return p;
+  return p;
 }
 
 static struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
 {
-	struct kdbus_policy *p;
-	__u64 size = sizeof(*p);
+  struct kdbus_policy *p;
+  __u64 size = sizeof(*p);
 
-	p = malloc(size);
-	if (!p)
-		return NULL;
+  p = malloc(size);
+  if (!p)
+    return NULL;
 
-	memset(p, 0, size);
-	p->size = size;
-	p->type = KDBUS_POLICY_ACCESS;
-	p->access.type = type;
-	p->access.bits = bits;
-	p->access.id = id;
+  memset(p, 0, size);
+  p->size = size;
+  p->type = KDBUS_POLICY_ACCESS;
+  p->access.type = type;
+  p->access.bits = bits;
+  p->access.id = id;
 
-	return p;
+  return p;
 }
 
 static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
 {
-	struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
+  struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
 
-	if (cmd_policy->size + policy->size > max_size)
-		return;
+  if (cmd_policy->size + policy->size > max_size)
+    return;
 
-	memcpy(dst, policy, policy->size);
-	cmd_policy->size += KDBUS_ALIGN8(policy->size);
-	free(policy);
+  memcpy(dst, policy, policy->size);
+  cmd_policy->size += KDBUS_ALIGN8(policy->size);
+  free(policy);
 }
 
 /**
@@ -93,42 +93,47 @@ static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_poli
  * Name of the policy equals name on the bus.
  *
  * @param name name of the policy = name of the connection
- * @param fd - file descriptor of the connection
+ * @param transport - transport
+ * @param owner_uid - uid or euid of the process being owner of the name
  *
  * @returns #TRUE on success
  */
-dbus_bool_t register_kdbus_policy(const char* name, int fd)
+dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int owner_uid)
 {
-	struct kdbus_cmd_policy *cmd_policy;
-	struct kdbus_policy *policy;
-	int size = 0xffff;
+  struct kdbus_cmd_policy *cmd_policy;
+  struct kdbus_policy *policy;
+  int size = 0xffff;
+  int fd;
 
-	cmd_policy = alloca(size);
-	memset(cmd_policy, 0, size);
+  if(!_dbus_transport_get_socket_fd (transport, &fd))
+    return FALSE;
 
-	policy = (struct kdbus_policy *) cmd_policy->policies;
-	cmd_policy->size = offsetof(struct kdbus_cmd_policy, policies);
+  cmd_policy = alloca(size);
+  memset(cmd_policy, 0, size);
 
-	policy = make_policy_name(name);
-	append_policy(cmd_policy, policy, size);
+  policy = (struct kdbus_policy *) cmd_policy->policies;
+  cmd_policy->size = offsetof(struct kdbus_cmd_policy, policies);
 
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, geteuid());
-	append_policy(cmd_policy, policy, size);
+  policy = make_policy_name(name);
+  append_policy(cmd_policy, policy, size);
 
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_RECV, 0);
-	append_policy(cmd_policy, policy, size);
+  policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, owner_uid);
+  append_policy(cmd_policy, policy, size);
 
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_SEND, 0);
-	append_policy(cmd_policy, policy, size);
+  policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_RECV, 0);
+  append_policy(cmd_policy, policy, size);
 
-	if (ioctl(fd, KDBUS_CMD_EP_POLICY_SET, cmd_policy) < 0)
-	{
-		_dbus_verbose ("Error setting policy: %m, %d\n", errno);
-		return FALSE;
-	}
+  policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_SEND, 0);
+  append_policy(cmd_policy, policy, size);
 
-	_dbus_verbose("Policy %s set correctly\n", name);
-	return TRUE;
+  if (ioctl(fd, KDBUS_CMD_EP_POLICY_SET, cmd_policy) < 0)
+    {
+      _dbus_verbose ("Error setting policy: %m, %d\n", errno);
+      return FALSE;
+    }
+
+  _dbus_verbose("Policy %s set correctly\n", name);
+  return TRUE;
 }
 
 /**
@@ -148,48 +153,48 @@ dbus_bool_t register_kdbus_policy(const char* name, int fd)
  */
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
 {
-	struct kdbus_cmd_name *cmd_name;
+  struct kdbus_cmd_name *cmd_name;
 
-	__u64 size = sizeof(*cmd_name) + strlen(name) + 1;
-	__u64 flags_kdbus = 0;
+  __u64 size = sizeof(*cmd_name) + strlen(name) + 1;
+  __u64 flags_kdbus = 0;
 
-	cmd_name = alloca(size);
+  cmd_name = alloca(size);
 
-	strcpy(cmd_name->name, name);
-	cmd_name->size = size;
+  strcpy(cmd_name->name, name);
+  cmd_name->size = size;
 
-	if(flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
-		flags_kdbus |= KDBUS_NAME_ALLOW_REPLACEMENT;
-	if(!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
-		flags_kdbus |= KDBUS_NAME_QUEUE;
-	if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
-		flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
-	if(flags & KDBUS_NAME_STARTER)
-	    flags_kdbus |= KDBUS_NAME_STARTER;
+  if(flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
+    flags_kdbus |= KDBUS_NAME_ALLOW_REPLACEMENT;
+  if(!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
+    flags_kdbus |= KDBUS_NAME_QUEUE;
+  if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
+    flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
+  if(flags & KDBUS_NAME_STARTER)
+    flags_kdbus |= KDBUS_NAME_STARTER;
 
-	cmd_name->flags = flags_kdbus;
-	cmd_name->id = id;
-//	cmd_name->conn_flags = 0;
+  cmd_name->flags = flags_kdbus;
+  cmd_name->id = id;
+  //	cmd_name->conn_flags = 0;
 
-	_dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
+  _dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
 
-	if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name))
-	{
-		_dbus_verbose ("error acquiring name '%s': %m, %d\n", name, errno);
-		if(errno == EEXIST)
-			return DBUS_REQUEST_NAME_REPLY_EXISTS;
-		return -errno;
-	}
+  if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name))
+    {
+      _dbus_verbose ("error acquiring name '%s': %m, %d\n", name, errno);
+      if(errno == EEXIST)
+        return DBUS_REQUEST_NAME_REPLY_EXISTS;
+      return -errno;
+    }
 
-	_dbus_verbose("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
+  _dbus_verbose("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
 
-	if(cmd_name->flags & KDBUS_NAME_IN_QUEUE)
-		return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
-	else
-		return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
-	/*todo now 1 code is never returned -  DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
-	 * because kdbus never returns it now
-	 */
+  if(cmd_name->flags & KDBUS_NAME_IN_QUEUE)
+    return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
+  else
+    return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
+  /*todo now 1 code is never returned -  DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
+   * because kdbus never returns it now
+   */
 }
 
 /**
@@ -205,26 +210,26 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
  */
 int release_kdbus_name(int fd, const char *name, __u64 id)
 {
-	struct kdbus_cmd_name *cmd_name;
+  struct kdbus_cmd_name *cmd_name;
 
-	__u64 size = sizeof(*cmd_name) + strlen(name) + 1;
+  __u64 size = sizeof(*cmd_name) + strlen(name) + 1;
 
-	cmd_name = alloca(size);
-	cmd_name->id = id;
-	strcpy(cmd_name->name, name);
-	cmd_name->size = size;
+  cmd_name = alloca(size);
+  cmd_name->id = id;
+  strcpy(cmd_name->name, name);
+  cmd_name->size = size;
 
-	if (ioctl(fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
-	{
-		if(errno == ESRCH)
-			return DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
-		else if (errno == EPERM)
-			return DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
-		_dbus_verbose ("error releasing name '%s' for id:%llu. Error: %m, %d\n", name, (unsigned long long)id, errno);
-		return -errno;
-	}
+  if (ioctl(fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
+    {
+      if(errno == ESRCH)
+        return DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
+      else if (errno == EPERM)
+        return DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
+      _dbus_verbose ("error releasing name '%s' for id:%llu. Error: %m, %d\n", name, (unsigned long long)id, errno);
+      return -errno;
+    }
 
-	_dbus_verbose("Name '%s' released\n", name);
+  _dbus_verbose("Name '%s' released\n", name);
 
-	return DBUS_RELEASE_NAME_REPLY_RELEASED;
+  return DBUS_RELEASE_NAME_REPLY_RELEASED;
 }
