@@ -112,7 +112,7 @@ dbus_bool_t register_kdbus_policy(const char* name, int fd)
 	policy = make_policy_name(name);
 	append_policy(cmd_policy, policy, size);
 
-	policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, getuid());
+	policy = make_policy_access(KDBUS_POLICY_ACCESS_USER, KDBUS_POLICY_OWN, geteuid());
 	append_policy(cmd_policy, policy, size);
 
 	policy = make_policy_access(KDBUS_POLICY_ACCESS_WORLD, KDBUS_POLICY_RECV, 0);
