@@ -1128,15 +1128,30 @@ main (int argc, char **argv)
         }
  #endif /* DBUS_ENABLE_EMBEDDED_TESTS */
 
-      execl (DBUS_DAEMONDIR"/dbus-daemon",
+      if (kdbus)
+        {
+          execl (DBUS_DAEMONDIR"/dbus-daemon",
              DBUS_DAEMONDIR"/dbus-daemon",
              "--fork",
              "--print-pid", write_pid_fd_as_string,
              "--print-address", write_address_fd_as_string,
-             kdbus ? "--address=kdbus:" : "",
+             "--address=kdbus:",
              config_file ? "--config-file" : "--session",
              config_file, /* has to be last in this varargs list */
              NULL);
+        }
+      else
+        {
+          execl (DBUS_DAEMONDIR"/dbus-daemon",
+             DBUS_DAEMONDIR"/dbus-daemon",
+             "--fork",
+             "--print-pid", write_pid_fd_as_string,
+             "--print-address", write_address_fd_as_string,
+             config_file ? "--config-file" : "--session",
+             config_file, /* has to be last in this varargs list */
+             NULL);
+        }
+
 
       fprintf (stderr,
                "Failed to execute message bus daemon %s: %s.  Will try again without full path.\n",
@@ -1148,15 +1163,29 @@ main (int argc, char **argv)
        * file and the dbus-daemon will not be in the install location during
        * build time.
        */
-      execlp ("dbus-daemon",
+      if (kdbus)
+        {
+          execlp ("dbus-daemon",
               "dbus-daemon",
               "--fork",
               "--print-pid", write_pid_fd_as_string,
               "--print-address", write_address_fd_as_string,
-              kdbus ? "--address=kdbus:" : "",
+              "--address=kdbus:",
               config_file ? "--config-file" : "--session",
               config_file, /* has to be last in this varargs list */
               NULL);
+        }
+      else
+        {
+          execlp ("dbus-daemon",
+              "dbus-daemon",
+              "--fork",
+              "--print-pid", write_pid_fd_as_string,
+              "--print-address", write_address_fd_as_string,
+              config_file ? "--config-file" : "--session",
+              config_file, /* has to be last in this varargs list */
+              NULL);
+        }
 
       fprintf (stderr,
                "Failed to execute message bus daemon: %s\n",
