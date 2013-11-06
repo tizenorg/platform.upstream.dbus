@@ -27,11 +27,7 @@
 #ifndef DBUS_TRANSPORT_KDBUS_H_
 #define DBUS_TRANSPORT_KDBUS_H_
 
-//#include "dbus-transport.h"
 #include "dbus-transport-protected.h"
-//#include "dbus-address.h"
-//#include "dbus-errors.h"
-#include "dbus-types.h"
 #include <linux/types.h>
 
 __u64 dbus_transport_get_bloom_size(DBusTransport* transport);
