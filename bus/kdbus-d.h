@@ -45,6 +45,19 @@ dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int 
 dbus_bool_t kdbus_add_match_rule (DBusConnection* connection, DBusMessage* message, const char* text, DBusError* error);
 dbus_bool_t kdbus_remove_match (DBusConnection* connection, DBusMessage* message, DBusError* error);
 
+dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rule);
+dbus_bool_t remove_match_kdbus (DBusTransport* transport, __u64 id);
+
+struct nameInfo
+{
+  __u64 uniqueId;
+  __u64 userId;
+  __u64 processId;
+  __u32 sec_label_len;
+  char *sec_label;
+};
+int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo* pInfo);
+
 int kdbus_get_name_owner(DBusConnection* connection, const char* name, char* owner);
 dbus_bool_t kdbus_get_unix_user(DBusConnection* connection, const char* name, unsigned long* uid, DBusError* error);
 dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, const char* name, unsigned long* pid, DBusError* error);
