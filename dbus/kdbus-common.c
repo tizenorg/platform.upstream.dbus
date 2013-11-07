@@ -183,6 +183,8 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
       _dbus_verbose ("error acquiring name '%s': %m, %d\n", name, errno);
       if(errno == EEXIST)
         return DBUS_REQUEST_NAME_REPLY_EXISTS;
+      if(errno == EALREADY)
+        return DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER;
       return -errno;
     }
 
@@ -192,9 +194,6 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
     return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
   else
     return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
-  /*todo now 1 code is never returned -  DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER
-   * because kdbus never returns it now
-   */
 }
 
 /**
