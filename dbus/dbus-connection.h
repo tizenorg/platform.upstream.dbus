@@ -277,6 +277,14 @@ dbus_bool_t        dbus_connection_get_unix_user                (DBusConnection 
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_unix_process_id          (DBusConnection             *connection,
                                                                  unsigned long              *pid);
+#ifdef ENABLE_KDBUS_TRANSPORT
+DBUS_EXPORT
+dbus_bool_t        dbus_connection_get_unix_user_dbus           (DBusConnection             *connection,
+                                                                 unsigned long              *uid);
+DBUS_EXPORT
+dbus_bool_t        dbus_connection_get_unix_process_id_dbus     (DBusConnection             *connection,
+                                                                 unsigned long              *pid);
+#endif
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_adt_audit_session_data   (DBusConnection             *connection,
                                                                  void                      **data,

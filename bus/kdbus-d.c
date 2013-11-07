@@ -35,6 +35,7 @@
 #include "connection.h"
 #include "activation.h"
 #include "services.h"
+#include <dbus/dbus-connection.h>
 
 #include <utils.h>
 #include <stdlib.h>
@@ -763,7 +764,10 @@ dbus_connection_get_unix_user (DBusConnection *connection,
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (uid != NULL, FALSE);
 
-  return kdbus_get_unix_user(connection, bus_connection_get_name(connection), uid, NULL);
+  if(bus_context_is_kdbus(bus_connection_get_context (connection)))
+    return kdbus_get_unix_user(connection, bus_connection_get_name(connection), uid, NULL);
+
+  return dbus_connection_get_unix_user_dbus(connection, uid);
 }
 
 /**
@@ -781,7 +785,10 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (pid != NULL, FALSE);
 
-  return kdbus_get_connection_unix_process_id(connection, bus_connection_get_name(connection), pid, NULL);
+  if(bus_context_is_kdbus(bus_connection_get_context (connection)))
+    return kdbus_get_connection_unix_process_id(connection, bus_connection_get_name(connection), pid, NULL);
+
+  return dbus_connection_get_unix_process_id_dbus(connection, pid);
 }
 
 /*

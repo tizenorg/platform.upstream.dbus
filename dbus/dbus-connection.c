@@ -5232,7 +5232,6 @@ dbus_connection_get_socket(DBusConnection              *connection,
   return retval;
 }
 
-#ifndef ENABLE_KDBUS_TRANSPORT
 /**
  * Gets the UNIX user ID of the connection if known.  Returns #TRUE if
  * the uid is filled in.  Always returns #FALSE on non-UNIX platforms
@@ -5255,9 +5254,15 @@ dbus_connection_get_socket(DBusConnection              *connection,
  * @param uid return location for the user ID
  * @returns #TRUE if uid is filled in with a valid user ID
  */
+#ifdef ENABLE_KDBUS_TRANSPORT
+dbus_bool_t
+dbus_connection_get_unix_user_dbus (DBusConnection *connection,
+                               unsigned long  *uid)
+#else
 dbus_bool_t
 dbus_connection_get_unix_user (DBusConnection *connection,
                                unsigned long  *uid)
+#endif
 {
   dbus_bool_t result;
 
@@ -5291,9 +5296,15 @@ dbus_connection_get_unix_user (DBusConnection *connection,
  * @param pid return location for the process ID
  * @returns #TRUE if uid is filled in with a valid process ID
  */
+#ifdef ENABLE_KDBUS_TRANSPORT
+dbus_bool_t
+dbus_connection_get_unix_process_id_dbus (DBusConnection *connection,
+             unsigned long  *pid)
+#else
 dbus_bool_t
 dbus_connection_get_unix_process_id (DBusConnection *connection,
 				     unsigned long  *pid)
+#endif
 {
   dbus_bool_t result;
 
@@ -5312,7 +5323,6 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
 
   return result;
 }
-#endif
 
 /**
  * Gets the ADT audit data of the connection if any.
