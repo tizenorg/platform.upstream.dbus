@@ -1505,9 +1505,16 @@ bus_service_get_primary_owners_connection (BusService *service)
   owner = bus_service_get_primary_owner (service);
 
 #ifdef ENABLE_KDBUS_TRANSPORT
-  if(kdbus_get_name_owner(owner->conn, bus_service_get_name(service), unique_name) < 0)
+  if(!owner)
     return NULL;
-  return _bus_service_find_owner_connection(service, unique_name);  //bus_connections_find_conn_by_name would be safer? but slower
+  if(bus_context_is_kdbus(service->registry->context))
+  {
+    if(kdbus_get_name_owner(owner->conn, bus_service_get_name(service), unique_name) < 0)
+      return NULL;
+    return _bus_service_find_owner_connection(service, unique_name);  //bus_connections_find_conn_by_name would be safer? but slower
+  }
+  else
+    return owner->conn;
 #else
   if (owner != NULL)
     return owner->conn;
