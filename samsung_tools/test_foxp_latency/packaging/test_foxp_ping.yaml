@@ -1,0 +1,13 @@
+Name: test_foxp_ping
+Summary: GDBus example application 2
+Version: 1
+Release: 1.0
+Group: System/Base
+License: GPLv2
+URL: none
+Sources:
+    - "%{name}-%{version}.tar.gz"
+Description: test_foxp_ping.
+
+PkgBR: none
+Configure: none
