@@ -52,6 +52,7 @@
 	     part = KDBUS_PART_NEXT(part))
 #define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU)
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
+//todo add compilation-time check if MEMFD_SIZE_THERSHOLD is lower than max payload vector size defined in kdbus.h
 
 #define KDBUS_MSG_DECODE_DEBUG 0
 
@@ -232,11 +233,17 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
 
     if(use_memfd == TRUE)  // bulk data - memfd
         msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
-    else {
-        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-    	if(body_size)
-    		msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
-    }
+    else
+      {
+        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //header is a must
+        while(body_size > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
+          {
+            msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+            body_size -= KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
+          }
+        if(body_size)
+          msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+      }
 
     if(fds_count)
     	msg_size += KDBUS_ITEM_SIZE(sizeof(int)*fds_count);
@@ -283,7 +290,7 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     uint64_t ret_size = 0;
     uint64_t body_size = 0;
     uint64_t header_size = 0;
-    dbus_bool_t use_memfd;
+  dbus_bool_t use_memfd = FALSE;
     const int *unix_fds;
     unsigned fds_count;
     dbus_bool_t autostart;
@@ -304,9 +311,12 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     body_size = _dbus_string_get_length(body);
     ret_size = header_size + body_size;
 
-    // check if message size is big enough to use memfd kdbus transport
-    use_memfd = ret_size > MEMFD_SIZE_THRESHOLD ? TRUE : FALSE;
-    if(use_memfd) kdbus_init_memfd(transport);
+  // check whether we can and should use memfd
+  if((dst_id != KDBUS_DST_ID_BROADCAST) && (ret_size > MEMFD_SIZE_THRESHOLD))
+    {
+      use_memfd = TRUE;
+      kdbus_init_memfd(transport);
+    }
     
     _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);
 
@@ -320,7 +330,6 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     // build message contents
     item = msg->items;
 
-    // case 1 - bulk data transfer - memfd
     if(use_memfd)          
     {
         char *buf;
@@ -364,11 +373,25 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
         _dbus_verbose("sending normal vector data\n");
         MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(header), header_size);
 
-        if(body_size)
+      if(body_size)
         {
-            _dbus_verbose("body attaching\n");
-	    item = KDBUS_PART_NEXT(item);
-	    MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(body), body_size);
+          const char* body_data;
+
+          body_data = _dbus_string_get_const_data(body);
+          while(body_size > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
+            {
+              _dbus_verbose("body attaching\n");
+              item = KDBUS_PART_NEXT(item);
+              MSG_ITEM_BUILD_VEC(body_data, KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE);
+              body_data += KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
+              body_size -= KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
+            }
+          if(body_size)
+            {
+              _dbus_verbose("body attaching\n");
+              item = KDBUS_PART_NEXT(item);
+              MSG_ITEM_BUILD_VEC(body_data, body_size);
+            }
         }
     }
 
