@@ -282,34 +282,34 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
  */
 static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, const char* destination)
 {
-    struct kdbus_msg *msg;
-    struct kdbus_item *item;
-    uint64_t dst_id = KDBUS_DST_ID_BROADCAST;
-    const DBusString *header;
-    const DBusString *body;
-    uint64_t ret_size = 0;
-    uint64_t body_size = 0;
-    uint64_t header_size = 0;
+  struct kdbus_msg *msg;
+  struct kdbus_item *item;
+  uint64_t dst_id = KDBUS_DST_ID_BROADCAST;
+  const DBusString *header;
+  const DBusString *body;
+  uint64_t ret_size = 0;
+  uint64_t body_size = 0;
+  uint64_t header_size = 0;
   dbus_bool_t use_memfd = FALSE;
-    const int *unix_fds;
-    unsigned fds_count;
-    dbus_bool_t autostart;
+  const int *unix_fds;
+  unsigned fds_count;
+  dbus_bool_t autostart;
 
-    // determine destination and destination id
-    if(destination)
+  // determine destination and destination id
+  if(destination)
     {
-    	dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
-	  	if((destination[0] == ':') && (destination[1] == '1') && (destination[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
-    	{
-    		dst_id = strtoull(&destination[3], NULL, 10);
-    		destination = NULL;
-    	}    
+      dst_id = KDBUS_DST_ID_WELL_KNOWN_NAME;
+      if((destination[0] == ':') && (destination[1] == '1') && (destination[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
+        {
+          dst_id = strtoull(&destination[3], NULL, 10);
+          destination = NULL;
+        }
     }
-    
-    _dbus_message_get_network_data (message, &header, &body);
-    header_size = _dbus_string_get_length(header);
-    body_size = _dbus_string_get_length(body);
-    ret_size = header_size + body_size;
+
+  _dbus_message_get_network_data (message, &header, &body);
+  header_size = _dbus_string_get_length(header);
+  body_size = _dbus_string_get_length(body);
+  ret_size = header_size + body_size;
 
   // check whether we can and should use memfd
   if((dst_id != KDBUS_DST_ID_BROADCAST) && (ret_size > MEMFD_SIZE_THRESHOLD))
@@ -317,61 +317,61 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
       use_memfd = TRUE;
       kdbus_init_memfd(transport);
     }
-    
-    _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);
 
-    // init basic message fields
-    msg = kdbus_init_msg(destination, dst_id, body_size, use_memfd, fds_count, transport);
-    msg->cookie = dbus_message_get_serial(message);
-    autostart = dbus_message_get_auto_start (message);
-    if(!autostart)
-    	msg->flags |= KDBUS_MSG_FLAGS_NO_AUTO_START;
-    
-    // build message contents
-    item = msg->items;
+  _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);
 
-    if(use_memfd)          
+  // init basic message fields
+  msg = kdbus_init_msg(destination, dst_id, body_size, use_memfd, fds_count, transport);
+  msg->cookie = dbus_message_get_serial(message);
+  autostart = dbus_message_get_auto_start (message);
+  if(!autostart)
+    msg->flags |= KDBUS_MSG_FLAGS_NO_AUTO_START;
+
+  // build message contents
+  item = msg->items;
+
+  if(use_memfd)
     {
-        char *buf;
+      char *buf;
 
-    	if(ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 0) < 0)
-	    {
-			_dbus_verbose("memfd sealing failed: \n");
-			goto out;
-	    }
+      if(ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 0) < 0)
+        {
+          _dbus_verbose("memfd sealing failed: \n");
+          goto out;
+        }
 
-	    buf = mmap(NULL, ret_size, PROT_WRITE, MAP_SHARED, transport->memfd, 0);
-	    if (buf == MAP_FAILED) 
-	    {
-			_dbus_verbose("mmap() fd=%i failed:%m", transport->memfd);
-			goto out;
-	    }
+      buf = mmap(NULL, ret_size, PROT_WRITE, MAP_SHARED, transport->memfd, 0);
+      if (buf == MAP_FAILED)
+        {
+          _dbus_verbose("mmap() fd=%i failed:%m", transport->memfd);
+          goto out;
+        }
 
-			memcpy(buf, _dbus_string_get_const_data(header), header_size);
-			if(body_size) {
-				buf+=header_size;
-				memcpy(buf, _dbus_string_get_const_data(body),  body_size);
-				buf-=header_size;
-		}
+      memcpy(buf, _dbus_string_get_const_data(header), header_size);
+      if(body_size) {
+          buf+=header_size;
+          memcpy(buf, _dbus_string_get_const_data(body),  body_size);
+          buf-=header_size;
+      }
 
-		munmap(buf, ret_size);
+      munmap(buf, ret_size);
 
-		// seal data - kdbus module needs it
-		if(ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 1) < 0) {
-			_dbus_verbose("memfd sealing failed: %d (%m)\n", errno);
-			ret_size = -1;
-			goto out;
-		}
+      // seal data - kdbus module needs it
+      if(ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 1) < 0) {
+          _dbus_verbose("memfd sealing failed: %d (%m)\n", errno);
+          ret_size = -1;
+          goto out;
+      }
 
-	    item->type = KDBUS_MSG_PAYLOAD_MEMFD;
-		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
-		item->memfd.size = ret_size;
-		item->memfd.fd = transport->memfd;
+      item->type = KDBUS_MSG_PAYLOAD_MEMFD;
+      item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
+      item->memfd.size = ret_size;
+      item->memfd.fd = transport->memfd;
     }
-    else
-      {
-        _dbus_verbose("sending normal vector data\n");
-        MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(header), header_size);
+  else
+    {
+      _dbus_verbose("sending normal vector data\n");
+      MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(header), header_size);
 
       if(body_size)
         {
@@ -395,59 +395,59 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
         }
     }
 
-    if(fds_count)
+  if(fds_count)
     {
-    	item = KDBUS_PART_NEXT(item);
-    	item->type = KDBUS_MSG_FDS;
-    	item->size = KDBUS_PART_HEADER_SIZE + (sizeof(int) * fds_count);
-    	memcpy(item->fds, unix_fds, sizeof(int) * fds_count);
+      item = KDBUS_PART_NEXT(item);
+      item->type = KDBUS_MSG_FDS;
+      item->size = KDBUS_PART_HEADER_SIZE + (sizeof(int) * fds_count);
+      memcpy(item->fds, unix_fds, sizeof(int) * fds_count);
     }
 
-	if (destination)
-	{
-		item = KDBUS_PART_NEXT(item);
-		item->type = KDBUS_MSG_DST_NAME;
-		item->size = KDBUS_PART_HEADER_SIZE + strlen(destination) + 1;
-		memcpy(item->str, destination, item->size - KDBUS_PART_HEADER_SIZE);
-	}
-	else if (dst_id == KDBUS_DST_ID_BROADCAST)
-	{
-		item = KDBUS_PART_NEXT(item);
-		item->type = KDBUS_MSG_BLOOM;
-		item->size = KDBUS_PART_HEADER_SIZE + transport->bloom_size;
-		strncpy(item->data, dbus_message_get_interface(message), transport->bloom_size);
-	}
+  if (destination)
+    {
+      item = KDBUS_PART_NEXT(item);
+      item->type = KDBUS_MSG_DST_NAME;
+      item->size = KDBUS_PART_HEADER_SIZE + strlen(destination) + 1;
+      memcpy(item->str, destination, item->size - KDBUS_PART_HEADER_SIZE);
+    }
+  else if (dst_id == KDBUS_DST_ID_BROADCAST)
+    {
+      item = KDBUS_PART_NEXT(item);
+      item->type = KDBUS_MSG_BLOOM;
+      item->size = KDBUS_PART_HEADER_SIZE + transport->bloom_size;
+      strncpy(item->data, dbus_message_get_interface(message), transport->bloom_size);
+    }
 
-	again:
-	if (ioctl(transport->fd, KDBUS_CMD_MSG_SEND, msg))
-	{
-		if(errno == EINTR)
-			goto again;
-		else if(errno == ENXIO) //no such id on the bus
-		{
-            if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+  again:
+  if (ioctl(transport->fd, KDBUS_CMD_MSG_SEND, msg))
+    {
+      if(errno == EINTR)
+        goto again;
+      else if(errno == ENXIO) //no such id on the bus
+        {
+          if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+            goto out;
+        }
+      else if((errno == ESRCH) || (errno = EADDRNOTAVAIL))  //when well known name is not available on the bus
+        {
+          if(autostart)
+            {
+              if(!reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
                 goto out;
-		}
-        else if((errno == ESRCH) || (errno = EADDRNOTAVAIL))  //when well known name is not available on the bus
-		{
-			if(autostart)
-			{
-				if(!reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
-					goto out;
-			}
-			else
-	            if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
-	                goto out;
-		}
-		_dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
-		ret_size = -1;
-	}
-out:
-    free(msg);
-    if(use_memfd)
-        close(transport->memfd);
+            }
+          else
+            if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
+              goto out;
+        }
+      _dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
+      ret_size = -1;
+    }
+  out:
+  free(msg);
+  if(use_memfd)
+    close(transport->memfd);
 
-    return ret_size;
+  return ret_size;
 }
 
 /**
@@ -1210,115 +1210,113 @@ do_io_error (DBusTransport *transport)
 static dbus_bool_t
 do_writing (DBusTransport *transport)
 {
-	DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
-	dbus_bool_t oom;
+  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
+  dbus_bool_t oom;
 
-	if (transport->disconnected)
+  if (transport->disconnected)
     {
-		_dbus_verbose ("Not connected, not writing anything\n");
-		return TRUE;
+      _dbus_verbose ("Not connected, not writing anything\n");
+      return TRUE;
     }
 
-#if 1
-	_dbus_verbose ("do_writing(), have_messages = %d, fd = %d\n",
-                 _dbus_connection_has_messages_to_send_unlocked (transport->connection),
-                 kdbus_transport->fd);
-#endif
 
-	oom = FALSE;
+  _dbus_verbose ("do_writing(), have_messages = %d, fd = %d\n",
+      _dbus_connection_has_messages_to_send_unlocked (transport->connection),
+      kdbus_transport->fd);
 
-	while (!transport->disconnected && _dbus_connection_has_messages_to_send_unlocked (transport->connection))
+  oom = FALSE;
+
+  while (!transport->disconnected && _dbus_connection_has_messages_to_send_unlocked (transport->connection))
     {
-		int bytes_written;
-		DBusMessage *message;
-		const DBusString *header;
-		const DBusString *body;
-		int total_bytes_to_write;
-		const char* pDestination;
+      int bytes_written;
+      DBusMessage *message;
+      const DBusString *header;
+      const DBusString *body;
+      int total_bytes_to_write;
+      const char* pDestination;
 
-		message = _dbus_connection_get_message_to_send (transport->connection);
-		_dbus_assert (message != NULL);
-		if(dbus_message_get_sender(message) == NULL)  //needed for daemon to pass pending activation messages
-		{
-            dbus_message_unlock(message);
-            dbus_message_set_sender(message, kdbus_transport->sender);
-            dbus_message_lock (message);
-		}
-		_dbus_message_get_network_data (message, &header, &body);
-		total_bytes_to_write = _dbus_string_get_length(header) + _dbus_string_get_length(body);
-		pDestination = dbus_message_get_destination(message);
+      message = _dbus_connection_get_message_to_send (transport->connection);
+      _dbus_assert (message != NULL);
+      if(dbus_message_get_sender(message) == NULL)  //needed for daemon to pass pending activation messages
+        {
+          dbus_message_unlock(message);
+          dbus_message_set_sender(message, kdbus_transport->sender);
+          dbus_message_lock (message);
+        }
+      _dbus_message_get_network_data (message, &header, &body);
+      total_bytes_to_write = _dbus_string_get_length(header) + _dbus_string_get_length(body);
+      pDestination = dbus_message_get_destination(message);
 
-		if(pDestination)
-		{
-			if(!strcmp(pDestination, DBUS_SERVICE_DBUS))
-			{
-				if(!strcmp(dbus_message_get_interface(message), DBUS_INTERFACE_DBUS))
-				{
-					int ret;
+      if(pDestination)
+        {
+          if(!strcmp(pDestination, DBUS_SERVICE_DBUS))
+            {
+              if(!strcmp(dbus_message_get_interface(message), DBUS_INTERFACE_DBUS))
+                {
+                  int ret;
 
-					ret = emulateOrgFreedesktopDBus(transport, message);
-					if(ret < 0)
-					{
-						bytes_written = -1;
-						goto written;
-					}
-					else if(ret == 0)
-					{
-						bytes_written = total_bytes_to_write;
-						goto written;
-					}
-					//else send to "daemon" as to normal recipient
-				}
-			}
-		}
+                  ret = emulateOrgFreedesktopDBus(transport, message);
+                  if(ret < 0)
+                    {
+                      bytes_written = -1;
+                      goto written;
+                    }
+                  else if(ret == 0)
+                    {
+                      bytes_written = total_bytes_to_write;
+                      goto written;
+                    }
+                  //else send to "daemon" as to normal recipient
+                }
+            }
+        }
 
-		if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
-		  return -E2BIG;
+      if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
+        return -E2BIG;
 
-		bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination);
+      bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination);
 
-
-written:
-		if (bytes_written < 0)
-		{
-			/* EINTR already handled for us */
+      written:
+      if (bytes_written < 0)
+        {
+          /* EINTR already handled for us */
 
           /* For some discussion of why we also ignore EPIPE here, see
            * http://lists.freedesktop.org/archives/dbus/2008-March/009526.html
            */
 
-			if (_dbus_get_is_errno_eagain_or_ewouldblock () || _dbus_get_is_errno_epipe ())
-				goto out;
-			else
-			{
-				_dbus_verbose ("Error writing to remote app: %s\n", _dbus_strerror_from_errno ());
-				do_io_error (transport);
-				goto out;
-			}
-		}
-		else
-		{
-			_dbus_verbose (" wrote %d bytes of %d\n", bytes_written,
-                         total_bytes_to_write);
+          if (_dbus_get_is_errno_eagain_or_ewouldblock () || _dbus_get_is_errno_epipe ())
+            goto out;
+          else
+            {
+              _dbus_verbose ("Error writing to remote app: %s\n", _dbus_strerror_from_errno ());
+              do_io_error (transport);
+              goto out;
+            }
+        }
+      else
+        {
+          _dbus_verbose (" wrote %d bytes of %d\n", bytes_written,
+              total_bytes_to_write);
 
-			kdbus_transport->message_bytes_written += bytes_written;
+          kdbus_transport->message_bytes_written += bytes_written;
 
-			_dbus_assert (kdbus_transport->message_bytes_written <=
-                        total_bytes_to_write);
+          _dbus_assert (kdbus_transport->message_bytes_written <=
+              total_bytes_to_write);
 
-			  if (kdbus_transport->message_bytes_written == total_bytes_to_write)
-			  {
-				  kdbus_transport->message_bytes_written = 0;
-				  _dbus_connection_message_sent_unlocked (transport->connection,
-														  message);
-			  }
-		}
+          if (kdbus_transport->message_bytes_written == total_bytes_to_write)
+            {
+              kdbus_transport->message_bytes_written = 0;
+              _dbus_connection_message_sent_unlocked (transport->connection,
+                  message);
+            }
+        }
     }
 
-	out:
-	if (oom)
-		return FALSE;
-	return TRUE;
+  out:
+  if (oom)
+    return FALSE;
+  return TRUE;
 }
 
 /* returns false on out-of-memory */
