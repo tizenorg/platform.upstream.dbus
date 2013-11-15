@@ -54,7 +54,6 @@
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
 
 #define KDBUS_MSG_DECODE_DEBUG 0
-//#define DBUS_AUTHENTICATION
 
 #define ITER_APPEND_STR(string) \
 if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
@@ -91,12 +90,6 @@ struct DBusTransportKdbus
   int message_bytes_written;            /**< Number of bytes of current
                                          *   outgoing message that have
                                          *   been written.
-                                         */
-  DBusString encoded_outgoing;          /**< Encoded version of current
-                                         *   outgoing message.
-                                         */
-  DBusString encoded_incoming;          /**< Encoded version of current
-                                         *   incoming data.
                                          */
   void* kdbus_mmap_ptr;	                /**< Mapped memory where Kdbus (kernel) writes
                                          *   messages incoming to us.
@@ -237,7 +230,7 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
 
     msg_size = sizeof(struct kdbus_msg);
 
-    if(use_memfd == TRUE)  // bulk data - memfd - encoded and plain
+    if(use_memfd == TRUE)  // bulk data - memfd
         msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
     else {
         msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
@@ -278,10 +271,9 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
  *
  * @param transport transport
  * @param message DBus message to be sent
- * @param encoded flag if the message is encoded
  * @return size of data sent
  */
-static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, const char* destination, dbus_bool_t encoded)
+static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, const char* destination)
 {
     struct kdbus_msg *msg;
     struct kdbus_item *item;
@@ -307,16 +299,10 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     	}    
     }
     
-    // get size of data
-    if(encoded)
-        ret_size = _dbus_string_get_length (&transport->encoded_outgoing);
-    else
-    {
-        _dbus_message_get_network_data (message, &header, &body);
-        header_size = _dbus_string_get_length(header);
-        body_size = _dbus_string_get_length(body);
-        ret_size = header_size + body_size;
-    }
+    _dbus_message_get_network_data (message, &header, &body);
+    header_size = _dbus_string_get_length(header);
+    body_size = _dbus_string_get_length(body);
+    ret_size = header_size + body_size;
 
     // check if message size is big enough to use memfd kdbus transport
     use_memfd = ret_size > MEMFD_SIZE_THRESHOLD ? TRUE : FALSE;
@@ -334,7 +320,7 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     // build message contents
     item = msg->items;
 
-    // case 1 - bulk data transfer - memfd - encoded and plain
+    // case 1 - bulk data transfer - memfd
     if(use_memfd)          
     {
         char *buf;
@@ -352,16 +338,11 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
 			goto out;
 	    }
 
-		if(encoded)
-			memcpy(buf, &transport->encoded_outgoing, ret_size);
-		else
-		{
 			memcpy(buf, _dbus_string_get_const_data(header), header_size);
 			if(body_size) {
 				buf+=header_size;
 				memcpy(buf, _dbus_string_get_const_data(body),  body_size);
 				buf-=header_size;
-			}
 		}
 
 		munmap(buf, ret_size);
@@ -377,13 +358,9 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
 		item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
 		item->memfd.size = ret_size;
 		item->memfd.fd = transport->memfd;
-    // case 2 - small encoded - don't use memfd
-    } else if(encoded) { 
-        _dbus_verbose("sending encoded data\n");
-        MSG_ITEM_BUILD_VEC(&transport->encoded_outgoing, _dbus_string_get_length (&transport->encoded_outgoing));
-
-    // case 3 - small not encoded - don't use memfd
-    } else { 
+    }
+    else
+      {
         _dbus_verbose("sending normal vector data\n");
         MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data(header), header_size);
 
@@ -1115,19 +1092,14 @@ free_watches (DBusTransport *transport)
 static void
 transport_finalize (DBusTransport *transport)
 {
-  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
-
   _dbus_verbose ("\n");
 
   free_watches (transport);
 
-  _dbus_string_free (&kdbus_transport->encoded_outgoing);
-  _dbus_string_free (&kdbus_transport->encoded_incoming);
-
   _dbus_transport_finalize_base (transport);
 
-  _dbus_assert (kdbus_transport->read_watch == NULL);
-  _dbus_assert (kdbus_transport->write_watch == NULL);
+  _dbus_assert (((DBusTransportKdbus*) transport)->read_watch == NULL);
+  _dbus_assert (((DBusTransportKdbus*) transport)->write_watch == NULL);
 
   dbus_free (transport);
 }
@@ -1152,33 +1124,8 @@ check_write_watch (DBusTransport *transport)
 
   _dbus_transport_ref (transport);
 
-#ifdef DBUS_AUTHENTICATION
-  if (_dbus_transport_try_to_authenticate (transport))
-#endif
-    needed = _dbus_connection_has_messages_to_send_unlocked (transport->connection);
-#ifdef DBUS_AUTHENTICATION
-  else
-    {
-      if (transport->send_credentials_pending)
-        needed = TRUE;
-      else
-        {
-          DBusAuthState auth_state;
+  needed = _dbus_connection_has_messages_to_send_unlocked (transport->connection);
 
-          auth_state = _dbus_auth_do_work (transport->auth);
-
-          /* If we need memory we install the write watch just in case,
-           * if there's no need for it, it will get de-installed
-           * next time we try reading.
-           */
-          if (auth_state == DBUS_AUTH_STATE_HAVE_BYTES_TO_SEND ||
-              auth_state == DBUS_AUTH_STATE_WAITING_FOR_MEMORY)
-            needed = TRUE;
-          else
-            needed = FALSE;
-        }
-    }
-#endif
   _dbus_verbose ("check_write_watch(): needed = %d on connection %p watch %p fd = %d outgoing messages exist %d\n",
                  needed, transport->connection, kdbus_transport->write_watch,
                  kdbus_transport->fd,
@@ -1213,42 +1160,9 @@ check_read_watch (DBusTransport *transport)
 
   _dbus_transport_ref (transport);
 
-#ifdef DBUS_AUTHENTICATION
-  if (_dbus_transport_try_to_authenticate (transport))
-#endif
-    need_read_watch =
+   need_read_watch =
       (_dbus_counter_get_size_value (transport->live_messages) < transport->max_live_messages_size) &&
       (_dbus_counter_get_unix_fd_value (transport->live_messages) < transport->max_live_messages_unix_fds);
-#ifdef DBUS_AUTHENTICATION
-  else
-    {
-      if (transport->receive_credentials_pending)
-        need_read_watch = TRUE;
-      else
-        {
-          /* The reason to disable need_read_watch when not WAITING_FOR_INPUT
-           * is to avoid spinning on the file descriptor when we're waiting
-           * to write or for some other part of the auth process
-           */
-          DBusAuthState auth_state;
-
-          auth_state = _dbus_auth_do_work (transport->auth);
-
-          /* If we need memory we install the read watch just in case,
-           * if there's no need for it, it will get de-installed
-           * next time we try reading. If we're authenticated we
-           * install it since we normally have it installed while
-           * authenticated.
-           */
-          if (auth_state == DBUS_AUTH_STATE_WAITING_FOR_INPUT ||
-              auth_state == DBUS_AUTH_STATE_WAITING_FOR_MEMORY ||
-              auth_state == DBUS_AUTH_STATE_AUTHENTICATED)
-            need_read_watch = TRUE;
-          else
-            need_read_watch = FALSE;
-        }
-    }
-#endif
 
   _dbus_verbose ("  setting read watch enabled = %d\n", need_read_watch);
   _dbus_connection_toggle_watch_unlocked (transport->connection,
@@ -1269,296 +1183,12 @@ do_io_error (DBusTransport *transport)
   _dbus_transport_unref (transport);
 }
 
-#ifdef DBUS_AUTHENTICATION
-/* return value is whether we successfully read any new data. */
-static dbus_bool_t
-read_data_into_auth (DBusTransport *transport,
-                     dbus_bool_t   *oom)
-{
-  DBusTransportKdbus *socket_transport = (DBusTransportKdbus*) transport;
-  DBusString *buffer;
-  int bytes_read;
-  int *fds, n_fds;
-
-  *oom = FALSE;
-
-  _dbus_auth_get_buffer (transport->auth, &buffer);
-
-  bytes_read = kdbus_read_message(socket_transport, buffer, fds, &n_fds);
-
-  _dbus_auth_return_buffer (transport->auth, buffer,
-                            bytes_read > 0 ? bytes_read : 0);
-
-  if (bytes_read > 0)
-    {
-      _dbus_verbose (" read %d bytes in auth phase\n", bytes_read);
-      return TRUE;
-    }
-  else if (bytes_read < 0)
-    {
-      /* EINTR already handled for us */
-
-      if (_dbus_get_is_errno_enomem ())
-        {
-          *oom = TRUE;
-        }
-      else if (_dbus_get_is_errno_eagain_or_ewouldblock ())
-        ; /* do nothing, just return FALSE below */
-      else
-        {
-          _dbus_verbose ("Error reading from remote app: %s\n",
-                         _dbus_strerror_from_errno ());
-          do_io_error (transport);
-        }
-
-      return FALSE;
-    }
-  else
-    {
-      _dbus_assert (bytes_read == 0);
-
-      _dbus_verbose ("Disconnected from remote app\n");
-      do_io_error (transport);
-
-      return FALSE;
-    }
-}
-
-static int kdbus_send_auth (DBusTransport *transport,  const DBusString *buffer)
-{
-	int len;
-	int bytes_written = -1;
-	struct kdbus_msg *msg;
-	struct kdbus_item *item;
-
-	len = _dbus_string_get_length (buffer);
-//	data = _dbus_string_get_const_data_len (buffer, 0, len);
-
-	msg = kdbus_init_msg(NULL, 1, 0, FALSE, 0, (DBusTransportKdbus*)transport);
-	item = msg->items;
-	MSG_ITEM_BUILD_VEC(_dbus_string_get_const_data_len (buffer, 0, len), len);
-
-    again:
-    if(ioctl(((DBusTransportKdbus*)transport)->fd, KDBUS_CMD_MSG_SEND, msg))
-    {
-        if(errno == EINTR)
-            goto again;
-        _dbus_verbose ("Error writing auth: %d, %m\n", errno);
-    }
-    else
-        bytes_written = len;
-
-	return bytes_written;
-}
-
-/* Return value is whether we successfully wrote any bytes */
-static dbus_bool_t
-write_data_from_auth (DBusTransport *transport)
-{
-//  DBusTransportKdbus *socket_transport = (DBusTransportSocket*) transport;
-  int bytes_written;
-  const DBusString *buffer;
-
-  if (!_dbus_auth_get_bytes_to_send (transport->auth,
-                                     &buffer))
-    return FALSE;
-
-  bytes_written = kdbus_send_auth (transport, buffer);
-
-  if (bytes_written > 0)
-    {
-      _dbus_auth_bytes_sent (transport->auth, bytes_written);
-      return TRUE;
-    }
-  else if (bytes_written < 0)
-    {
-      /* EINTR already handled for us */
-
-      if (_dbus_get_is_errno_eagain_or_ewouldblock ())
-        ;
-      else
-        {
-          _dbus_verbose ("Error writing to remote app: %s\n",
-                         _dbus_strerror_from_errno ());
-          do_io_error (transport);
-        }
-    }
-
-  return FALSE;
-}
-
-/* FALSE on OOM */
-static dbus_bool_t
-exchange_credentials (DBusTransport *transport,
-                      dbus_bool_t    do_reading,
-                      dbus_bool_t    do_writing)
-{
-  DBusTransportKdbus *socket_transport = (DBusTransportKdbus*) transport;
-  DBusError error = DBUS_ERROR_INIT;
-
-  _dbus_verbose ("exchange_credentials: do_reading = %d, do_writing = %d\n",
-                  do_reading, do_writing);
-
-  if (do_writing && transport->send_credentials_pending)
-    {
-      if (_dbus_send_credentials_socket (socket_transport->fd,
-                                         &error))
-        {
-          transport->send_credentials_pending = FALSE;
-        }
-      else
-        {
-          _dbus_verbose ("Failed to write credentials: %s\n", error.message);
-          dbus_error_free (&error);
-          do_io_error (transport);
-        }
-    }
-
-  if (do_reading && transport->receive_credentials_pending)
-    {
-      /* FIXME this can fail due to IO error _or_ OOM, broken
-       * (somewhat tricky to fix since the OOM error can be set after
-       * we already read the credentials byte, so basically we need to
-       * separate reading the byte and storing it in the
-       * transport->credentials). Does not really matter for now
-       * because storing in credentials never actually fails on unix.
-       */
-      if (_dbus_read_credentials_socket (socket_transport->fd,
-                                         transport->credentials,
-                                         &error))
-        {
-          transport->receive_credentials_pending = FALSE;
-        }
-      else
-        {
-          _dbus_verbose ("Failed to read credentials %s\n", error.message);
-          dbus_error_free (&error);
-          do_io_error (transport);
-        }
-    }
-
-  if (!(transport->send_credentials_pending ||
-        transport->receive_credentials_pending))
-    {
-      if (!_dbus_auth_set_credentials (transport->auth,
-                                       transport->credentials))
-        return FALSE;
-    }
-
-  return TRUE;
-}
-
-static dbus_bool_t
-do_authentication (DBusTransport *transport,
-                   dbus_bool_t    do_reading,
-                   dbus_bool_t    do_writing,
-		   dbus_bool_t   *auth_completed)
-{
-  dbus_bool_t oom;
-  dbus_bool_t orig_auth_state;
-
-  oom = FALSE;
-
-  orig_auth_state = _dbus_transport_try_to_authenticate (transport);
-
-  /* This is essential to avoid the check_write_watch() at the end,
-   * we don't want to add a write watch in do_iteration before
-   * we try writing and get EAGAIN
-   */
-  if (orig_auth_state)
-    {
-      if (auth_completed)
-        *auth_completed = FALSE;
-      return TRUE;
-    }
-
-  _dbus_transport_ref (transport);
-
-   while (!_dbus_transport_try_to_authenticate (transport) &&
-         _dbus_transport_get_is_connected (transport))
-    {
-      if (!exchange_credentials (transport, do_reading, do_writing))
-        {
-          oom = TRUE;
-          goto out;
-        }
-
-      if (transport->send_credentials_pending ||
-          transport->receive_credentials_pending)
-        {
-          _dbus_verbose ("send_credentials_pending = %d receive_credentials_pending = %d\n",
-                         transport->send_credentials_pending,
-                         transport->receive_credentials_pending);
-          goto out;
-        }
-
-#define TRANSPORT_SIDE(t) ((t)->is_server ? "server" : "client")
-      switch (_dbus_auth_do_work (transport->auth))
-        {
-        case DBUS_AUTH_STATE_WAITING_FOR_INPUT:
-          _dbus_verbose (" %s auth state: waiting for input\n",
-                         TRANSPORT_SIDE (transport));
-          if (!do_reading || !read_data_into_auth (transport, &oom))
-            goto out;
-          break;
-
-        case DBUS_AUTH_STATE_WAITING_FOR_MEMORY:
-          _dbus_verbose (" %s auth state: waiting for memory\n",
-                         TRANSPORT_SIDE (transport));
-          oom = TRUE;
-          goto out;
-          break;
-
-        case DBUS_AUTH_STATE_HAVE_BYTES_TO_SEND:
-          _dbus_verbose (" %s auth state: bytes to send\n",
-                         TRANSPORT_SIDE (transport));
-          if (!do_writing || !write_data_from_auth (transport))
-            goto out;
-          break;
-
-        case DBUS_AUTH_STATE_NEED_DISCONNECT:
-          _dbus_verbose (" %s auth state: need to disconnect\n",
-                         TRANSPORT_SIDE (transport));
-          do_io_error (transport);
-          break;
-
-        case DBUS_AUTH_STATE_AUTHENTICATED:
-          _dbus_verbose (" %s auth state: authenticated\n",
-                         TRANSPORT_SIDE (transport));
-          break;
-        }
-    }
-
- out:
-  if (auth_completed)
-    *auth_completed = (orig_auth_state != _dbus_transport_try_to_authenticate (transport));
-
-  check_read_watch (transport);
-  check_write_watch (transport);
-  _dbus_transport_unref (transport);
-
-  if (oom)
-    return FALSE;
-  else
-    return TRUE;
-}
-#endif
-
 /* returns false on oom */
 static dbus_bool_t
 do_writing (DBusTransport *transport)
 {
 	DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 	dbus_bool_t oom;
-
-#ifdef DBUS_AUTHENTICATION
-	/* No messages without authentication! */
-	if (!_dbus_transport_try_to_authenticate (transport))
-    {
-		_dbus_verbose ("Not authenticated, not writing anything\n");
-		return TRUE;
-    }
-#endif
 
 	if (transport->disconnected)
     {
@@ -1618,39 +1248,12 @@ do_writing (DBusTransport *transport)
 				}
 			}
 		}
-		if (_dbus_auth_needs_encoding (transport->auth))
-        {
-			if (_dbus_string_get_length (&kdbus_transport->encoded_outgoing) == 0)
-            {
-				if (!_dbus_auth_encode_data (transport->auth,
-                                           header, &kdbus_transport->encoded_outgoing))
-                {
-					oom = TRUE;
-					goto out;
-                }
 
-				if (!_dbus_auth_encode_data (transport->auth,
-                                           body, &kdbus_transport->encoded_outgoing))
-                {
-					_dbus_string_set_length (&kdbus_transport->encoded_outgoing, 0);
-					oom = TRUE;
-					goto out;
-                }
-            }
+		if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
+		  return -E2BIG;
 
-			total_bytes_to_write = _dbus_string_get_length (&kdbus_transport->encoded_outgoing);
-			if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
-				return -E2BIG;
+		bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination);
 
-			bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination, TRUE);
-        }
-		else
-		{
-			if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
-				return -E2BIG;
-
-			bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination, FALSE);
-		}
 
 written:
 		if (bytes_written < 0)
@@ -1683,9 +1286,6 @@ written:
 			  if (kdbus_transport->message_bytes_written == total_bytes_to_write)
 			  {
 				  kdbus_transport->message_bytes_written = 0;
-				  _dbus_string_set_length (&kdbus_transport->encoded_outgoing, 0);
-				  _dbus_string_compact (&kdbus_transport->encoded_outgoing, 2048);
-
 				  _dbus_connection_message_sent_unlocked (transport->connection,
 														  message);
 			  }
@@ -1710,12 +1310,6 @@ do_reading (DBusTransport *transport)
 
   _dbus_verbose ("fd = %d\n",kdbus_transport->fd);
 
-#ifdef DBUS_AUTHENTICATION
-  /* No messages without authentication! */
-  if (!_dbus_transport_try_to_authenticate (transport))
-    return TRUE;
-#endif
-
  again:
 
   /* See if we've exceeded max messages and need to disable reading */
@@ -1738,32 +1332,7 @@ do_reading (DBusTransport *transport)
   }
   _dbus_message_loader_get_buffer (transport->loader, &buffer);
 
-  if (_dbus_auth_needs_decoding (transport->auth))
-  {
-	  bytes_read = kdbus_read_message(kdbus_transport,  &kdbus_transport->encoded_incoming, fds, &n_fds);
-
-      _dbus_assert (_dbus_string_get_length (&kdbus_transport->encoded_incoming) == bytes_read);
-
-      if (bytes_read > 0)
-      {
-          if (!_dbus_auth_decode_data (transport->auth,
-                                       &kdbus_transport->encoded_incoming,
-                                       buffer))
-          {
-              _dbus_verbose ("Out of memory decoding incoming data\n");
-              _dbus_message_loader_return_buffer (transport->loader,
-                                              buffer,
-                                              _dbus_string_get_length (buffer));
-              oom = TRUE;
-              goto out;
-          }
-
-          _dbus_string_set_length (&kdbus_transport->encoded_incoming, 0);
-          _dbus_string_compact (&kdbus_transport->encoded_incoming, 2048);
-      }
-  }
-  else
-	  bytes_read = kdbus_read_message(kdbus_transport, buffer, fds, &n_fds);
+  bytes_read = kdbus_read_message(kdbus_transport, buffer, fds, &n_fds);
 
   if (bytes_read >= 0 && n_fds > 0)
     _dbus_verbose("Read %i unix fds\n", n_fds);
@@ -1872,50 +1441,22 @@ kdbus_handle_watch (DBusTransport *transport,
   if (watch == kdbus_transport->read_watch &&
       (flags & DBUS_WATCH_READABLE))
     {
-#ifdef DBUS_AUTHENTICATION
-      dbus_bool_t auth_finished;
-#endif
-#if 1
       _dbus_verbose ("handling read watch %p flags = %x\n",
                      watch, flags);
-#endif
-#ifdef DBUS_AUTHENTICATION
-      if (!do_authentication (transport, TRUE, FALSE, &auth_finished))
-        return FALSE;
 
-      /* We don't want to do a read immediately following
-       * a successful authentication.  This is so we
-       * have a chance to propagate the authentication
-       * state further up.  Specifically, we need to
-       * process any pending data from the auth object.
-       */
-      if (!auth_finished)
-	{
-#endif
 	  if (!do_reading (transport))
 	    {
 	      _dbus_verbose ("no memory to read\n");
 	      return FALSE;
 	    }
-#ifdef DBUS_AUTHENTICATION
-	}
-      else
-        {
-          _dbus_verbose ("Not reading anything since we just completed the authentication\n");
-        }
-#endif
+
     }
   else if (watch == kdbus_transport->write_watch &&
            (flags & DBUS_WATCH_WRITABLE))
     {
-#if 1
       _dbus_verbose ("handling write watch, have_outgoing_messages = %d\n",
                      _dbus_connection_has_messages_to_send_unlocked (transport->connection));
-#endif
-#ifdef DBUS_AUTHENTICATION
-      if (!do_authentication (transport, FALSE, TRUE, NULL))
-        return FALSE;
-#endif
+
       if (!do_writing (transport))
         {
           _dbus_verbose ("no memory to write\n");
@@ -1925,20 +1466,6 @@ kdbus_handle_watch (DBusTransport *transport,
       /* See if we still need the write watch */
       check_write_watch (transport);
     }
-#ifdef DBUS_ENABLE_VERBOSE_MODE
-  else
-    {
-      if (watch == kdbus_transport->read_watch)
-        _dbus_verbose ("asked to handle read watch with non-read condition 0x%x\n",
-                       flags);
-      else if (watch == kdbus_transport->write_watch)
-        _dbus_verbose ("asked to handle write watch with non-write condition 0x%x\n",
-                       flags);
-      else
-        _dbus_verbose ("asked to handle watch %p on fd %d that we don't recognize\n",
-                       watch, dbus_watch_get_socket (watch));
-    }
-#endif /* DBUS_ENABLE_VERBOSE_MODE */
 
   return TRUE;
 }
@@ -2122,20 +1649,10 @@ kdbus_do_iteration (DBusTransport *transport,
          {
             dbus_bool_t need_read = (poll_fd.revents & _DBUS_POLLIN) > 0;
             dbus_bool_t need_write = (poll_fd.revents & _DBUS_POLLOUT) > 0;
-#ifdef DBUS_AUTHENTICATION
-              dbus_bool_t authentication_completed;
-#endif
 
             _dbus_verbose ("in iteration, need_read=%d need_write=%d\n",
                              need_read, need_write);
-#ifdef DBUS_AUTHENTICATION
-              do_authentication (transport, need_read, need_write,
-				 &authentication_completed);
 
-	      /* See comment in socket_handle_watch. */
-	      if (authentication_completed)
-                goto out;
-#endif
             if (need_read && (flags & DBUS_ITERATION_DO_READING))
                do_reading (transport);
             if (need_write && (flags & DBUS_ITERATION_DO_WRITING))
@@ -2210,12 +1727,6 @@ _dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
   if (kdbus_transport == NULL)
     return NULL;
 
-  if (!_dbus_string_init (&kdbus_transport->encoded_outgoing))
-    goto failed_0;
-
-  if (!_dbus_string_init (&kdbus_transport->encoded_incoming))
-    goto failed_1;
-
   kdbus_transport->write_watch = _dbus_watch_new (fd,
                                                  DBUS_WATCH_WRITABLE,
                                                  FALSE,
@@ -2234,12 +1745,6 @@ _dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
                                   &kdbus_vtable,
                                   NULL, address))
     goto failed_4;
-
-#ifdef DBUS_AUTHENTICATION
-#ifdef HAVE_UNIX_FD_PASSING
-  _dbus_auth_set_unix_fd_possible(kdbus_transport->base.auth, _dbus_socket_can_pass_unix_fd(fd));
-#endif
-#endif
 
   kdbus_transport->fd = fd;
   kdbus_transport->message_bytes_written = 0;
@@ -2260,10 +1765,6 @@ _dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
   _dbus_watch_invalidate (kdbus_transport->write_watch);
   _dbus_watch_unref (kdbus_transport->write_watch);
  failed_2:
-  _dbus_string_free (&kdbus_transport->encoded_incoming);
- failed_1:
-  _dbus_string_free (&kdbus_transport->encoded_outgoing);
- failed_0:
   dbus_free (kdbus_transport);
   return NULL;
 }
