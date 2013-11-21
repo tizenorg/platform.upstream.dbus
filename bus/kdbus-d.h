@@ -42,6 +42,7 @@ dbus_bool_t kdbus_register_policy (const DBusString *service_name, DBusConnectio
 dbus_uint32_t kdbus_request_name(DBusConnection* connection, const DBusString *service_name, dbus_uint32_t flags, __u64 sender_id);
 dbus_uint32_t kdbus_release_name(DBusConnection* connection, const DBusString *service_name, __u64 sender_id);
 dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int *array_len);
+dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList **return_list, const char *name, DBusError *error);
 dbus_bool_t kdbus_add_match_rule (DBusConnection* connection, DBusMessage* message, const char* text, DBusError* error);
 dbus_bool_t kdbus_remove_match (DBusConnection* connection, DBusMessage* message, DBusError* error);
 

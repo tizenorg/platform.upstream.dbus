@@ -46,6 +46,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdlib.h>
 #endif
 
 static DBusConnection *
@@ -473,7 +474,6 @@ bus_driver_handle_list_services (DBusConnection *connection,
   else
 #endif
   {
-
       if (!bus_registry_list_services (registry, &services, &len))
         {
           dbus_message_unref (reply);
@@ -1366,7 +1366,11 @@ bus_driver_handle_list_queued_owners (DBusConnection *connection,
       if (! _dbus_list_append (&base_names, dbus_service_name))
         goto oom;
     }
+#ifdef ENABLE_KDBUS_TRANSPORT
+  else if (!bus_context_is_kdbus(bus_transaction_get_context (transaction)) && (service == NULL))
+#else
   else if (service == NULL)
+#endif
     {
       dbus_set_error (error,
                       DBUS_ERROR_NAME_HAS_NO_OWNER,
@@ -1375,10 +1379,20 @@ bus_driver_handle_list_queued_owners (DBusConnection *connection,
     }
   else
     {
-      if (!bus_service_list_queued_owners (service,
-                                           &base_names,
-                                           error))
-        goto failed;
+#ifdef ENABLE_KDBUS_TRANSPORT
+      if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
+        {
+          if(!kdbus_list_queued (connection,  &base_names, text ,error))
+            goto failed;
+        }
+      else
+#endif
+        {
+          if (!bus_service_list_queued_owners (service,
+              &base_names,
+              error))
+            goto failed;
+        }
     }
 
   _dbus_assert (base_names != NULL);
@@ -1419,6 +1433,21 @@ bus_driver_handle_list_queued_owners (DBusConnection *connection,
 
   dbus_message_unref (reply);
 
+  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
+    {
+      link = _dbus_list_get_first_link (&base_names);
+      while (link != NULL)
+        {
+          DBusList *next = _dbus_list_get_next_link (&base_names, link);
+
+          if(link->data != NULL)
+            free(link->data);
+
+          _dbus_list_free_link (link);
+          link = next;
+        }
+    }
+
   return TRUE;
 
  oom:
@@ -1428,10 +1457,8 @@ bus_driver_handle_list_queued_owners (DBusConnection *connection,
   _DBUS_ASSERT_ERROR_IS_SET (error);
   if (reply)
     dbus_message_unref (reply);
-
   if (base_names)
     _dbus_list_clear (&base_names);
-
   return FALSE;
 }
 

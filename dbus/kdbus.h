@@ -432,6 +432,7 @@ enum {
 	KDBUS_CMD_NAME_RELEASE =	_IOW(KDBUS_IOC_MAGIC, 0x51, struct kdbus_cmd_name),
 	KDBUS_CMD_NAME_LIST =		_IOWR(KDBUS_IOC_MAGIC, 0x52, struct kdbus_cmd_names),
 	KDBUS_CMD_NAME_QUERY =		_IOWR(KDBUS_IOC_MAGIC, 0x53, struct kdbus_cmd_name_info),
+	KDBUS_CMD_NAME_LIST_QUEUED = _IOWR(KDBUS_IOC_MAGIC, 0x54, struct kdbus_cmd_names),
 
 	KDBUS_CMD_MATCH_ADD =		_IOW(KDBUS_IOC_MAGIC, 0x60, struct kdbus_cmd_match),
 	KDBUS_CMD_MATCH_REMOVE =	_IOW(KDBUS_IOC_MAGIC, 0x61, struct kdbus_cmd_match),
