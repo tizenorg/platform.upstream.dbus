@@ -46,10 +46,6 @@
 #include <limits.h>
 #include <sys/stat.h>
 
-#define KDBUS_PART_FOREACH(part, head, first)				\
-	for (part = (head)->first;					\
-	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
-	     part = KDBUS_PART_NEXT(part))
 #define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU)
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
 //todo add compilation-time check if MEMFD_SIZE_THERSHOLD is lower than max payload vector size defined in kdbus.h
@@ -69,6 +65,11 @@ if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
         item->vec.address = (unsigned long) data;       			\
         item->vec.size = datasize;
 
+#define KDBUS_PART_FOREACH(part, head, first)				\
+	for (part = (head)->first;					\
+	     (uint8_t *)(part) < (uint8_t *)(head) + (head)->size;	\
+	     part = KDBUS_PART_NEXT(part))
+
 /**
  * Opaque object representing a transport. In kdbus transport it has nothing common
  * with socket, but the name was preserved to comply with  upper functions.
@@ -85,13 +86,9 @@ struct DBusTransportKdbus
   DBusWatch *read_watch;                /**< Watch for readability. */
   DBusWatch *write_watch;               /**< Watch for writability. */
 
-  int max_bytes_read_per_iteration;     /**< In kdbus only to control overall message size*/
-  int max_bytes_written_per_iteration;  /**< In kdbus only to control overall message size*/
+  int max_bytes_read_per_iteration;     /**< To avoid blocking too long. */
+  int max_bytes_written_per_iteration;  /**< To avoid blocking too long. */
 
-  int message_bytes_written;            /**< Number of bytes of current
-                                         *   outgoing message that have
-                                         *   been written.
-                                         */
   void* kdbus_mmap_ptr;	                /**< Mapped memory where Kdbus (kernel) writes
                                          *   messages incoming to us.
                                          */
@@ -505,7 +502,7 @@ static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *mess
     {
       char* name = NULL;
 
-      name = malloc(snprintf(name, 0, "%llu", ULLONG_MAX) + sizeof(":1."));
+      name = malloc(snprintf(name, 0, ":1.%llu0", ULLONG_MAX));
       if(name == NULL)
         return -1;
       strcpy(name, ":1.");
@@ -675,7 +672,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 	DBusMessageIter args;
 	const char* emptyString = "";
     const char* pString = NULL;
-	char dbus_name[(unsigned int)(snprintf((char*)pString, 0, "%llu", ULLONG_MAX) + sizeof(":1."))];
+	char dbus_name[(unsigned int)(snprintf((char*)pString, 0, ":1.%llu0", ULLONG_MAX))];
 	const char* pDBusName = dbus_name;
 #if KDBUS_MSG_DECODE_DEBUG == 1
 	char buf[32];
@@ -1212,6 +1209,7 @@ do_writing (DBusTransport *transport)
 {
   DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
   dbus_bool_t oom;
+  int total = 0;
 
   if (transport->disconnected)
     {
@@ -1234,6 +1232,13 @@ do_writing (DBusTransport *transport)
       const DBusString *body;
       int total_bytes_to_write;
       const char* pDestination;
+
+      if (total > kdbus_transport->max_bytes_written_per_iteration)
+        {
+          _dbus_verbose ("%d bytes exceeds %d bytes written per iteration, returning\n",
+                         total, kdbus_transport->max_bytes_written_per_iteration);
+          goto out;
+        }
 
       message = _dbus_connection_get_message_to_send (transport->connection);
       _dbus_assert (message != NULL);
@@ -1271,9 +1276,6 @@ do_writing (DBusTransport *transport)
             }
         }
 
-      if(total_bytes_to_write > kdbus_transport->max_bytes_written_per_iteration)
-        return -E2BIG;
-
       bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination);
 
       written:
@@ -1299,17 +1301,12 @@ do_writing (DBusTransport *transport)
           _dbus_verbose (" wrote %d bytes of %d\n", bytes_written,
               total_bytes_to_write);
 
-          kdbus_transport->message_bytes_written += bytes_written;
+          total += bytes_written;
 
-          _dbus_assert (kdbus_transport->message_bytes_written <=
-              total_bytes_to_write);
+          _dbus_assert (bytes_written == total_bytes_to_write);
 
-          if (kdbus_transport->message_bytes_written == total_bytes_to_write)
-            {
-              kdbus_transport->message_bytes_written = 0;
-              _dbus_connection_message_sent_unlocked (transport->connection,
+          _dbus_connection_message_sent_unlocked (transport->connection,
                   message);
-            }
         }
     }
 
@@ -1328,6 +1325,7 @@ do_reading (DBusTransport *transport)
   int bytes_read;
   dbus_bool_t oom = FALSE;
   int *fds, n_fds;
+  int total = 0;
 
   _dbus_verbose ("fd = %d\n",kdbus_transport->fd);
 
@@ -1335,6 +1333,13 @@ do_reading (DBusTransport *transport)
 
   /* See if we've exceeded max messages and need to disable reading */
   check_read_watch (transport);
+
+  if (total > kdbus_transport->max_bytes_read_per_iteration)
+    {
+      _dbus_verbose ("%d bytes exceeds %d bytes read per iteration, returning\n",
+                     total, kdbus_transport->max_bytes_read_per_iteration);
+      goto out;
+    }
 
   _dbus_assert (kdbus_transport->read_watch != NULL ||
                 transport->disconnected);
@@ -1392,6 +1397,8 @@ do_reading (DBusTransport *transport)
   else
     {
       _dbus_verbose (" read %d bytes\n", bytes_read);
+
+      total += bytes_read;
 
       if (!_dbus_transport_queue_messages (transport))
         {
@@ -1768,11 +1775,10 @@ _dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
     goto failed_4;
 
   kdbus_transport->fd = fd;
-  kdbus_transport->message_bytes_written = 0;
 
   /* These values should probably be tunable or something. */
-  kdbus_transport->max_bytes_read_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
-  kdbus_transport->max_bytes_written_per_iteration = DBUS_MAXIMUM_MESSAGE_LENGTH;
+  kdbus_transport->max_bytes_read_per_iteration = 16384;
+  kdbus_transport->max_bytes_written_per_iteration = 16384;
 
   kdbus_transport->kdbus_mmap_ptr = NULL;
   kdbus_transport->memfd = -1;
