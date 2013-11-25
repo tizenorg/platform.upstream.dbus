@@ -46,8 +46,8 @@
 #include <limits.h>
 #include <sys/stat.h>
 
-#define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU)
-#define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used
+#define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU) //size of the memory area for received non-memfd messages
+#define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used to send (if it is not broadcast)
 //todo add compilation-time check if MEMFD_SIZE_THERSHOLD is lower than max payload vector size defined in kdbus.h
 
 #define KDBUS_MSG_DECODE_DEBUG 0
@@ -71,13 +71,12 @@ if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
 	     part = KDBUS_PART_NEXT(part))
 
 /**
- * Opaque object representing a transport. In kdbus transport it has nothing common
- * with socket, but the name was preserved to comply with  upper functions.
+ * Opaque object representing a transport.
  */
 typedef struct DBusTransportKdbus DBusTransportKdbus;
 
 /**
- * Implementation details of DBusTransportSocket. All members are private.
+ * Implementation details of DBusTransportKdbus. All members are private.
  */
 struct DBusTransportKdbus
 {
@@ -89,7 +88,7 @@ struct DBusTransportKdbus
   int max_bytes_read_per_iteration;     /**< To avoid blocking too long. */
   int max_bytes_written_per_iteration;  /**< To avoid blocking too long. */
 
-  void* kdbus_mmap_ptr;	                /**< Mapped memory where Kdbus (kernel) writes
+  void* kdbus_mmap_ptr;	                /**< Mapped memory where kdbus (kernel) writes
                                          *   messages incoming to us.
                                          */
   int memfd;                            /**< File descriptor to special 
@@ -97,18 +96,26 @@ struct DBusTransportKdbus
                                          *   transfer. Retrieved from 
                                          *   Kdbus kernel module. 
                                          */
-  __u64 bloom_size;						/**<  bloom filter field size */
-  char* sender;                         /**< uniqe name of the sender */
+  __u64 bloom_size;						/**< bloom filter field size */
+  char* sender;                         /**< unique name of the sender */
 };
 
+/**
+ *  Gets size in bytes of bloom filter field.
+ *  This size is got from the bus during connection procedure.
+ *  @param transport transport
+ *  @returns size of bloom
+ */
 __u64 dbus_transport_get_bloom_size(DBusTransport* transport)
 {
   return ((DBusTransportKdbus*)transport)->bloom_size;
 }
 
-/*
- * Adds locally generated message to received messages queue
- *
+/**
+ * Puts locally generated message into received messages queue
+ * @param message message that will be added
+ * @param connection connection to which message will be added
+ * @returns TRUE on success, FALSE on memory allocation error
  */
 static dbus_bool_t add_message_to_received(DBusMessage *message, DBusConnection* connection)
 {
@@ -126,9 +133,18 @@ static dbus_bool_t add_message_to_received(DBusMessage *message, DBusConnection*
 	return TRUE;
 }
 
-/*
+/**
  * Generates local error message as a reply to message given as parameter
  * and adds generated error message to received messages queue.
+ * @param error_Type type of error, preferably DBUS_ERROR_(...)
+ * @param template Template of error description. It can has formatting
+ *  	  characters to print object string into it. Can be NULL.
+ * @param object String to print into error description. Can be NULL.
+ * 		  If object is not NULL while template is NULL, the object string
+ * 		  will be the only error description.
+ * @param message Message for which the error reply is generated.
+ * @param connection The connection.
+ * @returns 0 on success, otherwise -1
  */
 static int reply_with_error(char* error_type, const char* template, const char* object, DBusMessage *message, DBusConnection* connection)
 {
@@ -152,9 +168,14 @@ static int reply_with_error(char* error_type, const char* template, const char* 
 	return -1;
 }
 
-/*
+/**
  *  Generates reply to the message given as a parameter with one item in the reply body
  *  and adds generated reply message to received messages queue.
+ *  @param message The message we are replying to.
+ *  @param data_type Type of data sent in the reply.Use DBUS_TYPE_(...)
+ *  @param pData Address of data sent in the reply.
+ *  @param connection The connection
+ *  @returns 0 on success, otherwise -1
  */
 static int reply_1_data(DBusMessage *message, int data_type, void* pData, DBusConnection* connection)
 {
@@ -191,35 +212,35 @@ static int reply_ack(DBusMessage *message, DBusConnection* connection)
 }*/
 
 /**
- * Retrieves file descriptor to memory pool from kdbus module.
- * It is then used for bulk data sending.
+ * Retrieves file descriptor to memory pool from kdbus module and stores
+ * it in kdbus_transport->memfd. It is then used to send large message.
  * Triggered when message payload is over MEMFD_SIZE_THRESHOLD
- * 
+ * @param kdbus_transport DBusTransportKdbus transport structure
+ * @returns 0 on success, otherwise -1
  */
-static int kdbus_init_memfd(DBusTransportKdbus* socket_transport)
+static int kdbus_init_memfd(DBusTransportKdbus* kdbus_transport)
 {
 	int memfd;
 	
-		if (ioctl(socket_transport->fd, KDBUS_CMD_MEMFD_NEW, &memfd) < 0) {
+		if (ioctl(kdbus_transport->fd, KDBUS_CMD_MEMFD_NEW, &memfd) < 0) {
 			_dbus_verbose("KDBUS_CMD_MEMFD_NEW failed: \n");
 			return -1;
 		}
 
-		socket_transport->memfd = memfd;
-		_dbus_verbose("kdbus_init_memfd: %d!!\n", socket_transport->memfd);
+		kdbus_transport->memfd = memfd;
+		_dbus_verbose("kdbus_init_memfd: %d!!\n", kdbus_transport->memfd);
 	return 0;
 }
 
 /**
- * Initiates Kdbus message structure. 
- * Calculates it's size, allocates memory and fills some fields.
- * @param name Well-known name or NULL
- * @param dst_id Numeric id of recipient
- * @param body_size size of message body if present
- * @param use_memfd flag to build memfd message
- * @param fds_count number of file descriptors used
+ * Allocates and initializes kdbus message structure.
+ * @param name Well-known name or NULL. If NULL, dst_id must be supplied.
+ * @param dst_id Numeric id of recipient. Ignored if name is not NULL.
+ * @param body_size Size of message body (May be 0).
+ * @param use_memfd Flag to build memfd message.
+ * @param fds_count Number of file descriptors sent in the message.
  * @param transport transport
- * @return initialized kdbus message
+ * @returns initialized kdbus message or NULL if malloc failed
  */
 static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t body_size, dbus_bool_t use_memfd, int fds_count, DBusTransportKdbus *transport)
 {
@@ -267,15 +288,17 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
 }
 
 /**
- * Builds and sends kdbus message using DBus message.
- * Decide whether used payload vector or memfd memory pool.
+ * Sends DBus message using kdbus.
  * Handles broadcasts and unicast messages, and passing of Unix fds.
- * Does error handling.
- * TODO refactor to be more compact
+ * Also can locally generate error replies on some error returned by kernel.
  *
- * @param transport transport
+ * TODO refactor to be more compact - maybe we can send header always as a payload vector
+ *  and only message body as memfd if needed.
+ *
+ * @param transport Transport.
  * @param message DBus message to be sent
- * @return size of data sent
+ * @param destination Destination of the message.
+ * @returns bytes sent or -1 if sending failed
  */
 static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, const char* destination)
 {
@@ -449,8 +472,11 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
 
 /**
  * Performs kdbus hello - registration on the kdbus bus
+ * needed to send and receive messages on the bus,
+ * and configures transport.
+ * As a result unique id on he bus is obtained.
  *
- * @param name place to store unique name given by bus
+ * @param name place to print id given by bus
  * @param transportS transport structure
  * @returns #TRUE on success
  */
@@ -490,11 +516,16 @@ static dbus_bool_t bus_register_kdbus(char* name, DBusTransportKdbus* transportS
 }
 
 /**
- * Handles messages sent to bus daemon - "org.freedesktop.DBus" and translates them to appropriate
- * kdbus ioctl commands. Than translate kdbus reply into dbus message and put it into recived messages queue.
+ * Looks over messages sent to org.freedesktop.DBus. Hello message, which performs
+ * registration on the bus, is captured as it must be locally converted into
+ * appropriate ioctl. All the rest org.freedesktop.DBus methods are left untouched
+ * and they are sent to dbus-daemon in the same way as every other messages.
  *
- * Now it captures only Hello message, which must be handled locally.
- * All the rest is passed to dbus-daemon.
+ * @param transport Transport
+ * @param message Message being sent.
+ * @returns 1 if it is not Hello message and it should be passed to daemon
+ * 			0 if Hello message was handled correctly,
+ * 			-1 if Hello message was not handle correctly.
  */
 static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *message)
 {
@@ -591,12 +622,12 @@ TABLE(PAYLOAD) = {
 LOOKUP(PAYLOAD);
 
 /**
- * Puts locally generated message into received data buffer.
- * Use only during receiving phase!
+ * Finalizes locally generated DBus message
+ * and puts it into data buffer.
  *
- * @param message message to load
- * @param data place to load message
- * @return size of message
+ * @param message Message to load.
+ * @param data Place to load message.
+ * @returns Size of message loaded.
  */
 static int put_message_into_data(DBusMessage *message, char* data)
 {
@@ -619,10 +650,10 @@ static int put_message_into_data(DBusMessage *message, char* data)
 }
 
 /**
- * Get the length of the kdbus message content.
+ * Calculates length of the kdbus message content (payload).
  *
  * @param msg kdbus message
- * @return the length of the kdbus message
+ * @return the length of the kdbus message's payload.
  */
 static int kdbus_message_size(const struct kdbus_msg* msg)
 {
@@ -653,16 +684,16 @@ static int kdbus_message_size(const struct kdbus_msg* msg)
 }
 
 /**
- * Decodes kdbus message in order to extract dbus message and put it into data and fds.
- * Also captures and decodes kdbus error messages and kdbus kernel broadcasts and converts
- * all of them into dbus messages.
+ * Decodes kdbus message in order to extract DBus message and puts it into received data buffer
+ * and file descriptor's buffer. Also captures kdbus error messages and kdbus kernel broadcasts
+ * and converts all of them into appropriate DBus messages.
  *
  * @param msg kdbus message
- * @param data place to copy dbus message to
+ * @param data place to copy DBus message to
  * @param kdbus_transport transport
  * @param fds place to store file descriptors received
- * @param n_fds place to store quantity of file descriptor
- * @return number of dbus message's bytes received or -1 on error
+ * @param n_fds place to store quantity of file descriptors received
+ * @return number of DBus message's bytes received or -1 on error
  */
 static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTransportKdbus* kdbus_transport, int* fds, int* n_fds)
 {
@@ -1002,15 +1033,15 @@ out:
 }
 
 /**
- * Reads message from kdbus and puts it into dbus buffer and fds
+ * Reads message from kdbus and puts it into DBus buffers
  *
- * @param transport transport
+ * @param kdbus_transport transport
  * @param buffer place to copy received message to
- * @param fds place to store file descriptors sent in the message
- * @param n_fds place  to store number of file descriptors
+ * @param fds place to store file descriptors received with the message
+ * @param n_fds place to store quantity of file descriptors received
  * @return size of received message on success, -1 on error
  */
-static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *buffer, int* fds, int* n_fds)
+static int kdbus_read_message(DBusTransportKdbus *kdbus_transport, DBusString *buffer, int* fds, int* n_fds)
 {
 	int ret_size, buf_size;
 	uint64_t __attribute__ ((__aligned__(8))) offset;
@@ -1021,7 +1052,7 @@ static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *
 	start = _dbus_string_get_length (buffer);
 
 	again:
-	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RECV, &offset) < 0)
+	if (ioctl(kdbus_transport->fd, KDBUS_CMD_MSG_RECV, &offset) < 0)
 	{
 		if(errno == EINTR)
 			goto again;
@@ -1030,7 +1061,7 @@ static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *
 		return -1;
 	}
 
-	msg = (struct kdbus_msg *)((char*)socket_transport->kdbus_mmap_ptr + offset);
+	msg = (struct kdbus_msg *)((char*)kdbus_transport->kdbus_mmap_ptr + offset);
 
 	buf_size = kdbus_message_size(msg);
 	if (buf_size == -1)
@@ -1050,7 +1081,7 @@ static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *
 	}
 	data = _dbus_string_get_data_len (buffer, start, buf_size);
 
-	ret_size = kdbus_decode_msg(msg, data, socket_transport, fds, n_fds);
+	ret_size = kdbus_decode_msg(msg, data, kdbus_transport, fds, n_fds);
 
 	if(ret_size == -1) /* error */
 	{
@@ -1063,7 +1094,7 @@ static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *
 	}
 
 	again2:
-	if (ioctl(socket_transport->fd, KDBUS_CMD_MSG_RELEASE, &offset) < 0)
+	if (ioctl(kdbus_transport->fd, KDBUS_CMD_MSG_RELEASE, &offset) < 0)
 	{
 		if(errno == EINTR)
 			goto again2;
@@ -1073,8 +1104,9 @@ static int kdbus_read_message(DBusTransportKdbus *socket_transport, DBusString *
 
 	return ret_size;
 }
-/*
- * copy-paste from socket transport with needed renames only.
+
+/**
+ * Copy-paste from socket transport. Only renames done.
  */
 static void
 free_watches (DBusTransport *transport)
@@ -1106,8 +1138,9 @@ free_watches (DBusTransport *transport)
   _dbus_verbose ("end\n");
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ * Copy-paste from socket transport. Only done needed renames and removed
+ * lines related to encoded messages.
  */
 static void
 transport_finalize (DBusTransport *transport)
@@ -1124,8 +1157,9 @@ transport_finalize (DBusTransport *transport)
   dbus_free (transport);
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ * Copy-paste from socket transport. Removed code related to authentication,
+ * socket_transport replaced by kdbus_transport.
  */
 static void
 check_write_watch (DBusTransport *transport)
@@ -1158,8 +1192,9 @@ check_write_watch (DBusTransport *transport)
   _dbus_transport_unref (transport);
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ * Copy-paste from socket transport. Removed code related to authentication,
+ * socket_transport replaced by kdbus_transport.
  */
 static void
 check_read_watch (DBusTransport *transport)
@@ -1192,8 +1227,8 @@ check_read_watch (DBusTransport *transport)
   _dbus_transport_unref (transport);
 }
 
-/*
- * copy-paste from socket transport.
+/**
+ * Copy-paste from socket transport.
  */
 static void
 do_io_error (DBusTransport *transport)
@@ -1203,12 +1238,17 @@ do_io_error (DBusTransport *transport)
   _dbus_transport_unref (transport);
 }
 
-/* returns false on oom */
+/**
+ *  Based on do_writing from socket transport.
+ *  Removed authentication code and code related to encoded messages
+ *  and adapted to kdbus transport.
+ *  In socket transport returns false on out-of-memory. Here this won't happen,
+ *  so it always returns TRUE.
+ */
 static dbus_bool_t
 do_writing (DBusTransport *transport)
 {
   DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
-  dbus_bool_t oom;
   int total = 0;
 
   if (transport->disconnected)
@@ -1217,12 +1257,9 @@ do_writing (DBusTransport *transport)
       return TRUE;
     }
 
-
   _dbus_verbose ("do_writing(), have_messages = %d, fd = %d\n",
       _dbus_connection_has_messages_to_send_unlocked (transport->connection),
       kdbus_transport->fd);
-
-  oom = FALSE;
 
   while (!transport->disconnected && _dbus_connection_has_messages_to_send_unlocked (transport->connection))
     {
@@ -1311,12 +1348,15 @@ do_writing (DBusTransport *transport)
     }
 
   out:
-  if (oom)
-    return FALSE;
   return TRUE;
 }
 
-/* returns false on out-of-memory */
+/**
+ *  Based on do_reading from socket transport.
+ *  Removed authentication code and code related to encoded messages
+ *  and adapted to kdbus transport.
+ *  returns false on out-of-memory
+ */
 static dbus_bool_t
 do_reading (DBusTransport *transport)
 {
@@ -1420,8 +1460,8 @@ do_reading (DBusTransport *transport)
   return TRUE;
 }
 
-/*
- * copy-paste from socket transport.
+/**
+ * Copy-paste from socket transport, with socket replaced by kdbus.
  */
 static dbus_bool_t
 unix_error_with_read_to_come (DBusTransport *itransport,
@@ -1441,8 +1481,9 @@ unix_error_with_read_to_come (DBusTransport *itransport,
    return TRUE;
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ *  Copy-paste from socket transport. Removed authentication related code
+ *  and renamed socket_transport to kdbus_transport.
  */
 static dbus_bool_t
 kdbus_handle_watch (DBusTransport *transport,
@@ -1498,8 +1539,8 @@ kdbus_handle_watch (DBusTransport *transport,
   return TRUE;
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ * Copy-paste from socket transport renamed to kdbus_transport.
  */
 static void
 kdbus_disconnect (DBusTransport *transport)
@@ -1514,15 +1555,18 @@ kdbus_disconnect (DBusTransport *transport)
   kdbus_transport->fd = -1;
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ *  Copy-paste from socket transport. Renamed socket_transport to
+ *  kdbus_transport and added dbus_connection_set_is_authenticated, because
+ *  we do not perform authentication in kdbus, so we have mark is as already done
+ *  to make everything work.
  */
 static dbus_bool_t
 kdbus_connection_set (DBusTransport *transport)
 {
   DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
-  dbus_connection_set_is_authenticated(transport->connection); //now we don't have authentication in kdbus
+  dbus_connection_set_is_authenticated(transport->connection); //now we don't have authentication in kdbus, so mark it done
 
   _dbus_watch_set_handler (kdbus_transport->write_watch,
                            _dbus_connection_handle_watch,
@@ -1550,7 +1594,11 @@ kdbus_connection_set (DBusTransport *transport)
   return TRUE;
 }
 
-/**  original dbus copy-pasted comment
+/**
+ *  Copy-paste from socket_transport.
+ *  Socket_transport renamed to kdbus_transport
+ *
+ *   Original dbus copy-pasted @todo comment below.
  * @todo We need to have a way to wake up the select sleep if
  * a new iteration request comes in with a flag (read/write) that
  * we're not currently serving. Otherwise a call that just reads
@@ -1707,8 +1755,8 @@ kdbus_do_iteration (DBusTransport *transport,
    _dbus_verbose (" ... leaving do_iteration()\n");
 }
 
-/*
- * copy-paste from socket transport with needed renames only.
+/**
+ * Copy-paste from socket transport.
  */
 static void
 kdbus_live_messages_changed (DBusTransport *transport)
@@ -1717,6 +1765,12 @@ kdbus_live_messages_changed (DBusTransport *transport)
   check_read_watch (transport);
 }
 
+/**
+ * Gets file descriptor of the kdbus bus.
+ * @param transport transport
+ * @param fd_p place to write fd to
+ * @returns always TRUE
+ */
 static dbus_bool_t
 kdbus_get_kdbus_fd (DBusTransport *transport,
                       int           *fd_p)
@@ -1739,8 +1793,10 @@ static const DBusTransportVTable kdbus_vtable = {
 };
 
 /**
- * Creates a new transport for the given kdbus file descriptor.  The file
- * descriptor must be nonblocking.
+ * Copy-paste from dbus_transport_socket with needed changes.
+ *
+ * Creates a new transport for the given kdbus file descriptor and address.
+ * The file descriptor must be nonblocking.
  *
  * @param fd the file descriptor.
  * @param address the transport's address
@@ -1799,9 +1855,7 @@ _dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
 /**
  * Opens a connection to the kdbus bus
  *
- * This will set FD_CLOEXEC for the socket returned.
- *
- * @param path the path to UNIX domain socket
+ * @param path the path to kdbus bus
  * @param error return location for error code
  * @returns connection file descriptor or -1 on error
  */
@@ -1820,8 +1874,7 @@ static int _dbus_connect_kdbus (const char *path, DBusError *error)
 }
 
 /**
- * Creates a new transport for kdbus.
- * This creates a client-side of a transport.
+ * Connects to kdbus, creates and sets-up transport.
  *
  * @param path the path to the bus.
  * @param error address where an error can be returned.
@@ -1880,10 +1933,10 @@ static DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError
 /**
  * Opens kdbus transport if method from address entry is kdbus
  *
- * @param entry the address entry to try opening
+ * @param entry the address entry to open
  * @param transport_p return location for the opened transport
- * @param error error to be set
- * @returns result of the attempt
+ * @param error place to store error
+ * @returns result of the attempt as a DBusTransportOpenResult enum
  */
 DBusTransportOpenResult _dbus_transport_open_kdbus(DBusAddressEntry  *entry,
                                         		   DBusTransport    **transport_p,
