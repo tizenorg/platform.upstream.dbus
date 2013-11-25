@@ -48,7 +48,11 @@
 
 #define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU) //size of the memory area for received non-memfd messages
 #define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used to send (if it is not broadcast)
-//todo add compilation-time check if MEMFD_SIZE_THERSHOLD is lower than max payload vector size defined in kdbus.h
+#define MAX_BYTES_PER_ITERATION 16384
+
+#if (MEMFD_SIZE_THRESHOLD > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
+  #error  Memfd size threshold higher than max kdbus message payload vector size
+#endif
 
 #define KDBUS_MSG_DECODE_DEBUG 0
 
@@ -136,7 +140,7 @@ static dbus_bool_t add_message_to_received(DBusMessage *message, DBusConnection*
 /**
  * Generates local error message as a reply to message given as parameter
  * and adds generated error message to received messages queue.
- * @param error_Type type of error, preferably DBUS_ERROR_(...)
+ * @param error_type type of error, preferably DBUS_ERROR_(...)
  * @param template Template of error description. It can has formatting
  *  	  characters to print object string into it. Can be NULL.
  * @param object String to print into error description. Can be NULL.
@@ -527,33 +531,38 @@ static dbus_bool_t bus_register_kdbus(char* name, DBusTransportKdbus* transportS
  * 			0 if Hello message was handled correctly,
  * 			-1 if Hello message was not handle correctly.
  */
-static int emulateOrgFreedesktopDBus(DBusTransport *transport, DBusMessage *message)
+static int capture_hello_message(DBusTransport *transport, const char* destination, DBusMessage *message)
 {
-  if(!strcmp(dbus_message_get_member(message), "Hello"))
+  if(!strcmp(destination, DBUS_SERVICE_DBUS))
     {
-      char* name = NULL;
+      if(!strcmp(dbus_message_get_interface(message), DBUS_INTERFACE_DBUS))
+        {
+          if(!strcmp(dbus_message_get_member(message), "Hello"))
+            {
+              char* name = NULL;
 
-      name = malloc(snprintf(name, 0, ":1.%llu0", ULLONG_MAX));
-      if(name == NULL)
-        return -1;
-      strcpy(name, ":1.");
-      if(!bus_register_kdbus(&name[3], (DBusTransportKdbus*)transport))
-        goto out;
-      if(!register_kdbus_policy(&name[3], transport, geteuid()))
-        goto out;
+              name = malloc(snprintf(name, 0, ":1.%llu0", ULLONG_MAX));
+              if(name == NULL)
+                return -1;
+              strcpy(name, ":1.");
+              if(!bus_register_kdbus(&name[3], (DBusTransportKdbus*)transport))
+                goto out;
+              if(!register_kdbus_policy(&name[3], transport, geteuid()))
+                goto out;
 
-      ((DBusTransportKdbus*)transport)->sender = name;
+              ((DBusTransportKdbus*)transport)->sender = name;
 
-      if(!reply_1_data(message, DBUS_TYPE_STRING, &name, transport->connection))
-        return 0;
+              if(!reply_1_data(message, DBUS_TYPE_STRING, &name, transport->connection))
+                return 0;  //on success we can not free name
 
-    out:
-      free(name);
+              out:
+              free(name);
+              return -1;
+            }
+        }
     }
-  else
-    return 1;  //send to daemon
 
-  return -1;
+  return 1;  //send message to daemon
 }
 
 #if KDBUS_MSG_DECODE_DEBUG == 1
@@ -1291,26 +1300,20 @@ do_writing (DBusTransport *transport)
 
       if(pDestination)
         {
-          if(!strcmp(pDestination, DBUS_SERVICE_DBUS))
-            {
-              if(!strcmp(dbus_message_get_interface(message), DBUS_INTERFACE_DBUS))
-                {
-                  int ret;
+          int ret;
 
-                  ret = emulateOrgFreedesktopDBus(transport, message);
-                  if(ret < 0)
-                    {
-                      bytes_written = -1;
-                      goto written;
-                    }
-                  else if(ret == 0)
-                    {
-                      bytes_written = total_bytes_to_write;
-                      goto written;
-                    }
-                  //else send to "daemon" as to normal recipient
-                }
+          ret = capture_hello_message(transport, pDestination, message);
+          if(ret < 0)  //error
+            {
+              bytes_written = -1;
+              goto written;
             }
+          else if(ret == 0)  //hello message captured and handled correctly
+            {
+              bytes_written = total_bytes_to_write;
+              goto written;
+            }
+          //else send as regular message
         }
 
       bytes_written = kdbus_write_msg(kdbus_transport, message, pDestination);
@@ -1540,7 +1543,8 @@ kdbus_handle_watch (DBusTransport *transport,
 }
 
 /**
- * Copy-paste from socket transport renamed to kdbus_transport.
+ * Copy-paste from socket transport, but socket_transport renamed to kdbus_transport
+ * and _dbus_close_socket replaced with close().
  */
 static void
 kdbus_disconnect (DBusTransport *transport)
@@ -1551,7 +1555,13 @@ kdbus_disconnect (DBusTransport *transport)
 
   free_watches (transport);
 
-  _dbus_close_socket (kdbus_transport->fd, NULL);
+  again:
+   if (close (kdbus_transport->fd) < 0)
+     {
+       if (errno == EINTR)
+         goto again;
+     }
+
   kdbus_transport->fd = -1;
 }
 
@@ -1623,60 +1633,39 @@ kdbus_do_iteration (DBusTransport *transport,
                  kdbus_transport->write_watch,
                  kdbus_transport->fd);
 
-  /* the passed in DO_READING/DO_WRITING flags indicate whether to
-   * read/write messages, but regardless of those we may need to block
-   * for reading/writing to do auth.  But if we do reading for auth,
-   * we don't want to read any messages yet if not given DO_READING.
-   */
-
    poll_fd.fd = kdbus_transport->fd;
    poll_fd.events = 0;
 
-   if (_dbus_transport_try_to_authenticate (transport))
-   {
-      /* This is kind of a hack; if we have stuff to write, then try
-       * to avoid the poll. This is probably about a 5% speedup on an
-       * echo client/server.
-       *
-       * If both reading and writing were requested, we want to avoid this
-       * since it could have funky effects:
-       *   - both ends spinning waiting for the other one to read
-       *     data so they can finish writing
-       *   - prioritizing all writing ahead of reading
-       */
-      if ((flags & DBUS_ITERATION_DO_WRITING) &&
-          !(flags & (DBUS_ITERATION_DO_READING | DBUS_ITERATION_BLOCK)) &&
-          !transport->disconnected &&
-          _dbus_connection_has_messages_to_send_unlocked (transport->connection))
-      {
-         do_writing (transport);
+   /* This is kind of a hack; if we have stuff to write, then try
+    * to avoid the poll. This is probably about a 5% speedup on an
+    * echo client/server.
+    *
+    * If both reading and writing were requested, we want to avoid this
+    * since it could have funky effects:
+    *   - both ends spinning waiting for the other one to read
+    *     data so they can finish writing
+    *   - prioritizing all writing ahead of reading
+    */
+   if ((flags & DBUS_ITERATION_DO_WRITING) &&
+       !(flags & (DBUS_ITERATION_DO_READING | DBUS_ITERATION_BLOCK)) &&
+       !transport->disconnected &&
+       _dbus_connection_has_messages_to_send_unlocked (transport->connection))
+     {
+       do_writing (transport);
 
-         if (transport->disconnected ||
-              !_dbus_connection_has_messages_to_send_unlocked (transport->connection))
-            goto out;
-      }
+       if (transport->disconnected ||
+           !_dbus_connection_has_messages_to_send_unlocked (transport->connection))
+         goto out;
+     }
 
-      /* If we get here, we decided to do the poll() after all */
-      _dbus_assert (kdbus_transport->read_watch);
-      if (flags & DBUS_ITERATION_DO_READING)
-	     poll_fd.events |= _DBUS_POLLIN;
+   /* If we get here, we decided to do the poll() after all */
+   _dbus_assert (kdbus_transport->read_watch);
+   if (flags & DBUS_ITERATION_DO_READING)
+     poll_fd.events |= _DBUS_POLLIN;
 
-      _dbus_assert (kdbus_transport->write_watch);
-      if (flags & DBUS_ITERATION_DO_WRITING)
-         poll_fd.events |= _DBUS_POLLOUT;
-   }
-   else
-   {
-      DBusAuthState auth_state;
-
-      auth_state = _dbus_auth_do_work (transport->auth);
-
-      if (transport->receive_credentials_pending || auth_state == DBUS_AUTH_STATE_WAITING_FOR_INPUT)
-	     poll_fd.events |= _DBUS_POLLIN;
-
-      if (transport->send_credentials_pending || auth_state == DBUS_AUTH_STATE_HAVE_BYTES_TO_SEND)
-	     poll_fd.events |= _DBUS_POLLOUT;
-   }
+   _dbus_assert (kdbus_transport->write_watch);
+   if (flags & DBUS_ITERATION_DO_WRITING)
+     poll_fd.events |= _DBUS_POLLOUT;
 
    if (poll_fd.events)
    {
@@ -1700,10 +1689,7 @@ kdbus_do_iteration (DBusTransport *transport,
       poll_res = _dbus_poll (&poll_fd, 1, poll_timeout);
 
       if (poll_res < 0 && _dbus_get_is_errno_eintr ())
-      {
-         _dbus_verbose ("Error from _dbus_poll(): %s\n", _dbus_strerror_from_errno ());
-    	 goto again;
-      }
+        goto again;
 
       if (flags & DBUS_ITERATION_BLOCK)
       {
@@ -1803,7 +1789,7 @@ static const DBusTransportVTable kdbus_vtable = {
  * @returns the new transport, or #NULL if no memory.
  */
 static DBusTransport*
-_dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
+new_kdbus_transport (int fd, const DBusString *address)
 {
 	DBusTransportKdbus *kdbus_transport;
 
@@ -1833,8 +1819,8 @@ _dbus_transport_new_kdbus_transport (int fd, const DBusString *address)
   kdbus_transport->fd = fd;
 
   /* These values should probably be tunable or something. */
-  kdbus_transport->max_bytes_read_per_iteration = 16384;
-  kdbus_transport->max_bytes_written_per_iteration = 16384;
+  kdbus_transport->max_bytes_read_per_iteration = MAX_BYTES_PER_ITERATION;
+  kdbus_transport->max_bytes_written_per_iteration = MAX_BYTES_PER_ITERATION;
 
   kdbus_transport->kdbus_mmap_ptr = NULL;
   kdbus_transport->memfd = -1;
@@ -1911,7 +1897,7 @@ static DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError
 
 	_dbus_verbose ("Successfully connected to kdbus bus %s\n", path);
 
-	transport = _dbus_transport_new_kdbus_transport (fd, &address);
+	transport = new_kdbus_transport (fd, &address);
 	if (transport == NULL)
     {
 		dbus_set_error (error, DBUS_ERROR_NO_MEMORY, NULL);
@@ -1923,10 +1909,15 @@ static DBusTransport* _dbus_transport_new_for_kdbus (const char *path, DBusError
 	return transport;
 
 	failed_1:
-		_dbus_close_socket (fd, NULL);
-  	failed_0:
-  		_dbus_string_free (&address);
-  	return NULL;
+  again:
+   if (close (fd) < 0)
+     {
+       if (errno == EINTR)
+         goto again;
+     }
+  failed_0:
+  	_dbus_string_free (&address);
+  return NULL;
 }
 
 
