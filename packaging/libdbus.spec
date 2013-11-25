@@ -9,6 +9,7 @@ Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 
 BuildRequires:  expat-devel
 BuildRequires:  libtool
+BuildRequires:  pkg-config
 BuildRequires:  pkgconfig(libsmack)
 
 
