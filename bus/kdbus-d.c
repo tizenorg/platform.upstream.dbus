@@ -26,6 +26,7 @@
 
 #include <dbus/dbus-connection-internal.h>
 #include "kdbus-d.h"
+#define KDBUS_FOR_SBB
 #include <dbus/kdbus.h>
 #include <dbus/dbus-bus.h>
 #include "dispatch.h"
@@ -306,7 +307,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 /*
  * Creates kdbus bus of given type.
  */
-char* make_kdbus_bus(DBusBusType type, DBusError *error)
+char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
 {
     struct {
         struct kdbus_cmd_bus_make head;
@@ -317,6 +318,7 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
 
     int fdc, ret;
     char *bus;
+    char *addr_value;
 
     _dbus_verbose("Opening /dev/kdbus/control\n");
     fdc = open("/dev/kdbus/control", O_RDWR|O_CLOEXEC);
@@ -327,9 +329,13 @@ char* make_kdbus_bus(DBusBusType type, DBusError *error)
         return NULL;
     }
 
+    addr_value = strchr(address, ':') + 1;
+
     memset(&bus_make, 0, sizeof(bus_make));
     bus_make.head.bloom_size = 64;
     bus_make.head.flags = KDBUS_MAKE_ACCESS_WORLD;
+    if(!strcmp(addr_value, "sbb"))
+      bus_make.head.flags |= KDBUS_MAKE_SBB_OFFSET;
 
     if(type == DBUS_BUS_SYSTEM)
         snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%s", getuid(), "system");
@@ -369,19 +375,22 @@ DBusServer* empty_server_init(char* address)
 	return dbus_server_init_mini(address);
 }
 
-static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusTransport* transport)
+static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
 {
   struct kdbus_cmd_match* pCmd_match;
   struct kdbus_item *pItem;
   uint64_t size;
   int fd;
+  DBusTransport *transport;
+  const char* unique_name;
+
+  transport = dbus_connection_get_transport(connection);
 
   if(!_dbus_transport_get_socket_fd(transport, &fd))
     {
       errno = EPERM;
       return FALSE;
     }
-
 
   size = sizeof(struct kdbus_cmd_match);
   size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /*3 name related items plus 2 id related items*/
@@ -393,7 +402,9 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusTransport* transport)
       return FALSE;
     }
 
-  pCmd_match->id = 1;
+  unique_name = dbus_bus_get_unique_name(connection);
+
+  pCmd_match->id = strtoull(&unique_name[3], NULL, 10);
   pCmd_match->cookie = 1;
   pCmd_match->size = size;
 
@@ -439,7 +450,7 @@ DBusConnection* daemon_as_client(DBusBusType type, char* address, DBusError *err
   if(connection == NULL)
     return NULL;
 
-  if(!add_matches_for_kdbus_broadcasts(dbus_connection_get_transport(connection)))
+  if(!add_matches_for_kdbus_broadcasts(connection))
     {
       dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for daemon, %s", _dbus_strerror_from_errno ());
       goto failed;
@@ -1075,7 +1086,7 @@ void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusC
     }
     else //it is well-known name
     {
-        if((*old != 0) && (strcmp(old, ":1.1")))
+        if((*old != 0) && (strcmp(old, bus_connection_get_name(connection))))
         {
             DBusMessage *message;
 
@@ -1100,7 +1111,7 @@ void handleNameOwnerChanged(DBusMessage *msg, BusTransaction *transaction, DBusC
             dbus_message_unref (message);
         }
     next:
-        if((*new != 0) && (strcmp(new, ":1.1")))
+        if((*new != 0) && (strcmp(new, bus_connection_get_name(connection))))
         {
             DBusMessage *message;
 

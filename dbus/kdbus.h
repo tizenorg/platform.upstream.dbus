@@ -121,6 +121,11 @@ enum {
 	KDBUS_MSG_SRC_SECLABEL,		/* NUL terminated string, in .str */
 	KDBUS_MSG_SRC_AUDIT,		/* .audit */
 
+#ifdef KDBUS_FOR_SBB
+	KDBUS_MSG_SBB_DST_NAME,		/* destination name for sbb agent purpose */
+	KDBUS_MSG_SBB_BLOOM,
+#endif
+
 	/* Special messages from kernel, consisting of one and only one of these data blocks */
 	KDBUS_MSG_NAME_ADD	= 0x800,/* .name_change */
 	KDBUS_MSG_NAME_REMOVE,		/* .name_change */
@@ -255,6 +260,11 @@ enum {
 	KDBUS_HELLO_ATTACH_CAPS		=  1 << 14,
 	KDBUS_HELLO_ATTACH_SECLABEL	=  1 << 15,
 	KDBUS_HELLO_ATTACH_AUDIT	=  1 << 16,
+
+#ifdef KDBUS_FOR_SBB
+	/*Flags for SBB*/
+	KDBUS_HELLO_IAMAGENT	= 1 << 30,
+#endif
 };
 
 struct kdbus_cmd_hello {
@@ -286,15 +296,16 @@ enum {
 	KDBUS_MAKE_ACCESS_GROUP		= 1 <<  0,
 	KDBUS_MAKE_ACCESS_WORLD		= 1 <<  1,
 	KDBUS_MAKE_POLICY_OPEN		= 1 <<  2,
+
+#ifdef KDBUS_FOR_SBB
+	KDBUS_MAKE_SBB_OFFSET		= ((__u64)1 << 31),
+#endif
 };
 
 /* Items to append to kdbus_cmd_{bus,ep,ns}_make */
 enum {
 	_KDBUS_MAKE_NULL,
 	KDBUS_MAKE_NAME,
-	KDBUS_MAKE_CGROUP,	/* the cgroup hierarchy ID for which to attach
-				 * cgroup membership paths to messages.
-				 * FIXME: remove, use *the* hierarchy */
 	KDBUS_MAKE_CRED,	/* allow translator services which connect
 				 * to the bus on behalf of somebody else,
 				 * allow specifiying the credentials of the
@@ -448,4 +459,9 @@ enum {
 	KDBUS_CMD_MEMFD_SEAL_GET =	_IOR(KDBUS_IOC_MAGIC, 0x83, int *),
 	KDBUS_CMD_MEMFD_SEAL_SET =	_IO(KDBUS_IOC_MAGIC, 0x84),
 };
+
+#ifdef KDBUS_FOR_SBB
+#define SBB_AGENT_ID_MASK		((__u64)1 << 63)
+//FIXME KDBUS_DST_ID_BROADCAST has "remote" mask
+#endif
 #endif

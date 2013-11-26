@@ -35,7 +35,7 @@
 #include <dbus/dbus-transport-kdbus.h>
 
 __u64 sender_name_to_id(const char* name, DBusError* error);
-char* make_kdbus_bus(DBusBusType type, DBusError *error);
+char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error);
 DBusServer* empty_server_init(char* address);
 
 dbus_bool_t kdbus_register_policy (const DBusString *service_name, DBusConnection* connection);

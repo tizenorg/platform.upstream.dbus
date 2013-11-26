@@ -433,7 +433,7 @@ process_config_first_time_only (BusContext       *context,
   if (address)
     {
 #ifdef ENABLE_KDBUS_TRANSPORT
-      if(!strcmp(_dbus_string_get_const_data(address), "kdbus:"))
+      if(strcmp(_dbus_string_get_const_data(address), "kdbus:") >= 0)
       {
     	  DBusBusType type;
     	  DBusServer* server;
@@ -446,7 +446,7 @@ process_config_first_time_only (BusContext       *context,
     	  else
     		  type = DBUS_BUS_STARTER;
 
-    	  bus_address = make_kdbus_bus(type, error);
+    	  bus_address = make_kdbus_bus(type, _dbus_string_get_const_data(address), error);
     	  if(bus_address == NULL)
     	  	  goto failed;
 
@@ -993,7 +993,7 @@ bus_context_new (const DBusString *config_file,
           goto failed;
 	  }
 	  dbus_connection_set_route_peer_messages (context->myKdbusConnection, FALSE);
-	  _dbus_string_init_const (&unique_name, ":1.1"); //dbus_bus_get_unique_name(context->myConnection)); this is without :1.
+	  _dbus_string_init_const (&unique_name, dbus_bus_get_unique_name(context->myKdbusConnection));
 	  if(!bus_connection_complete (context->myKdbusConnection, &unique_name, error))
 	  {
 		  _dbus_verbose ("Bus connection complete failed for myKdbusConnection!\n");
