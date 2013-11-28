@@ -46,14 +46,34 @@
 #include <limits.h>
 #include <sys/stat.h>
 
-#define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU) //size of the memory area for received non-memfd messages
-#define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU) // over this memfd is used to send (if it is not broadcast)
+/**
+ * @defgroup DBusTransportKdbus DBusTransport implementations for kdbus
+ * @ingroup  DBusInternals
+ * @brief Implementation details of DBusTransport on kdbus
+ *
+ * @{
+ */
+
+/** Size of the memory area for received non-memfd messages. */
+#define RECEIVE_POOL_SIZE (10 * 1024LU * 1024LU)
+
+/** Over this memfd is used to send (if it is not broadcast). */
+#define MEMFD_SIZE_THRESHOLD (2 * 1024 * 1024LU)
+
+/** Define max bytes read or written in one iteration.
+* This is to avoid blocking on reading or writing for too long. It is checked after each message is sent or received,
+* so if message is bigger than MAX_BYTES_PER_ITERATION it will be handled in one iteration, but sending/writing
+* will break after that message.
+**/
 #define MAX_BYTES_PER_ITERATION 16384
 
 #if (MEMFD_SIZE_THRESHOLD > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
   #error  Memfd size threshold higher than max kdbus message payload vector size
 #endif
 
+/** Enables verbosing more information about kdbus message.
+ *  Works only if DBUS_VERBOSE=1 is used.
+ */
 #define KDBUS_MSG_DECODE_DEBUG 0
 
 #define ITER_APPEND_STR(string) \
@@ -1967,3 +1987,5 @@ DBusTransportOpenResult _dbus_transport_open_kdbus(DBusAddressEntry  *entry,
 		return DBUS_TRANSPORT_OPEN_NOT_HANDLED;
     }
 }
+
+/** @} */
