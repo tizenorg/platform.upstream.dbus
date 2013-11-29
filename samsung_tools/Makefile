@@ -9,8 +9,8 @@ CLIENT_DBUS_SOURCES=client.c
 #SQLITE_LIBS=`pkg-config --libs sqlite3`
 
 ifndef CROSS_COMPILE
-DBUS_CFLAGS=`pkg-config --cflags dbus-1`
-DBUS_LIBS=`pkg-config --libs dbus-1`
+DBUS_CFLAGS=-I../
+DBUS_LIBS=-L../dbus/.libs/ -ldbus-1
 else
 DBUS_CFLAGS=-I/home/`whoami`/GBS-ROOT/local/BUILD-ROOTS/scratch.armv7l.0/.build.packages/BUILD/com.samsung.dbus-1.7.5
 DBUS_LIBS=-L/home/`whoami`/GBS-ROOT/local/BUILD-ROOTS/scratch.armv7l.0/.build.packages/BUILD/com.samsung.dbus-1.7.5/dbus/.libs -ldbus-1

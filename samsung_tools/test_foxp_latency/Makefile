@@ -1,10 +1,10 @@
 default:   ping-client ping-server
 
 ping-client:
-	$(CC) -o ping-client ping-client.c -Wall -g -O0 `pkg-config --cflags --libs dbus-1` 
+	$(CC) -o ping-client ping-client.c -Wall -g -O0 -I../../ -L../../dbus/.libs/ -ldbus-1
 	
 ping-server:
-	$(CC) -o ping-server ping-server.c -Wall -g -O0 `pkg-config --cflags --libs dbus-1` 
+	$(CC) -o ping-server ping-server.c -Wall -g -O0 -I../../ -L../../dbus/.libs/ -ldbus-1
 
 install:
 	
