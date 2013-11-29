@@ -1433,6 +1433,7 @@ bus_driver_handle_list_queued_owners (DBusConnection *connection,
 
   dbus_message_unref (reply);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
     {
       link = _dbus_list_get_first_link (&base_names);
@@ -1447,6 +1448,7 @@ bus_driver_handle_list_queued_owners (DBusConnection *connection,
           link = next;
         }
     }
+#endif
 
   return TRUE;
 
