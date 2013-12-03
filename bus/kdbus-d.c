@@ -334,8 +334,16 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
     memset(&bus_make, 0, sizeof(bus_make));
     bus_make.head.bloom_size = 64;
     bus_make.head.flags = KDBUS_MAKE_ACCESS_WORLD;
-    if(!strcmp(addr_value, "sbb"))
-      bus_make.head.flags |= KDBUS_MAKE_SBB_OFFSET;
+    if(*addr_value)
+      {
+        if(!strcmp(addr_value, "sbb"))
+          bus_make.head.flags |= KDBUS_MAKE_SBB_OFFSET;
+        else
+          {
+            dbus_set_error_const(error, DBUS_ERROR_BAD_ADDRESS, "Invalid address parameter.");
+            return NULL;
+          }
+      }
 
     if(type == DBUS_BUS_SYSTEM)
         snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%s", getuid(), "system");
