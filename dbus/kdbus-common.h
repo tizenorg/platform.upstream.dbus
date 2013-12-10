@@ -35,6 +35,10 @@
 	(typeof(part))(((uint8_t *)part) + KDBUS_ALIGN8((part)->size))
 #define KDBUS_ITEM_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
 
+#define KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE  0x00800000              /* maximum size of message header and items */
+#define KDBUS_PART_HEADER_SIZE          offsetof(struct kdbus_item, data)
+
+
 dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int uid);
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id);
 int release_kdbus_name(int fd, const char *name, __u64 id);
