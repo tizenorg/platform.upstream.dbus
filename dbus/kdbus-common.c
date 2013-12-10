@@ -174,7 +174,6 @@ int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id)
 
   cmd_name->flags = flags_kdbus;
   cmd_name->id = id;
-  //	cmd_name->conn_flags = 0;
 
   _dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
 

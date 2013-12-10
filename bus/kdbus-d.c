@@ -564,7 +564,7 @@ dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int 
   cmd.flags = KDBUS_NAME_LIST_NAMES; //TODO add handling | KDBUS_NAME_LIST_UNIQUE;
 
 again:
-	if(ioctl(fd, KDBUS_CMD_NAME_LIST, cmd))
+	if(ioctl(fd, KDBUS_CMD_NAME_LIST, &cmd))
 	{
 		if(errno == EINTR)
 			goto again;
@@ -579,6 +579,9 @@ again:
 
   for (name = name_list->names; (uint8_t *)(name) < (uint8_t *)(name_list) + name_list->size; name = KDBUS_PART_NEXT(name))
     list_len++;
+
+  _dbus_verbose ("Name list size: %llu\n", name_list->size);
+  _dbus_verbose ("List len: %d\n", list_len);
 
   list = malloc(sizeof(char*) * (list_len + 1));
   if(list == NULL)

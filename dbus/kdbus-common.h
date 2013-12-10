@@ -36,7 +36,6 @@
 	(typeof(part))(((uint8_t *)part) + KDBUS_ALIGN8((part)->size))
 #define KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE  0x00800000              /* maximum size of message header and items */
 #define KDBUS_PART_HEADER_SIZE          offsetof(struct kdbus_item, data)
-
 #define KDBUS_PART_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
 
 //todo restore if DBus policy will be applied in kdbus somehow
