@@ -726,6 +726,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
   if (!kdbus_get_unix_user(phantom, conn_unique_name, &uid, NULL))
     goto failed;
 
+#ifdef POLICY_TO_KDBUS
   if (!register_kdbus_policy(name, dbus_connection_get_transport(phantom), uid))
   {
     dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
@@ -733,6 +734,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
             conn_unique_name, name);
     goto failed;
   }
+#endif
 
   *result = kdbus_request_name(connection, service_name, flags, sender_id);
   if(*result == -EPERM)

@@ -31,6 +31,7 @@
 #include <linux/types.h>
 
 __u64 dbus_transport_get_bloom_size(DBusTransport* transport);
+void* dbus_transport_get_pool_pointer(DBusTransport* transport);
 DBusTransportOpenResult _dbus_transport_open_kdbus(DBusAddressEntry *entry, DBusTransport **transport_p, DBusError *error);
 
 #endif

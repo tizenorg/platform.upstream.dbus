@@ -29,15 +29,18 @@
 
 #include <dbus/dbus-types.h>
 #include <dbus/dbus-transport.h>
+#include <dbus/kdbus.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
 #define KDBUS_PART_NEXT(part) \
 	(typeof(part))(((uint8_t *)part) + KDBUS_ALIGN8((part)->size))
-#define KDBUS_ITEM_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
-
 #define KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE  0x00800000              /* maximum size of message header and items */
 #define KDBUS_PART_HEADER_SIZE          offsetof(struct kdbus_item, data)
 
+#define KDBUS_PART_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
+
+//todo restore if DBus policy will be applied in kdbus somehow
+#define POLICY_TO_KDBUS
 
 dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int uid);
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id);

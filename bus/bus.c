@@ -1005,11 +1005,11 @@ bus_context_new (const DBusString *config_file,
 	      _dbus_verbose ("Registering org.freedesktop.DBus name for daemon failed!\n");
 	      goto failed;
 	  }
-	  if(!register_kdbus_starters(context->myKdbusConnection))
+	/*  if(!register_kdbus_starters(context->myKdbusConnection)) TODO repair in kdbus
 	  {
           _dbus_verbose ("Registering kdbus starters for dbus activatable names failed!\n");
           goto failed;
-	  }
+	  }*/
   }
 #endif
 

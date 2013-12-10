@@ -138,7 +138,7 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
       pName = NULL;
     }
     else
-      size += KDBUS_ITEM_SIZE(name_size + 1);  //well known name
+      size += KDBUS_PART_SIZE(name_size + 1);  //well known name
   }
 
   pCmd_match = alloca(size);
@@ -222,12 +222,11 @@ dbus_bool_t remove_match_kdbus (DBusTransport* transport, __u64 id)
  */
 int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo* pInfo)
 {
-  struct kdbus_cmd_name_info *msg;
-  struct kdbus_item *item;
-  uint64_t size;
+  struct kdbus_cmd_conn_info *cmd;
   int ret;
-  uint64_t item_size;
   int fd;
+  uint64_t size;
+  __u64 id = 0;
 
   pInfo->sec_label_len = 0;
   pInfo->sec_label = NULL;
@@ -235,72 +234,76 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
   if(!_dbus_transport_get_socket_fd(transport, &fd))
     return -EPERM;
 
-  item_size = KDBUS_PART_HEADER_SIZE + strlen(name) + 1;
-  item_size = (item_size < 56) ? 56 : item_size;  //at least 56 bytes are needed by kernel to place info about name, otherwise error
-  size = sizeof(struct kdbus_cmd_name_info) + item_size;
+  size = sizeof(struct kdbus_cmd_conn_info);
+  if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
+     id = strtoull(&name[3], NULL, 10);
+  if(id == 0)
+    size += strlen(name) + 1;
 
-  msg = malloc(size);
-  if (!msg)
+  cmd = malloc(size);
+  if (!cmd)
   {
     _dbus_verbose("Error allocating memory for: %s,%s\n", _dbus_strerror (errno), _dbus_error_from_errno (errno));
     return -errno;
   }
 
-  memset(msg, 0, size);
-  msg->size = size;
-    if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
-      msg->id = strtoull(&name[3], NULL, 10);
-    else
-      msg->id = 0;
-
-  item = msg->items;
-  item->type = KDBUS_NAME_INFO_ITEM_NAME;
-  item->size = item_size;
-  memcpy(item->str, name, strlen(name) + 1);
+  cmd->size = size;
+  cmd->id = id;
+  if(id == 0)
+    memcpy(cmd->name, name, strlen(name) + 1);
 
   again:
-  ret = ioctl(fd, KDBUS_CMD_NAME_QUERY, msg);
+  ret = ioctl(fd, KDBUS_CMD_CONN_INFO, cmd);
   if (ret < 0)
   {
     if(errno == EINTR)
       goto again;
-    if(errno == EAGAIN)
-        goto again;
-    else if(ret == -ENOBUFS)
-    {
-      msg = realloc(msg, msg->size);  //prepare memory
-      if(msg != NULL)
-        goto again;
-    }
     pInfo->uniqueId = 0;
-    ret = -errno;
   }
   else
   {
-    pInfo->uniqueId = msg->id;
-    pInfo->userId = msg->creds.uid;
-    pInfo->processId = msg->creds.pid;
-    item = msg->items;
-    while((uint8_t *)(item) < (uint8_t *)(msg) + msg->size)
+    struct kdbus_conn_info *info;
+    struct kdbus_item *item;
+
+    info = (struct kdbus_conn_info *)((char*)dbus_transport_get_pool_pointer(transport) + cmd->offset);
+    pInfo->uniqueId = info->id;
+
+    item = info->items;
+    while((uint8_t *)(item) < (uint8_t *)(info) + info->size)
     {
-      if(item->type == KDBUS_NAME_INFO_ITEM_SECLABEL)
-      {
-          pInfo->sec_label_len = item->size - KDBUS_PART_HEADER_SIZE - 1;
-        if(pInfo->sec_label_len != 0)
+      if(item->type == KDBUS_ITEM_CREDS)
         {
-          pInfo->sec_label = malloc(pInfo->sec_label_len);
-          if(pInfo->sec_label == NULL)
-            ret = -1;
-          else
-            memcpy(pInfo->sec_label, item->data, pInfo->sec_label_len);
+          pInfo->userId = item->creds.uid;
+          pInfo->processId = item->creds.uid;
         }
-        break;
-      }
+
+      if(item->type == KDBUS_ITEM_SECLABEL)
+        {
+          pInfo->sec_label_len = item->size - KDBUS_PART_HEADER_SIZE - 1;
+          if(pInfo->sec_label_len != 0)
+            {
+              pInfo->sec_label = malloc(pInfo->sec_label_len);
+              if(pInfo->sec_label == NULL)
+                ret = -1;
+              else
+                memcpy(pInfo->sec_label, item->data, pInfo->sec_label_len);
+            }
+        }
+
       item = KDBUS_PART_NEXT(item);
+    }
+
+    again2:
+    if (ioctl(fd, KDBUS_CMD_FREE, &cmd->offset) < 0)
+    {
+      if(errno == EINTR)
+        goto again2;
+      _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
+      return -1;
     }
   }
 
-  free(msg);
+  free(cmd);
   return ret;
 }
 
@@ -333,7 +336,11 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
 
     memset(&bus_make, 0, sizeof(bus_make));
     bus_make.head.bloom_size = 64;
+#ifdef POLICY_TO_KDBUS
     bus_make.head.flags = KDBUS_MAKE_ACCESS_WORLD;
+#else
+    bus_make.head.flags = KDBUS_MAKE_POLICY_OPEN;
+#endif
     if(*addr_value)
       {
         if(!strcmp(addr_value, "sbb"))
@@ -401,7 +408,7 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
     }
 
   size = sizeof(struct kdbus_cmd_match);
-  size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /*3 name related items plus 2 id related items*/
+  size += KDBUS_PART_SIZE(1)*3 + KDBUS_PART_SIZE(sizeof(__u64))*2;  /*3 name related items plus 2 id related items*/
 
   pCmd_match = alloca(size);
   if(pCmd_match == NULL)
@@ -487,8 +494,10 @@ dbus_bool_t register_daemon_name(DBusConnection* connection)
     BusTransaction *transaction;
 
     _dbus_string_init_const(&daemon_name, DBUS_SERVICE_DBUS);
+#ifdef POLICY_TO_KDBUS
     if(!register_kdbus_policy(DBUS_SERVICE_DBUS, dbus_connection_get_transport(connection), geteuid()))
       return FALSE;
+#endif
 
     if(kdbus_request_name(connection, &daemon_name, 0, 0) != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
        return FALSE;
@@ -537,77 +546,73 @@ dbus_uint32_t kdbus_release_name(DBusConnection* connection, const DBusString *s
 dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int *array_len)
 {
 	int fd;
-	struct kdbus_cmd_names* pCmd;
-	__u64 cmd_size;
+	struct kdbus_cmd_name_list __attribute__ ((__aligned__(8))) cmd;
+	struct kdbus_name_list *name_list;
+	struct kdbus_cmd_name *name;
+	DBusTransport *transport;
 	dbus_bool_t ret_val = FALSE;
 	char** list;
 	int list_len = 0;
 	int i = 0;
 	int j;
 
-	cmd_size = sizeof(struct kdbus_cmd_names) + KDBUS_ITEM_SIZE(1);
-	pCmd = malloc(cmd_size);
-	if(pCmd == NULL)
-		goto out;
-	pCmd->size = cmd_size;
+	transport = dbus_connection_get_transport(connection);
 
-	_dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
+	if(!_dbus_transport_get_socket_fd(transport, &fd))
+	  return FALSE;
+
+  cmd.flags = KDBUS_NAME_LIST_NAMES; //TODO add handling | KDBUS_NAME_LIST_UNIQUE;
 
 again:
-	cmd_size = 0;
-	if(ioctl(fd, KDBUS_CMD_NAME_LIST, pCmd))
+	if(ioctl(fd, KDBUS_CMD_NAME_LIST, cmd))
 	{
 		if(errno == EINTR)
 			goto again;
-		if(errno == ENOBUFS)			//buffer to small to put all names into it
-			cmd_size = pCmd->size;		//here kernel tells how much memory it needs
 		else
 		{
 			_dbus_verbose("kdbus error asking for name list: err %d (%m)\n",errno);
 			goto out;
 		}
 	}
-	if(cmd_size)  //kernel needs more memory
-	{
-		pCmd = realloc(pCmd, cmd_size);  //prepare memory
-		if(pCmd == NULL)
-			return FALSE;
-		goto again;						//and try again
-	}
-	else
-	{
-		struct kdbus_cmd_name* pCmd_name;
 
-		for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
-			list_len++;
+	name_list = (struct kdbus_name_list *)((char*)dbus_transport_get_pool_pointer(transport) + cmd.offset);
 
-		list = malloc(sizeof(char*) * (list_len + 1));
-		if(list == NULL)
-			goto out;
+  for (name = name_list->names; (uint8_t *)(name) < (uint8_t *)(name_list) + name_list->size; name = KDBUS_PART_NEXT(name))
+    list_len++;
 
-		for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
-		{
-			list[i] = strdup(pCmd_name->name);
-			if(list[i] == NULL)
-			{
-				for(j=0; j<i; j++)
-					free(list[j]);
-				free(list);
-				goto out;
-			}
-			_dbus_verbose ("Name %d: %s\n", i, list[i]);
-			++i;
-		}
-		list[i] = NULL;
-	}
+  list = malloc(sizeof(char*) * (list_len + 1));
+  if(list == NULL)
+    goto out;
 
+  for (name = name_list->names; (uint8_t *)(name) < (uint8_t *)(name_list) + name_list->size; name = KDBUS_PART_NEXT(name))
+  {
+    list[i] = strdup(name->name);
+    if(list[i] == NULL)
+    {
+      for(j=0; j<i; j++)
+        free(list[j]);
+      free(list);
+      goto out;
+    }
+    _dbus_verbose ("Name %d: %s\n", i, list[i]);
+    ++i;
+  }
+
+  again2:
+  if (ioctl(fd, KDBUS_CMD_FREE, &cmd.offset) < 0)
+  {
+    if(errno == EINTR)
+      goto again2;
+    _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
+    return -1;
+  }
+
+  list[i] = NULL;
 	*array_len = list_len;
 	*listp = list;
 	ret_val = TRUE;
 
 out:
-	if(pCmd)
-		free(pCmd);
 	return ret_val;
 }
 
@@ -618,16 +623,18 @@ out:
  */
 dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList  **return_list,
                                const char *name, DBusError  *error)
-{
-  int fd;
-  struct kdbus_cmd_names* pCmd;
-  __u64 cmd_size;
+{   //todo implement using new CMD_NAME_LIST
+/*  int fd;
   dbus_bool_t ret_val = FALSE;
   int name_length;
+  struct kdbus_cmd_names* pCmd;
+  __u64 cmd_size;
+
 
   _dbus_assert (*return_list == NULL);
 
   name_length = strlen(name) + 1;
+
   cmd_size = sizeof(struct kdbus_cmd_names) + sizeof(struct kdbus_cmd_name) + name_length;
   pCmd = malloc(cmd_size);
   if(pCmd == NULL)
@@ -636,13 +643,14 @@ dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList  **return_li
   pCmd->names[0].id = 0;
   pCmd->names[0].size =  sizeof(struct kdbus_cmd_name) + name_length;
   memcpy(pCmd->names[0].name, name, name_length);
+
   _dbus_verbose ("Asking for queued owners of %s\n", pCmd->names[0].name);
 
   _dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
 
   again:
   cmd_size = 0;
-  if(ioctl(fd, KDBUS_CMD_NAME_LIST_QUEUED, pCmd))
+  if(ioctl(fd, KDBUS_CMD_NAME_LIST, pCmd))
     {
       if(errno == EINTR)
         goto again;
@@ -712,7 +720,11 @@ dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList  **return_li
         }
     }
 
-  return ret_val;
+  return ret_val;*/
+  dbus_set_error (error, _dbus_error_from_errno (errno),
+      "Failed to list queued owners of \"%s\": %s",
+      name, "Function not implemented yet");
+  return FALSE;
 }
 
 /*
@@ -767,7 +779,7 @@ int kdbus_get_name_owner(DBusConnection* connection, const char* name, char* own
     sprintf(owner, ":1.%llu", (unsigned long long int)info.uniqueId);
     _dbus_verbose("Unique name discovered:%s\n", owner);
   }
-  else if(ret != -ENOENT)
+  else if((ret != -ENOENT) && (ret != -ENXIO))
     _dbus_verbose("kdbus error sending name query: err %d (%m)\n", errno);
 
   return ret;
@@ -789,7 +801,7 @@ dbus_bool_t kdbus_get_unix_user(DBusConnection* connection, const char* name, un
     *uid = info.userId;
     return TRUE;
   }
-  else if(inter_ret == -ENOENT)  //name has no owner
+  else if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
     {
       _dbus_verbose ("Name %s has no owner.\n", name);
       dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get UID of name '%s': no such name", name);
@@ -820,7 +832,7 @@ dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, con
 		*pid = info.processId;
 		return TRUE;
 	}
-	else if(inter_ret == -ENOENT)  //name has no owner
+	else if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
 		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get PID of name '%s': no such name", name);
 	else
 	{
@@ -843,7 +855,7 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 
 	dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID);
 	inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
-	if(inter_ret == -ENOENT)  //name has no owner
+	if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
 		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get security context of name '%s': no such name", name);
 	else if(inter_ret < 0)
 	{
@@ -961,7 +973,6 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
     BusTransaction *transaction;
     DBusString name;
     DBusTransport* transport;
-    unsigned long int euid;
 
     transaction = bus_transaction_new (bus_connection_get_context(connection));
     if (transaction == NULL)
@@ -971,7 +982,6 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
         return FALSE;
 
     transport = dbus_connection_get_transport(connection);
-    euid = geteuid();
 
     if(!_dbus_transport_get_socket_fd (transport, &fd))
       return FALSE;
@@ -980,8 +990,10 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
 
     for(i=0; i<len; i++)
     {
-        if(!register_kdbus_policy(services[i], transport, euid))
+#ifdef POLICY_TO_KDBUS
+        if(!register_kdbus_policy(services[i], transport, geteuid()))
           goto out;
+#endif
 
         if (request_kdbus_name(fd, services[i], (DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER) , 0) < 0)
             goto out;

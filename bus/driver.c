@@ -826,7 +826,7 @@ bus_driver_handle_service_exists (DBusConnection *connection,
 		  struct nameInfo info;
 
 		  inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
-			if((inter_ret == 0) || (inter_ret == -ENOENT))
+			if((inter_ret == 0) || (inter_ret == -ENOENT) || (inter_ret == -ENXIO))
 				service_exists = (inter_ret == 0) ? TRUE : FALSE;
 			else
 			{
@@ -1255,7 +1255,7 @@ bus_driver_handle_get_service_owner (DBusConnection *connection,
       ret = kdbus_get_name_owner(connection, text, unique_name);
       if(ret == 0)
         base_name = unique_name;
-      else if(ret == -ENOENT)  //name has no owner
+      else if((ret == -ENOENT) || (ret == -ENXIO)) //name has no owner
         {
           dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
                   "Could not get owner of name '%s': no such name", text);

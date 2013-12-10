@@ -136,6 +136,17 @@ __u64 dbus_transport_get_bloom_size(DBusTransport* transport)
 }
 
 /**
+ *  Gets pointer to the memory pool, wher received messages are
+ *  placed and some ioctls return their info
+ *  @param transport transport
+ *  @returns pointer to the pool
+ */
+void* dbus_transport_get_pool_pointer(DBusTransport* transport)
+{
+  return ((DBusTransportKdbus*)transport)->kdbus_mmap_ptr;
+}
+
+/**
  * Puts locally generated message into received messages queue
  * @param message message that will be added
  * @param connection connection to which message will be added
@@ -274,24 +285,24 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
     msg_size = sizeof(struct kdbus_msg);
 
     if(use_memfd == TRUE)  // bulk data - memfd
-        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
+        msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_memfd));
     else
       {
-        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //header is a must
+        msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_vec));  //header is a must
         while(body_size > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
           {
-            msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+            msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_vec));
             body_size -= KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
           }
         if(body_size)
-          msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
+          msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_vec));
       }
 
     if(fds_count)
-    	msg_size += KDBUS_ITEM_SIZE(sizeof(int)*fds_count);
+    	msg_size += KDBUS_PART_SIZE(sizeof(int)*fds_count);
 
     if (name)
-    	msg_size += KDBUS_ITEM_SIZE(strlen(name) + 1);
+    	msg_size += KDBUS_PART_SIZE(strlen(name) + 1);
     else if (dst_id == KDBUS_DST_ID_BROADCAST)
     	msg_size += KDBUS_PART_HEADER_SIZE + transport->bloom_size;
 
@@ -567,9 +578,10 @@ static int capture_hello_message(DBusTransport *transport, const char* destinati
               strcpy(name, ":1.");
               if(!bus_register_kdbus(&name[3], (DBusTransportKdbus*)transport))
                 goto out;
+#ifdef POLICY_TO_KDBUS
               if(!register_kdbus_policy(&name[3], transport, geteuid()))
                 goto out;
-
+#endif
               ((DBusTransportKdbus*)transport)->sender = name;
 
               if(!reply_1_data(message, DBUS_TYPE_STRING, &name, transport->connection))
