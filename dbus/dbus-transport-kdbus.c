@@ -518,6 +518,7 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
 static dbus_bool_t bus_register_kdbus(char* name, DBusTransportKdbus* transportS)
 {
 	struct kdbus_cmd_hello __attribute__ ((__aligned__(8))) hello;
+	memset(&hello, 0, sizeof(hello));
 
 	hello.conn_flags = KDBUS_HELLO_ACCEPT_FD/* |
 			   KDBUS_HELLO_ATTACH_COMM |

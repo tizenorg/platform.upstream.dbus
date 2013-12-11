@@ -102,7 +102,7 @@ fi
 
 #--enable-developer --enable-verbose-mode 
 if $run_configure; then
-    $srcdir/configure --enable-abstract-sockets --config-cache "$@" || exit $?
+    $srcdir/configure --enable-abstract-sockets --config-cache --enable-doxygen-docs=no "$@" || exit $?
     echo 
     echo "Now type 'make' to compile $PROJECT."
 else

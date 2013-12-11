@@ -46,7 +46,7 @@ static struct kdbus_item *make_policy_name(const char *name)
   memset(p, 0, size);
   p->size = size;
   p->type = KDBUS_ITEM_POLICY_NAME;
-  strcpy(p->policy.name, name);
+  memcpy(p->policy.name, name, strlen(name) + 1);
 
   return p;
 }
