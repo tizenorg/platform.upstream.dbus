@@ -315,7 +315,7 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
 
     memset(msg, 0, msg_size);
     msg->size = msg_size;
-    msg->payload_type = KDBUS_PAYLOAD_DBUS1;
+    msg->payload_type = KDBUS_PAYLOAD_DBUS;
     msg->dst_id = name ? 0 : dst_id;
     msg->src_id = strtoull(dbus_bus_get_unique_name(transport->base.connection), NULL , 10);
 
@@ -657,8 +657,7 @@ LOOKUP(MSG);
 const char *enum_PAYLOAD(long long id);
 TABLE(PAYLOAD) = {
 	ENUM(KDBUS_PAYLOAD_KERNEL),
-	ENUM(KDBUS_PAYLOAD_DBUS1),
-	ENUM(KDBUS_PAYLOAD_GVARIANT),
+	ENUM(KDBUS_PAYLOAD_DBUS),
 };
 LOOKUP(PAYLOAD);
 

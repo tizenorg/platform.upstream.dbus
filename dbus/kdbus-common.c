@@ -34,48 +34,48 @@
 #include <dbus/dbus-internals.h>
 #include <dbus/dbus-shared.h>
 
-static struct kdbus_policy *make_policy_name(const char *name)
+static struct kdbus_item *make_policy_name(const char *name)
 {
-  struct kdbus_policy *p;
+  struct kdbus_item *p;
   __u64 size;
 
-  size = offsetof(struct kdbus_policy, name) + strlen(name) + 1;
+  size = offsetof(struct kdbus_item, policy.name) + strlen(name) + 1;
   p = malloc(size);
   if (!p)
-    return NULL;
+	  return NULL;
   memset(p, 0, size);
   p->size = size;
-  p->type = KDBUS_POLICY_NAME;
-  strcpy(p->name, name);
+  p->type = KDBUS_ITEM_POLICY_NAME;
+  strcpy(p->policy.name, name);
 
   return p;
 }
 
-static struct kdbus_policy *make_policy_access(__u64 type, __u64 bits, __u64 id)
+static  struct kdbus_item *make_policy_access(__u64 type, __u64 bits, __u64 id)
 {
-  struct kdbus_policy *p;
+  struct kdbus_item *p;
   __u64 size = sizeof(*p);
 
   p = malloc(size);
   if (!p)
-    return NULL;
+	  return NULL;
 
   memset(p, 0, size);
   p->size = size;
-  p->type = KDBUS_POLICY_ACCESS;
-  p->access.type = type;
-  p->access.bits = bits;
-  p->access.id = id;
+  p->type = KDBUS_ITEM_POLICY_ACCESS;
+  p->policy.access.type = type;
+  p->policy.access.bits = bits;
+  p->policy.access.id = id;
 
   return p;
 }
 
-static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_policy *policy, __u64 max_size)
+static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_item *policy, __u64 max_size)
 {
-  struct kdbus_policy *dst = (struct kdbus_policy *) ((char *) cmd_policy + cmd_policy->size);
+  struct kdbus_item *dst = (struct kdbus_item *) ((char *) cmd_policy + cmd_policy->size);
 
   if (cmd_policy->size + policy->size > max_size)
-    return;
+	  return;
 
   memcpy(dst, policy, policy->size);
   cmd_policy->size += KDBUS_ALIGN8(policy->size);
@@ -101,7 +101,7 @@ static void append_policy(struct kdbus_cmd_policy *cmd_policy, struct kdbus_poli
 dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int owner_uid)
 {
   struct kdbus_cmd_policy *cmd_policy;
-  struct kdbus_policy *policy;
+  struct kdbus_item *policy;
   int size = 0xffff;
   int fd;
 
@@ -111,7 +111,7 @@ dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, un
   cmd_policy = alloca(size);
   memset(cmd_policy, 0, size);
 
-  policy = (struct kdbus_policy *) cmd_policy->policies;
+  policy = (struct kdbus_item *) cmd_policy->policies;
   cmd_policy->size = offsetof(struct kdbus_cmd_policy, policies);
 
   policy = make_policy_name(name);
