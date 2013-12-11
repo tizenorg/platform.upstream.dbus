@@ -998,13 +998,13 @@ dbus_bool_t register_kdbus_starters(DBusConnection* connection)
           goto out;
 #endif
 
-        if (request_kdbus_name(fd, services[i], (DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER) , 0) < 0)
+        if (request_kdbus_name(fd, services[i], (DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER_NAME) , 0) < 0)
             goto out;
 
         if(!_dbus_string_append(&name, services[i]))
         	goto out;
         if(!bus_registry_ensure (bus_connection_get_registry (connection), &name, connection,
-        		(DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER), transaction, NULL))
+        		(DBUS_NAME_FLAG_ALLOW_REPLACEMENT | KDBUS_NAME_STARTER_NAME), transaction, NULL))
         	goto out;
         if(!_dbus_string_set_length(&name, 0))
         	goto out;

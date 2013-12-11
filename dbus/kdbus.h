@@ -555,7 +555,7 @@ enum kdbus_name_flags {
 	KDBUS_NAME_QUEUE			= 1 <<  1,
 	KDBUS_NAME_ALLOW_REPLACEMENT		= 1 <<  2,
 
-	KDBUS_NAME_STARTER 			= 1 <<  7,
+	KDBUS_NAME_STARTER_NAME 			= 1 <<  7,
 	/* kernel → userspace */
 	KDBUS_NAME_IN_QUEUE			= 1 << 16,
 };

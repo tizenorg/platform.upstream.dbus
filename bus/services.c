@@ -223,7 +223,7 @@ bus_owner_set_flags (BusOwner *owner,
 
 #ifdef ENABLE_KDBUS_TRANSPORT
    owner->is_kdbus_starter =
-        (flags & KDBUS_NAME_STARTER) != FALSE;
+        (flags & KDBUS_NAME_STARTER_NAME) != FALSE;
 #endif
 }
 
