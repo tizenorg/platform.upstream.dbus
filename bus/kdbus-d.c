@@ -559,7 +559,7 @@ dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int 
 	if(!_dbus_transport_get_socket_fd(transport, &fd))
 	  return FALSE;
 
-  cmd.flags = KDBUS_NAME_LIST_NAMES; //TODO add handling | KDBUS_NAME_LIST_UNIQUE;
+  cmd.flags = KDBUS_NAME_LIST_NAMES | KDBUS_NAME_LIST_UNIQUE;
 
 again:
 	if(ioctl(fd, KDBUS_CMD_NAME_LIST, &cmd))
@@ -578,7 +578,6 @@ again:
   for (name = name_list->names; (uint8_t *)(name) < (uint8_t *)(name_list) + name_list->size; name = KDBUS_PART_NEXT(name))
     list_len++;
 
-  _dbus_verbose ("Name list size: %llu\n", name_list->size);
   _dbus_verbose ("List len: %d\n", list_len);
 
   list = malloc(sizeof(char*) * (list_len + 1));
@@ -587,9 +586,19 @@ again:
 
   for (name = name_list->names; (uint8_t *)(name) < (uint8_t *)(name_list) + name_list->size; name = KDBUS_PART_NEXT(name))
   {
-    list[i] = strdup(name->name);
-    if(list[i] == NULL)
-      goto out;
+      if(*name->name)
+      {
+        list[i] = strdup(name->name);
+        if(list[i] == NULL)
+          goto out;
+      }
+      else
+      {
+        list[i] = malloc(snprintf(list[i], 0, ":1.%llu0", (unsigned long long)name->id));
+        if(list[i] == NULL)
+          goto out;
+        sprintf(list[i], ":1.%llu", (unsigned long long int)name->id);
+      }
     _dbus_verbose ("Name %d: %s\n", i, list[i]);
     ++i;
   }
