@@ -312,74 +312,89 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
  */
 char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
 {
-    struct {
-        struct kdbus_cmd_bus_make head;
-        uint64_t n_size;
-        uint64_t n_type;
-        char name[64];
-    } __attribute__ ((__aligned__(8))) bus_make;
+  struct kdbus_cmd_bus_make *bus_make;
+  struct kdbus_item *item;
+  __u64 name_size, item_size, bus_make_size;
+  int fdc, ret;
+  char *addr_value = NULL;
+  char *bus = NULL;
+  char *name = NULL;
 
-    int fdc, ret;
-    char *bus;
-    char *addr_value;
+  if(type == DBUS_BUS_SYSTEM)
+    name_size = snprintf(name, 0, "%u-kdbus-%s", getuid(), "system") + 1;
+  else if(type == DBUS_BUS_SESSION)
+    name_size = snprintf(name, 0, "%u-kdbus", getuid()) + 1;
+  else
+    name_size = snprintf(name, 0, "%u-kdbus-%u", getuid(), getpid()) + 1;
 
-    _dbus_verbose("Opening /dev/kdbus/control\n");
-    fdc = open("/dev/kdbus/control", O_RDWR|O_CLOEXEC);
-    if (fdc < 0)
+  item_size = KDBUS_PART_HEADER_SIZE + name_size;
+  bus_make_size = sizeof(struct kdbus_cmd_bus_make) + item_size;
+
+  bus_make = alloca(bus_make_size);
+  if (!bus_make)
     {
-        _dbus_verbose("--- error %d (%m)\n", fdc);
-        dbus_set_error(error, DBUS_ERROR_FAILED, "Opening /dev/kdbus/control failed: %d (%m)", fdc);
-        return NULL;
+      return NULL;
     }
 
-    addr_value = strchr(address, ':') + 1;
+  item = bus_make->items;
+  item->size = item_size;
+  item->type = KDBUS_ITEM_MAKE_NAME;
 
-    memset(&bus_make, 0, sizeof(bus_make));
-    bus_make.head.bloom_size = 64;
+  if(type == DBUS_BUS_SYSTEM)
+    sprintf(item->str, "%u-kdbus-%s", getuid(), "system");
+  else if(type == DBUS_BUS_SESSION)
+    sprintf(item->str, "%u-kdbus", getuid());
+  else
+    sprintf(item->str, "%u-kdbus-%u", getuid(), getpid());
+
+  bus_make->bloom_size = 64;
+  bus_make->size = bus_make_size;
+
 #ifdef POLICY_TO_KDBUS
-    bus_make.head.flags = KDBUS_MAKE_ACCESS_WORLD;
+  bus_make->flags = KDBUS_MAKE_ACCESS_WORLD;
 #else
-    bus_make.head.flags = KDBUS_MAKE_POLICY_OPEN;
+  bus_make->flags = KDBUS_MAKE_POLICY_OPEN;
 #endif
-    if(*addr_value)
-      {
-        if(!strcmp(addr_value, "sbb"))
-          bus_make.head.flags |= KDBUS_MAKE_SBB_OFFSET;
-        else
-          {
-            dbus_set_error_const(error, DBUS_ERROR_BAD_ADDRESS, "Invalid address parameter.");
-            return NULL;
-          }
-      }
 
-    if(type == DBUS_BUS_SYSTEM)
-        snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%s", getuid(), "system");
-    else if(type == DBUS_BUS_SESSION)
-        snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus", getuid());
-    else
-        snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%u", getuid(), getpid());
-
-    bus_make.n_type = KDBUS_ITEM_MAKE_NAME;
-    bus_make.n_size = KDBUS_PART_HEADER_SIZE + strlen(bus_make.name) + 1;
-    bus_make.head.size = sizeof(struct kdbus_cmd_bus_make) + bus_make.n_size;
-
-    _dbus_verbose("Creating bus '%s'\n", bus_make.name);
-    ret = ioctl(fdc, KDBUS_CMD_BUS_MAKE, &bus_make);
-    if (ret)
+  addr_value = strchr(address, ':') + 1;
+  if(*addr_value)
     {
-        _dbus_verbose("--- error %d (%m)\n", ret);
-        dbus_set_error(error, DBUS_ERROR_FAILED, "Creating bus '%s' failed: %d (%m)", bus_make.name, fdc);
-        return NULL;
+      if(!strcmp(addr_value, "sbb"))
+        bus_make->flags |= KDBUS_MAKE_SBB_OFFSET;
+      else
+        {
+          dbus_set_error_const(error, DBUS_ERROR_BAD_ADDRESS, "Invalid address parameter.");
+          return NULL;
+        }
     }
 
-    if (asprintf(&bus, "kdbus:path=/dev/kdbus/%s/bus", bus_make.name) < 0)
+  _dbus_verbose("Opening /dev/kdbus/control\n");
+  fdc = open("/dev/kdbus/control", O_RDWR|O_CLOEXEC);
+  if (fdc < 0)
     {
-        BUS_SET_OOM (error);
-        return NULL;
+      _dbus_verbose("--- error %d (%m)\n", fdc);
+      dbus_set_error(error, DBUS_ERROR_FAILED, "Opening /dev/kdbus/control failed: %d (%m)", fdc);
+      return NULL;
     }
 
-    _dbus_verbose("Return value '%s'\n", bus);
-	return bus;
+  _dbus_verbose("Creating bus '%s'\n", (bus_make->items[0]).str);
+  ret = ioctl(fdc, KDBUS_CMD_BUS_MAKE, bus_make);
+  if (ret)
+    {
+      _dbus_verbose("--- error %d (%m)\n", errno);
+      dbus_set_error(error, DBUS_ERROR_FAILED, "Creating bus '%s' failed: %d (%m)",
+          (bus_make->items[0]).str, errno);
+      return NULL;
+    }
+
+  if (asprintf(&bus, "kdbus:path=/dev/kdbus/%s/bus", (bus_make->items[0]).str) < 0)
+    {
+      BUS_SET_OOM (error);
+      return NULL;
+    }
+
+  _dbus_verbose("Return value '%s'\n", bus);
+  return bus;
 }
 
 /*
