@@ -33,5 +33,8 @@ ping-server:
 ping-client: 
 	$(CC) -o $@ $(CLIENT_DBUS_SOURCES) $(INCLUDES) $(DBUS_CFLAGS) $(CFLAGS) $(DBUS_LIBS) $(SQLITE_CFLAGS) $(SQLITE_LIBS) 
 
+install:
+
+
 clean:
 	rm -f *.o ping-server ping-client
