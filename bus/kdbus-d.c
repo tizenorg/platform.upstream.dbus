@@ -359,7 +359,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
     else
         snprintf(bus_make.name, sizeof(bus_make.name), "%u-kdbus-%u", getuid(), getpid());
 
-    bus_make.n_type = KDBUS_MAKE_NAME;
+    bus_make.n_type = KDBUS_ITEM_MAKE_NAME;
     bus_make.n_size = KDBUS_PART_HEADER_SIZE + strlen(bus_make.name) + 1;
     bus_make.head.size = sizeof(struct kdbus_cmd_bus_make) + bus_make.n_size;
 
@@ -549,14 +549,12 @@ dbus_bool_t kdbus_list_services (DBusConnection* connection, char ***listp, int 
 	struct kdbus_cmd_name_list __attribute__ ((__aligned__(8))) cmd;
 	struct kdbus_name_list *name_list;
 	struct kdbus_cmd_name *name;
-	DBusTransport *transport;
+	DBusTransport *transport = dbus_connection_get_transport(connection);
 	dbus_bool_t ret_val = FALSE;
 	char** list;
 	int list_len = 0;
 	int i = 0;
 	int j;
-
-	transport = dbus_connection_get_transport(connection);
 
 	if(!_dbus_transport_get_socket_fd(transport, &fd))
 	  return FALSE;
@@ -571,7 +569,7 @@ again:
 		else
 		{
 			_dbus_verbose("kdbus error asking for name list: err %d (%m)\n",errno);
-			goto out;
+			return FALSE;
 		}
 	}
 
@@ -591,23 +589,9 @@ again:
   {
     list[i] = strdup(name->name);
     if(list[i] == NULL)
-    {
-      for(j=0; j<i; j++)
-        free(list[j]);
-      free(list);
       goto out;
-    }
     _dbus_verbose ("Name %d: %s\n", i, list[i]);
     ++i;
-  }
-
-  again2:
-  if (ioctl(fd, KDBUS_CMD_FREE, &cmd.offset) < 0)
-  {
-    if(errno == EINTR)
-      goto again2;
-    _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
-    return -1;
   }
 
   list[i] = NULL;
@@ -616,6 +600,22 @@ again:
 	ret_val = TRUE;
 
 out:
+  if (ioctl(fd, KDBUS_CMD_FREE, &cmd.offset) < 0)
+  {
+    if(errno == EINTR)
+      goto out;
+    _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
+    ret_val = FALSE;
+  }
+  if(ret_val == FALSE)
+    {
+      for(j=0; j<i; j++)
+        free(list[j]);
+      free(list);
+      *array_len = 0;
+      *listp = NULL;
+    }
+
 	return ret_val;
 }
 
@@ -626,44 +626,40 @@ out:
  */
 dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList  **return_list,
                                const char *name, DBusError  *error)
-{   //todo implement using new CMD_NAME_LIST
-/*  int fd;
+{
+  int fd;
   dbus_bool_t ret_val = FALSE;
   int name_length;
-  struct kdbus_cmd_names* pCmd;
+  struct kdbus_cmd_conn_info *pCmd;
   __u64 cmd_size;
-
+  DBusTransport *transport = dbus_connection_get_transport(connection);
+  struct kdbus_name_list *name_list;
+  struct kdbus_cmd_name *owner;
 
   _dbus_assert (*return_list == NULL);
 
   name_length = strlen(name) + 1;
-
-  cmd_size = sizeof(struct kdbus_cmd_names) + sizeof(struct kdbus_cmd_name) + name_length;
-  pCmd = malloc(cmd_size);
+  cmd_size = sizeof(struct kdbus_cmd_conn_info) + name_length;
+  pCmd = alloca(cmd_size);
   if(pCmd == NULL)
     goto out;
   pCmd->size = cmd_size;
-  pCmd->names[0].id = 0;
-  pCmd->names[0].size =  sizeof(struct kdbus_cmd_name) + name_length;
-  memcpy(pCmd->names[0].name, name, name_length);
+  pCmd->id = 0;
+  memcpy(pCmd->name, name, name_length);
 
-  _dbus_verbose ("Asking for queued owners of %s\n", pCmd->names[0].name);
+  _dbus_verbose ("Asking for queued owners of %s\n", pCmd->name);
 
-  _dbus_transport_get_socket_fd(dbus_connection_get_transport(connection), &fd);
+  _dbus_transport_get_socket_fd(transport, &fd);
 
   again:
-  cmd_size = 0;
-  if(ioctl(fd, KDBUS_CMD_NAME_LIST, pCmd))
+  if(ioctl(fd, KDBUS_CMD_NAME_LIST_QUEUED, pCmd))
     {
       if(errno == EINTR)
         goto again;
-      if(errno == ENOBUFS)      //buffer to small to put all names into it
-        cmd_size = pCmd->size;    //here kernel tells how much memory it needs
-      else if(errno == ENOENT)
+      else if(errno == ESRCH)
         {
           dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
                       "Could not get owners of name '%s': no such name", name);
-          free(pCmd);
           return FALSE;
         }
       else
@@ -672,36 +668,32 @@ dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList  **return_li
           goto out;
         }
     }
-  if(cmd_size)  //kernel needs more memory
-    {
-      pCmd = realloc(pCmd, cmd_size);  //prepare memory
-      if(pCmd == NULL)
-        return FALSE;
-      goto again;           //and try again
-    }
-  else
-    {
-      struct kdbus_cmd_name* pCmd_name;
 
-      for (pCmd_name = pCmd->names; (uint8_t *)(pCmd_name) < (uint8_t *)(pCmd) + pCmd->size; pCmd_name = KDBUS_PART_NEXT(pCmd_name))
-        {
-          char *uname = NULL;
+  name_list = (struct kdbus_name_list *)((char*)dbus_transport_get_pool_pointer(transport) + pCmd->offset);
 
-          _dbus_verbose ("Got queued owner id: %llu\n", (unsigned long long)pCmd_name->id);
-          uname = malloc(snprintf(uname, 0, ":1.%llu0", (unsigned long long)pCmd_name->id));
-          if(uname == NULL)
-            goto out;
-          sprintf(uname, ":1.%llu", (unsigned long long int)pCmd_name->id);
-          if (!_dbus_list_append (return_list, uname))
-            goto out;
-        }
+  for (owner = name_list->names; (uint8_t *)(owner) < (uint8_t *)(name_list) + name_list->size; owner = KDBUS_PART_NEXT(owner))
+    {
+      char *uname = NULL;
+
+      _dbus_verbose ("Got queued owner id: %llu\n", (unsigned long long)owner->id);
+      uname = malloc(snprintf(uname, 0, ":1.%llu0", (unsigned long long)owner->id));
+      if(uname == NULL)
+        goto out;
+      sprintf(uname, ":1.%llu", (unsigned long long int)owner->id);
+      if (!_dbus_list_append (return_list, uname))
+        goto out;
     }
 
   ret_val = TRUE;
 
   out:
-  if(pCmd)
-    free(pCmd);
+  if (ioctl(fd, KDBUS_CMD_FREE, &pCmd->offset) < 0)
+  {
+    if(errno == EINTR)
+      goto out;
+    _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
+    ret_val = FALSE;
+  }
   if(ret_val == FALSE)
     {
       DBusList *link;
@@ -723,11 +715,7 @@ dbus_bool_t kdbus_list_queued (DBusConnection *connection, DBusList  **return_li
         }
     }
 
-  return ret_val;*/
-  dbus_set_error (error, _dbus_error_from_errno (errno),
-      "Failed to list queued owners of \"%s\": %s",
-      name, "Function not implemented yet");
-  return FALSE;
+  return ret_val;
 }
 
 /*

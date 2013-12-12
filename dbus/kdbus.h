@@ -814,6 +814,7 @@ enum kdbus_ioctl_type {
 	KDBUS_CMD_NAME_ACQUIRE =	_IOWR(KDBUS_IOC_MAGIC, 0x50, struct kdbus_cmd_name),
 	KDBUS_CMD_NAME_RELEASE =	_IOW (KDBUS_IOC_MAGIC, 0x51, struct kdbus_cmd_name),
 	KDBUS_CMD_NAME_LIST =		_IOWR(KDBUS_IOC_MAGIC, 0x52, struct kdbus_cmd_name_list),
+	KDBUS_CMD_NAME_LIST_QUEUED = _IOWR(KDBUS_IOC_MAGIC, 0x58, struct kdbus_cmd_conn_info),
 
 	KDBUS_CMD_CONN_INFO =		_IOWR(KDBUS_IOC_MAGIC, 0x60, struct kdbus_cmd_conn_info),
 
