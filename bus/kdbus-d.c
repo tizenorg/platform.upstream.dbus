@@ -240,7 +240,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
   if(id == 0)
     size += strlen(name) + 1;
 
-  cmd = malloc(size);
+  cmd = alloca(size);
   if (!cmd)
   {
     _dbus_verbose("Error allocating memory for: %s,%s\n", _dbus_strerror (errno), _dbus_error_from_errno (errno));
@@ -259,6 +259,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
     if(errno == EINTR)
       goto again;
     pInfo->uniqueId = 0;
+    return -errno;
   }
   else
   {
@@ -299,11 +300,10 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
       if(errno == EINTR)
         goto again2;
       _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
-      return -1;
+      return -errno;
     }
   }
 
-  free(cmd);
   return ret;
 }
 
@@ -795,7 +795,7 @@ int kdbus_get_name_owner(DBusConnection* connection, const char* name, char* own
     _dbus_verbose("Unique name discovered:%s\n", owner);
   }
   else if((ret != -ENOENT) && (ret != -ENXIO))
-    _dbus_verbose("kdbus error sending name query: err %d (%m)\n", errno);
+    _dbus_verbose("kdbus error sending name query: err %d (%m)\n", ret);
 
   return ret;
 }
