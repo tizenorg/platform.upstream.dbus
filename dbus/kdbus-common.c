@@ -219,7 +219,7 @@ int release_kdbus_name(int fd, const char *name, __u64 id)
 
   if (ioctl(fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
     {
-      if(errno == ESRCH)
+      if((errno == ESRCH) || (errno == ENXIO))
         return DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
       else if (errno == EPERM)
         return DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
