@@ -465,6 +465,7 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_ID_REMOVE;
   pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+  pItem->id = KDBUS_MATCH_SRC_ID_ANY;
 
   if(ioctl(fd, KDBUS_CMD_MATCH_ADD, pCmd_match))
     {
