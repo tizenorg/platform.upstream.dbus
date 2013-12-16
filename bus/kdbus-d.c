@@ -312,6 +312,9 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
  */
 char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
 {
+  // TODO Function alloca() used. In upstream there was a patch proposing to
+  // replace alloca() with malloc() to assure memory alignment. If there will be
+  // suggestion to use malloc instead of alloca this function has to be modified
   struct kdbus_cmd_bus_make *bus_make;
   struct kdbus_item *item;
   __u64 name_size, item_size, bus_make_size;
@@ -327,6 +330,12 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
   else
     name_size = snprintf(name, 0, "%u-kdbus-%u", getuid(), getpid()) + 1;
 
+  name = alloca(name_size);
+  if (!name)
+    {
+      return NULL;
+    }
+
   item_size = KDBUS_PART_HEADER_SIZE + name_size;
   bus_make_size = sizeof(struct kdbus_cmd_bus_make) + item_size;
 
@@ -341,11 +350,13 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
   item->type = KDBUS_ITEM_MAKE_NAME;
 
   if(type == DBUS_BUS_SYSTEM)
-    sprintf(item->str, "%u-kdbus-%s", getuid(), "system");
+    sprintf(name, "%u-kdbus-%s", getuid(), "system");
   else if(type == DBUS_BUS_SESSION)
-    sprintf(item->str, "%u-kdbus", getuid());
+    sprintf(name, "%u-kdbus", getuid());
   else
-    sprintf(item->str, "%u-kdbus-%u", getuid(), getpid());
+    sprintf(name, "%u-kdbus-%u", getuid(), getpid());
+
+  memcpy((bus_make->items)->str, name, name_size);
 
   bus_make->bloom_size = 64;
   bus_make->size = bus_make_size;
