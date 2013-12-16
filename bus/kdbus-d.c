@@ -612,7 +612,7 @@ again:
 
   for (name = name_list->names; (uint8_t *)(name) < (uint8_t *)(name_list) + name_list->size; name = KDBUS_PART_NEXT(name))
   {
-      if(*name->name)
+      if(name->size > sizeof(struct kdbus_cmd_name) )
       {
         list[i] = strdup(name->name);
         if(list[i] == NULL)
