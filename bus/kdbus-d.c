@@ -364,7 +364,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
 #ifdef POLICY_TO_KDBUS
   bus_make->flags = KDBUS_MAKE_ACCESS_WORLD;
 #else
-  bus_make->flags = KDBUS_MAKE_POLICY_OPEN;
+  bus_make->flags = KDBUS_MAKE_ACCESS_WORLD | KDBUS_MAKE_POLICY_OPEN;
 #endif
 
   addr_value = strchr(address, ':') + 1;

@@ -39,7 +39,7 @@
 #define KDBUS_PART_SIZE(s) KDBUS_ALIGN8((s) + KDBUS_PART_HEADER_SIZE)
 
 //todo restore if DBus policy will be applied in kdbus somehow
-#define POLICY_TO_KDBUS
+//#define POLICY_TO_KDBUS
 
 dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int uid);
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id);
