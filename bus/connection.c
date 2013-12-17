@@ -202,7 +202,7 @@ bus_connection_disconnected (DBusConnection *connection)
                  d->name ? d->name : "(inactive)");
 
 #ifdef ENABLE_KDBUS_TRANSPORT
-  if(bus_context_is_kdbus(d->connections->context) && (strcmp(bus_connection_get_name(connection), ":1.1")))
+  if((d->name) && bus_context_is_kdbus(d->connections->context) && (strcmp(d->name, ":1.1")))
       is_phantom = TRUE;
 #endif
 
