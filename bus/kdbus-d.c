@@ -228,8 +228,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
   uint64_t size;
   __u64 id = 0;
 
-  pInfo->sec_label_len = 0;
-  pInfo->sec_label = NULL;
+  memset(pInfo, 0, sizeof(struct nameInfo));
 
   if(!_dbus_transport_get_socket_fd(transport, &fd))
     return -EPERM;
@@ -247,6 +246,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
     return -errno;
   }
 
+  memset(cmd, 0, sizeof(struct kdbus_cmd_conn_info));
   cmd->size = size;
   cmd->id = id;
   if(id == 0)
@@ -275,7 +275,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
       if(item->type == KDBUS_ITEM_CREDS)
         {
           pInfo->userId = item->creds.uid;
-          pInfo->processId = item->creds.uid;
+          pInfo->processId = item->creds.pid;
         }
 
       if(item->type == KDBUS_ITEM_SECLABEL)
