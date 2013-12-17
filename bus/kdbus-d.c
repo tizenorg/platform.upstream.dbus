@@ -543,8 +543,12 @@ dbus_bool_t register_daemon_name(DBusConnection* connection)
     retval = TRUE;
 
 out:
-	bus_transaction_cancel_and_free(transaction);
-    return retval;
+  if(retval)
+    bus_transaction_execute_and_free(transaction);
+  else
+    bus_transaction_cancel_and_free(transaction);
+
+  return retval;
 }
 
 dbus_uint32_t kdbus_request_name(DBusConnection* connection, const DBusString *service_name, dbus_uint32_t flags, __u64 sender_id)
@@ -1041,8 +1045,12 @@ out:
     }
     dbus_free_string_array (services);
     _dbus_string_free(&name);
+  if(retval)
+    bus_transaction_execute_and_free(transaction);
+  else
     bus_transaction_cancel_and_free(transaction);
-    return retval;
+
+  return retval;
 }
 
 /*
@@ -1098,8 +1106,12 @@ dbus_bool_t update_kdbus_starters(DBusConnection* connection)
     retval = TRUE;
 
 out:
-	bus_transaction_cancel_and_free(transaction);
-    return retval;
+  if(retval)
+    bus_transaction_execute_and_free(transaction);
+  else
+    bus_transaction_cancel_and_free(transaction);
+
+  return retval;
 }
 
 /*
