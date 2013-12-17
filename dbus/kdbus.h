@@ -30,10 +30,11 @@
  * struct kdbus_notify_name_change - name registry change message
  * @old_id:		Former owner of a name
  * @new_id:		New owner of a name
- * @flags:		flags from KDBUS_NAME_*
+ * @old_flags:		flags from KDBUS_NAME_* the name entry used to have
+ * @new_flags:		flags from KDBUS_NAME_* the name entry has now
  * @name:		Well-known name
  *
- * Sent from kernel to userspace when the owner or starter of
+ * Sent from kernel to userspace when the owner or activator of
  * a well-known name changes.
  *
  * Attached to:
@@ -44,7 +45,8 @@
 struct kdbus_notify_name_change {
 	__u64 old_id;
 	__u64 new_id;
-	__u64 flags;
+	__u64 old_flags;
+	__u64 new_flags;
 	char name[0];
 };
 
@@ -53,7 +55,7 @@ struct kdbus_notify_name_change {
  * @id:			New or former owner of the name
  * @flags:		flags field from KDBUS_HELLO_*
  *
- * Sent from kernel to userspace when the owner or starter of
+ * Sent from kernel to userspace when the owner or activator of
  * a well-known name changes.
  *
  * Attached to:
@@ -205,7 +207,7 @@ struct kdbus_policy {
  * @KDBUS_ITEM_POLICY_NAME:	Policy in struct kdbus_policy
  * @KDBUS_ITEM_POLICY_ACCESS:	Policy in struct kdbus_policy
  * @KDBUS_ITEM_NAME:		Well-know name with flags
- * @KDBUS_ITEM_STARTER_NAME:	Well-known name for the starter
+ * @KDBUS_ITEM_ACTIVATOR_NAME:	Well-known name for the activator
  * @KDBUS_ITEM_TIMESTAMP:	Timestamp
  * @KDBUS_ITEM_CREDS:		Process credential
  * @KDBUS_ITEM_PID_COMM:	Process ID "comm" identifier
@@ -242,7 +244,7 @@ enum kdbus_item_type {
 
 	_KDBUS_ITEM_ATTACH_BASE	= 0x600,
 	KDBUS_ITEM_NAME		= _KDBUS_ITEM_ATTACH_BASE,
-	KDBUS_ITEM_STARTER_NAME,
+	KDBUS_ITEM_ACTIVATOR_NAME,
 	KDBUS_ITEM_TIMESTAMP,
 	KDBUS_ITEM_CREDS,
 	KDBUS_ITEM_PID_COMM,
@@ -349,7 +351,17 @@ enum kdbus_payload_type {
  * @cookie_reply:	For kernel-generated messages, this is the cookie
  * 			the message is a reply to
  * @timeout_ns:		For non-kernel-generated messages, this denotes the
- * 			message timeout in nanoseconds
+ * 			message timeout in nanoseconds. A message has to be
+ * 			received with KDBUS_CMD_MSG_RECV by the destination
+ * 			connection within this time frame. For messages that
+ * 			have KDBUS_MSG_FLAGS_EXPECT_REPLY set in @flags,
+ * 			this value also denotes the timeout for the reply to
+ * 			this message. If there is no reply, or the message is
+ * 			not received in time by the other side, a
+ * 			kernel-generated message with an attached
+ * 			KDBUS_ITEM_REPLY_TIMEOUT item is sent to @src_id.
+ * 			A 0-value is only valid if KDBUS_MSG_FLAGS_EXPECT_REPLY
+ * 			is unset in @flags.
  * @items:		A list of kdbus_items containing the message payload
  */
 struct kdbus_msg {
@@ -407,13 +419,13 @@ struct kdbus_cmd_policy {
 
 /**
  * enum kdbus_hello_flags - flags for struct kdbus_cmd_hello
- * @KDBUS_HELLO_STARTER:		The connection registers a name for activation
+ * @KDBUS_HELLO_ACTIVATOR:		The connection registers a name for activation
  * 				by well-know name
  * @KDBUS_HELLO_ACCEPT_FD:	The connection allows the receiving of
  * 				any passed file descriptors
  */
 enum kdbus_hello_flags {
-	KDBUS_HELLO_STARTER		=  1 <<  0,
+	KDBUS_HELLO_ACTIVATOR		=  1 <<  0,
 	KDBUS_HELLO_ACCEPT_FD		=  1 <<  1,
 
 #ifdef KDBUS_FOR_SBB
@@ -500,8 +512,7 @@ enum kdbus_make_flags {
  * @bloom_size:		Size of the bloom filter for this bus
  * @items:		Items describing details such as the name of the bus
  *
- * This structure is used with the KDBUS_CMD_BUS_MAKE ioctl. Refer to the
- * documentation for more information.
+ * This structure is used with the KDBUS_CMD_BUS_MAKE ioctl.
  */
 struct kdbus_cmd_bus_make {
 	__u64 size;
@@ -517,8 +528,7 @@ struct kdbus_cmd_bus_make {
  * @items:		Items describing details such as the
  * 			name of the endpoint
  *
- * This structure is used with the KDBUS_CMD_EP_MAKE ioctl. Refer to the
- * documentation for more information.
+ * This structure is used with the KDBUS_CMD_EP_MAKE ioctl.
  */
 struct kdbus_cmd_ep_make {
 	__u64 size;
@@ -533,8 +543,7 @@ struct kdbus_cmd_ep_make {
  * @items:		Items describing details such as the
  * 			name of the namespace
  *
- * This structure is used with the KDBUS_CMD_NS_MAKE ioctl. Refer to the
- * documentation for more information.
+ * This structure is used with the KDBUS_CMD_NS_MAKE ioctl.
  */
 struct kdbus_cmd_ns_make {
 	__u64 size;
@@ -545,19 +554,18 @@ struct kdbus_cmd_ns_make {
 /**
  * enum kdbus_name_flags - properties of a well-known name
  * @KDBUS_NAME_REPLACE_EXISTING:	Try to replace name of other connections
- * @KDBUS_NAME_QUEUE:			Name should be queued if busy
  * @KDBUS_NAME_ALLOW_REPLACEMENT:	Allow the replacement of the name
+ * @KDBUS_NAME_QUEUE:			Name should be queued if busy
  * @KDBUS_NAME_IN_QUEUE:		Name is queued
+ * @KDBUS_NAME_ACTIVATOR:		Name is owned by a activator connection
  */
 enum kdbus_name_flags {
-	/* userspace → kernel */
 	KDBUS_NAME_REPLACE_EXISTING		= 1 <<  0,
-	KDBUS_NAME_QUEUE			= 1 <<  1,
-	KDBUS_NAME_ALLOW_REPLACEMENT		= 1 <<  2,
-
-	KDBUS_NAME_STARTER_NAME 			= 1 <<  7,
-	/* kernel → userspace */
-	KDBUS_NAME_IN_QUEUE			= 1 << 16,
+	KDBUS_NAME_ALLOW_REPLACEMENT		= 1 <<  1,
+	KDBUS_NAME_QUEUE			= 1 <<  2,
+	KDBUS_NAME_IN_QUEUE			= 1 <<  3,
+	KDBUS_NAME_ACTIVATOR			= 1 <<  4,
+	KDBUS_NAME_STARTER_NAME			= 1 <<  7,
 };
 
 /**
@@ -570,7 +578,6 @@ enum kdbus_name_flags {
  * @name:		The well-known name
  *
  * This structure is used with the KDBUS_CMD_NAME_ACQUIRE ioctl.
- * Refer to the documentation for more information.
  */
 struct kdbus_cmd_name {
 	__u64 size;
@@ -584,13 +591,13 @@ struct kdbus_cmd_name {
  * enum kdbus_name_list_flags - what to include into the returned list
  * @KDBUS_NAME_LIST_UNIQUE:	All active connections
  * @KDBUS_NAME_LIST_NAMES:	All known well-known names
- * @KDBUS_NAME_LIST_STARTERS:	All connections which are starter connections
+ * @KDBUS_NAME_LIST_ACTIVATORS:	All activator connections
  * @KDBUS_NAME_LIST_QUEUED:	All queued-up names
  */
 enum kdbus_name_list_flags {
 	KDBUS_NAME_LIST_UNIQUE		= 1 <<  0,
 	KDBUS_NAME_LIST_NAMES		= 1 <<  1,
-	KDBUS_NAME_LIST_STARTERS	= 1 <<  2,
+	KDBUS_NAME_LIST_ACTIVATORS	= 1 <<  2,
 	KDBUS_NAME_LIST_QUEUED		= 1 <<  3,
 };
 
@@ -629,7 +636,7 @@ struct kdbus_name_list {
  * 			@name is required. kdbus will look up the name to determine
  * 			the ID in this case.
  * @offset:		Returned offset in the caller's pool buffer where the
- * 			kdbus_name_info struct result is stored. The user must
+ * 			kdbus_conn_info struct result is stored. The user must
  * 			use KDBUS_CMD_FREE to free the allocated memory.
  * @name:		The optional well-known name to look up. Only needed in
  * 			case @id is zero.
@@ -697,8 +704,7 @@ enum kdbus_match_type {
  * @items:		A list of items for additional information
  *
  * This structure is used with the KDBUS_CMD_ADD_MATCH and
- * KDBUS_CMD_REMOVE_MATCH ioctl. Refer to the documentation for more
- * information.
+ * KDBUS_CMD_REMOVE_MATCH ioctl.
  */
 struct kdbus_cmd_match {
 	__u64 size;
@@ -723,7 +729,6 @@ enum kdbus_monitor_flags {
  * @flags:		Use KDBUS_MONITOR_ENABLE to enable eavesdropping
  *
  * This structure is used with the KDBUS_CMD_MONITOR ioctl.
- * Refer to the documentation for more information.
  */
 struct kdbus_cmd_monitor {
 	__u64 id;
@@ -848,6 +853,8 @@ enum kdbus_ioctl_type {
  * @EBADFD:		A bus connection is in a corrupted state.
  * @EBADMSG:		Passed data contains a combination of conflicting or
  * 			inconsistent types.
+ * @ECONNRESET:		A connection is shut down, no further operations are
+ * 			possible.
  * @ECOMM:		A peer does not accept the file descriptors addressed
  * 			to it.
  * @EDESTADDRREQ:	The well-known bus name is required but missing.
@@ -884,8 +891,8 @@ enum kdbus_ioctl_type {
  * @ENXIO:		A unique address does not exist.
  * @EPERM:		The policy prevented an operation. The requested
  * 			resource is owned by another entity.
- * @ESHUTDOWN:		The connection is currently shutting down, no further
- * 			operations are possible.
+ * @ESHUTDOWN:		A namespace or endpoint is currently shutting down;
+ * 			no further operations will be possible.
  * @ESRCH:		A requested well-known bus name is not found.
  * @ETXTBSY:		A kdbus memfd file cannot be sealed or the seal removed,
  * 			because it is shared with other processes or still

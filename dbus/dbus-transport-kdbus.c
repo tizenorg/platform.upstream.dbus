@@ -932,10 +932,11 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			break;
 
 			case KDBUS_ITEM_NAME_ADD:
-				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
+				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, old flags=0x%llx, new flags=0x%llx\n",
 					enum_MSG(item->type), (unsigned long long) item->size,
 					item->name_change.name, item->name_change.old_id,
-					item->name_change.new_id, item->name_change.flags);
+					item->name_change.new_id, item->name_change.old_flags,
+					item->name_change.new_flags);
 
 				message = dbus_message_new_signal(DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "NameOwnerChanged");
 				if(message == NULL)
@@ -957,10 +958,11 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			break;
 
 			case KDBUS_ITEM_NAME_REMOVE:
-				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
+				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, old flags=0x%llx, new flags=0x%llx\n",
 					enum_MSG(item->type), (unsigned long long) item->size,
 					item->name_change.name, item->name_change.old_id,
-					item->name_change.new_id, item->name_change.flags);
+					item->name_change.new_id, item->name_change.old_flags,
+					item->name_change.new_flags);
 
 				message = dbus_message_new_signal(DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "NameOwnerChanged"); // name of the signal
 				if(message == NULL)
@@ -982,10 +984,11 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			break;
 
 			case KDBUS_ITEM_NAME_CHANGE:
-				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, flags=0x%llx\n",
+				_dbus_verbose("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, old flags=0x%llx, new flags=0x%llx\n",
 					enum_MSG(item->type), (unsigned long long) item->size,
 					item->name_change.name, item->name_change.old_id,
-					item->name_change.new_id, item->name_change.flags);
+					item->name_change.new_id, item->name_change.old_flags,
+					item->name_change.new_flags);
 
 				message = dbus_message_new_signal(DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "NameOwnerChanged");
 				if(message == NULL)
