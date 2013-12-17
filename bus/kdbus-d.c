@@ -423,7 +423,6 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
   uint64_t size;
   int fd;
   DBusTransport *transport;
-  const char* unique_name;
 
   transport = dbus_connection_get_transport(connection);
 
@@ -443,14 +442,12 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
       return FALSE;
     }
 
-  unique_name = dbus_bus_get_unique_name(connection);
-
-  pCmd_match->id = strtoull(&unique_name[3], NULL, 10);
+  pCmd_match->id = 0;
   pCmd_match->cookie = 1;
   pCmd_match->size = size;
+  pCmd_match->src_id = KDBUS_MATCH_SRC_ID_ANY;
 
   pItem = pCmd_match->items;
-  pCmd_match->src_id = 0;
   pItem->type = KDBUS_MATCH_NAME_CHANGE;
   pItem->size = KDBUS_PART_HEADER_SIZE + 1;
   pItem = KDBUS_PART_NEXT(pItem);
@@ -462,6 +459,7 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_ID_ADD;
   pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+  pItem->id = KDBUS_MATCH_SRC_ID_ANY;
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_ID_REMOVE;
   pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
