@@ -315,9 +315,9 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
   // TODO Function alloca() used. In upstream there was a patch proposing to
   // replace alloca() with malloc() to assure memory alignment. If there will be
   // suggestion to use malloc instead of alloca this function has to be modified
-  struct kdbus_cmd_bus_make *bus_make;
+  struct kdbus_cmd_make *bus_make;
   struct kdbus_item *item;
-  __u64 name_size, item_size, bus_make_size;
+  __u64 name_size, bus_make_size;
   int fdc, ret;
   char *addr_value = NULL;
   char *bus = NULL;
@@ -336,36 +336,35 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
       return NULL;
     }
 
-  item_size = KDBUS_PART_HEADER_SIZE + name_size;
-  bus_make_size = sizeof(struct kdbus_cmd_bus_make) + item_size;
-
+  bus_make_size = sizeof(struct kdbus_cmd_make) + KDBUS_PART_SIZE(name_size) + KDBUS_PART_SIZE(sizeof(__u64));
   bus_make = alloca(bus_make_size);
   if (!bus_make)
     {
       return NULL;
     }
 
+  bus_make->size = bus_make_size;
+#ifdef POLICY_TO_KDBUS
+  bus_make->flags = KDBUS_MAKE_ACCESS_WORLD;
+#else
+  bus_make->flags = KDBUS_MAKE_ACCESS_WORLD | KDBUS_MAKE_POLICY_OPEN;
+#endif
   item = bus_make->items;
-  item->size = item_size;
-  item->type = KDBUS_ITEM_MAKE_NAME;
 
+  item->type = KDBUS_ITEM_MAKE_NAME;
+  item->size = KDBUS_PART_HEADER_SIZE + name_size;
   if(type == DBUS_BUS_SYSTEM)
     sprintf(name, "%u-kdbus-%s", getuid(), "system");
   else if(type == DBUS_BUS_SESSION)
     sprintf(name, "%u-kdbus", getuid());
   else
     sprintf(name, "%u-kdbus-%u", getuid(), getpid());
-
   memcpy((bus_make->items)->str, name, name_size);
 
-  bus_make->bloom_size = 64;
-  bus_make->size = bus_make_size;
-
-#ifdef POLICY_TO_KDBUS
-  bus_make->flags = KDBUS_MAKE_ACCESS_WORLD;
-#else
-  bus_make->flags = KDBUS_MAKE_ACCESS_WORLD | KDBUS_MAKE_POLICY_OPEN;
-#endif
+  item = KDBUS_PART_NEXT(item);
+  item->type = KDBUS_ITEM_BLOOM_SIZE;
+  item->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+  item->data64[0] = 64;
 
   addr_value = strchr(address, ':') + 1;
   if(*addr_value)

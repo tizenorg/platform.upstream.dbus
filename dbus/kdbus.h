@@ -201,13 +201,13 @@ struct kdbus_policy {
  * @KDBUS_ITEM_PAYLOAD_MEMFD:	Data as sealed memfd
  * @KDBUS_ITEM_FDS:		Attached file descriptors
  * @KDBUS_ITEM_BLOOM:		For broadcasts, carries bloom filter
+ * @KDBUS_ITEM_BLOOM_SIZE:	Desired bloom size, used by KDBUS_CMD_BUS_MAKE
  * @KDBUS_ITEM_DST_NAME:	Destination's well-known name
  * @KDBUS_ITEM_PRIORITY:	Queue priority for message
  * @KDBUS_ITEM_MAKE_NAME:	Name of namespace, bus, endpoint
  * @KDBUS_ITEM_POLICY_NAME:	Policy in struct kdbus_policy
  * @KDBUS_ITEM_POLICY_ACCESS:	Policy in struct kdbus_policy
  * @KDBUS_ITEM_NAME:		Well-know name with flags
- * @KDBUS_ITEM_ACTIVATOR_NAME:	Well-known name for the activator
  * @KDBUS_ITEM_TIMESTAMP:	Timestamp
  * @KDBUS_ITEM_CREDS:		Process credential
  * @KDBUS_ITEM_PID_COMM:	Process ID "comm" identifier
@@ -234,6 +234,7 @@ enum kdbus_item_type {
 	KDBUS_ITEM_PAYLOAD_MEMFD,
 	KDBUS_ITEM_FDS,
 	KDBUS_ITEM_BLOOM,
+	KDBUS_ITEM_BLOOM_SIZE,
 	KDBUS_ITEM_DST_NAME,
 	KDBUS_ITEM_PRIORITY,
 	KDBUS_ITEM_MAKE_NAME,
@@ -244,7 +245,6 @@ enum kdbus_item_type {
 
 	_KDBUS_ITEM_ATTACH_BASE	= 0x600,
 	KDBUS_ITEM_NAME		= _KDBUS_ITEM_ATTACH_BASE,
-	KDBUS_ITEM_ACTIVATOR_NAME,
 	KDBUS_ITEM_TIMESTAMP,
 	KDBUS_ITEM_CREDS,
 	KDBUS_ITEM_PID_COMM,
@@ -376,7 +376,7 @@ struct kdbus_msg {
 		__u64 timeout_ns;
 	};
 	struct kdbus_item items[0];
-};
+} __attribute__((aligned(8)));
 
 /**
  * enum kdbus_policy_access_type - permissions of a policy record
@@ -415,19 +415,22 @@ enum kdbus_policy_type {
 struct kdbus_cmd_policy {
 	__u64 size;
 	struct kdbus_item policies[0];
-};
+} __attribute__((aligned(8)));
 
 /**
  * enum kdbus_hello_flags - flags for struct kdbus_cmd_hello
- * @KDBUS_HELLO_ACTIVATOR:		The connection registers a name for activation
- * 				by well-know name
  * @KDBUS_HELLO_ACCEPT_FD:	The connection allows the receiving of
  * 				any passed file descriptors
+ * @KDBUS_HELLO_ACTIVATOR:	Special-purpose connection which registers
+ * 				a well-know name for a process to be started
+ * 				when traffic arrives
+ * @KDBUS_HELLO_MONITOR:	Special-purpose connection to monitor
+ * 				bus traffic
  */
 enum kdbus_hello_flags {
-	KDBUS_HELLO_ACTIVATOR		=  1 <<  0,
-	KDBUS_HELLO_ACCEPT_FD		=  1 <<  1,
-
+	KDBUS_HELLO_ACCEPT_FD		=  1 <<  0,
+	KDBUS_HELLO_ACTIVATOR		=  1 <<  1,
+	KDBUS_HELLO_MONITOR		=  1 <<  2,
 #ifdef KDBUS_FOR_SBB
 	/*Flags for SBB*/
 	KDBUS_HELLO_IAMAGENT		=  1 << 30,
@@ -492,7 +495,7 @@ struct kdbus_cmd_hello {
 	__u64 pool_size;
 	__u8 id128[16];
 	struct kdbus_item items[0];
-};
+} __attribute__((aligned(8)));
 
 /* Flags for KDBUS_CMD_{BUS,EP,NS}_MAKE */
 enum kdbus_make_flags {
@@ -506,50 +509,19 @@ enum kdbus_make_flags {
 };
 
 /**
- * struct kdbus_cmd_bus_make - struct to make a bus
+ * struct kdbus_cmd_make - struct to make a bus, an endpoint or a namespace
  * @size:		The total size of the struct
- * @flags:		Properties for the bus to create
- * @bloom_size:		Size of the bloom filter for this bus
- * @items:		Items describing details such as the name of the bus
+ * @flags:		Properties for the bus/ep/ns to create
+ * @items:		Items describing details
  *
- * This structure is used with the KDBUS_CMD_BUS_MAKE ioctl.
+ * This structure is used with the KDBUS_CMD_BUS_MAKE, KDBUS_CMD_EP_MAKE and
+ * KDBUS_CMD_NS_MAKE ioctls.
  */
-struct kdbus_cmd_bus_make {
-	__u64 size;
-	__u64 flags;
-	__u64 bloom_size;
-	struct kdbus_item items[0];
-};
-
-/**
- * struct kdbus_cmd_ep_make - struct to make an endpoint
- * @size:		The total size of the struct
- * @flags:		Unused for now
- * @items:		Items describing details such as the
- * 			name of the endpoint
- *
- * This structure is used with the KDBUS_CMD_EP_MAKE ioctl.
- */
-struct kdbus_cmd_ep_make {
+struct kdbus_cmd_make {
 	__u64 size;
 	__u64 flags;
 	struct kdbus_item items[0];
-};
-
-/**
- * struct kdbus_cmd_ns_make - struct to make a namespace
- * @size:		The total size of the struct
- * @flags:		Unused for now
- * @items:		Items describing details such as the
- * 			name of the namespace
- *
- * This structure is used with the KDBUS_CMD_NS_MAKE ioctl.
- */
-struct kdbus_cmd_ns_make {
-	__u64 size;
-	__u64 flags;
-	struct kdbus_item items[0];
-};
+} __attribute__((aligned(8)));
 
 /**
  * enum kdbus_name_flags - properties of a well-known name
@@ -585,7 +557,7 @@ struct kdbus_cmd_name {
 	__u64 id;
 	__u64 conn_flags;
 	char name[0];
-};
+} __attribute__((aligned(8)));
 
 /**
  * enum kdbus_name_list_flags - what to include into the returned list
@@ -607,13 +579,13 @@ enum kdbus_name_list_flags {
  * @offset:		The returned offset in the caller's pool buffer.
  *			The user must use KDBUS_CMD_FREE to free the
  *			allocated memory.
- *
+ * 
  * This structure is used with the KDBUS_CMD_NAME_LIST ioctl.
  */
 struct kdbus_cmd_name_list {
 	__u64 flags;
 	__u64 offset;
-};
+} __attribute__((aligned(8)));
 
 /**
  * struct kdbus_name_list - information returned by KDBUS_CMD_NAME_LIST
@@ -651,7 +623,7 @@ struct kdbus_cmd_conn_info {
 	__u64 id;
 	__u64 offset;
 	char name[0];
-};
+} __attribute__((aligned(8)));
 
 /**
  * struct kdbus_conn_info - information returned by KDBUS_CMD_CONN_INFO
@@ -712,28 +684,7 @@ struct kdbus_cmd_match {
 	__u64 cookie;
 	__u64 src_id;
 	struct kdbus_item items[0];
-};
-
-/**
- * enum kdbus_monitor_flags - flags for monitoring
- * @KDBUS_MONITOR_ENABLE:	Enable monitoring
- */
-enum kdbus_monitor_flags {
-	KDBUS_MONITOR_ENABLE		= 1 <<  0,
-};
-
-/**
- * struct kdbus_cmd_monitor - struct to enable or disable eavesdropping
- * @id:			Privileged users may enable or disable the monitor feature
- * 			on behalf of other peers
- * @flags:		Use KDBUS_MONITOR_ENABLE to enable eavesdropping
- *
- * This structure is used with the KDBUS_CMD_MONITOR ioctl.
- */
-struct kdbus_cmd_monitor {
-	__u64 id;
-	__u64 flags;
-};
+} __attribute__((aligned(8)));
 
 /**
  * enum kdbus_ioctl_type - Ioctl API
@@ -757,6 +708,10 @@ struct kdbus_cmd_monitor {
  * 				placed in the receiver's pool.
  * @KDBUS_CMD_FREE:		Release the allocated memory in the receiver's
  * 				pool.
+ * @KDBUS_CMD_DROP:		Drop and free the next queued message and all
+ * 				its ressources without actually receiveing it.
+ * @KDBUS_CMD_SRC:		Return the sender's connection ID of the next
+ * 				queued message.
  * @KDBUS_CMD_NAME_ACQUIRE:	Request a well-known bus name to associate with
  * 				the connection. Well-known names are used to
  * 				address a peer on the bus.
@@ -772,9 +727,6 @@ struct kdbus_cmd_monitor {
  * @KDBUS_CMD_MATCH_ADD:	Install a match which broadcast messages should
  * 				be delivered to the connection.
  * @KDBUS_CMD_MATCH_REMOVE:	Remove a current match for broadcast messages.
- * @KDBUS_CMD_MONITOR:		Monitor the bus and receive all transmitted
- * 				messages. Privileges are required for this
- * 				operation.
  * @KDBUS_CMD_EP_POLICY_SET:	Set the policy of an endpoint. It is used to
  * 				restrict the access for endpoints created with
  * 				KDBUS_CMD_EP_MAKE.
@@ -806,15 +758,17 @@ struct kdbus_cmd_monitor {
  * 				be changed as long as the file is shared.
  */
 enum kdbus_ioctl_type {
-	KDBUS_CMD_BUS_MAKE =		_IOW (KDBUS_IOC_MAGIC, 0x00, struct kdbus_cmd_bus_make),
-	KDBUS_CMD_NS_MAKE =		_IOR (KDBUS_IOC_MAGIC, 0x10, struct kdbus_cmd_ns_make),
+	KDBUS_CMD_BUS_MAKE =		_IOW (KDBUS_IOC_MAGIC, 0x00, struct kdbus_cmd_make),
+	KDBUS_CMD_NS_MAKE =		_IOR (KDBUS_IOC_MAGIC, 0x10, struct kdbus_cmd_make),
+	KDBUS_CMD_EP_MAKE =		_IOW (KDBUS_IOC_MAGIC, 0x20, struct kdbus_cmd_make),
 
-	KDBUS_CMD_EP_MAKE =		_IOW (KDBUS_IOC_MAGIC, 0x20, struct kdbus_cmd_ep_make),
 	KDBUS_CMD_HELLO =		_IOWR(KDBUS_IOC_MAGIC, 0x30, struct kdbus_cmd_hello),
 
 	KDBUS_CMD_MSG_SEND =		_IOW (KDBUS_IOC_MAGIC, 0x40, struct kdbus_msg),
 	KDBUS_CMD_MSG_RECV =		_IOR (KDBUS_IOC_MAGIC, 0x41, __u64 *),
 	KDBUS_CMD_FREE =		_IOW (KDBUS_IOC_MAGIC, 0x42, __u64 *),
+	KDBUS_CMD_MSG_DROP =		_IO  (KDBUS_IOC_MAGIC, 0x43),
+	KDBUS_CMD_MSG_SRC =		_IOR (KDBUS_IOC_MAGIC, 0x44, __u64 *),
 
 	KDBUS_CMD_NAME_ACQUIRE =	_IOWR(KDBUS_IOC_MAGIC, 0x50, struct kdbus_cmd_name),
 	KDBUS_CMD_NAME_RELEASE =	_IOW (KDBUS_IOC_MAGIC, 0x51, struct kdbus_cmd_name),
@@ -825,7 +779,6 @@ enum kdbus_ioctl_type {
 
 	KDBUS_CMD_MATCH_ADD =		_IOW (KDBUS_IOC_MAGIC, 0x70, struct kdbus_cmd_match),
 	KDBUS_CMD_MATCH_REMOVE =	_IOW (KDBUS_IOC_MAGIC, 0x71, struct kdbus_cmd_match),
-	KDBUS_CMD_MONITOR =		_IOW (KDBUS_IOC_MAGIC, 0x72, struct kdbus_cmd_monitor),
 
 	KDBUS_CMD_EP_POLICY_SET =	_IOW (KDBUS_IOC_MAGIC, 0x80, struct kdbus_cmd_policy),
 
@@ -888,7 +841,8 @@ enum kdbus_ioctl_type {
  * @ENOTUNIQ:		A specific data type was addressed to a broadcast
  * 			address, but only direct addresses support this kind of
  * 			data.
- * @ENXIO:		A unique address does not exist.
+ * @ENXIO:		A unique address does not exist, or an offset in the
+ * 			receiver's pool does not represent a queued message.
  * @EPERM:		The policy prevented an operation. The requested
  * 			resource is owned by another entity.
  * @ESHUTDOWN:		A namespace or endpoint is currently shutting down;
