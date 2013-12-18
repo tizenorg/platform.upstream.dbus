@@ -127,7 +127,7 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
   /*parsing rule and calculating size of command*/
   size = sizeof(struct kdbus_cmd_match);
   if(parse_match_key(rule, "interface='", &pInterface))       /*actual size is not important for interface because bloom size is defined by bus*/
-    size += KDBUS_PART_HEADER_SIZE + bloom_size;
+    size += KDBUS_ITEM_HEADER_SIZE + bloom_size;
   name_size = parse_match_key(rule, "sender='", &pName);
   if(name_size)
   {
@@ -138,7 +138,7 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
       pName = NULL;
     }
     else
-      size += KDBUS_PART_SIZE(name_size + 1);  //well known name
+      size += KDBUS_ITEM_SIZE(name_size + 1);  //well known name
   }
 
   pCmd_match = alloca(size);
@@ -154,14 +154,14 @@ dbus_bool_t add_match_kdbus (DBusTransport* transport, __u64 id, const char *rul
   if(pName)
   {
     pItem->type = KDBUS_MATCH_SRC_NAME;
-    pItem->size = KDBUS_PART_HEADER_SIZE + name_size + 1;
+    pItem->size = KDBUS_ITEM_HEADER_SIZE + name_size + 1;
     memcpy(pItem->str, pName, strlen(pName) + 1);
     pItem = KDBUS_PART_NEXT(pItem);
   }
   if(pInterface)
   {
     pItem->type = KDBUS_MATCH_BLOOM;
-    pItem->size = KDBUS_PART_HEADER_SIZE + bloom_size;
+    pItem->size = KDBUS_ITEM_HEADER_SIZE + bloom_size;
     strncpy(pItem->data, pInterface, bloom_size);
   }
 
@@ -280,7 +280,7 @@ int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo*
 
       if(item->type == KDBUS_ITEM_SECLABEL)
         {
-          pInfo->sec_label_len = item->size - KDBUS_PART_HEADER_SIZE - 1;
+          pInfo->sec_label_len = item->size - KDBUS_ITEM_HEADER_SIZE - 1;
           if(pInfo->sec_label_len != 0)
             {
               pInfo->sec_label = malloc(pInfo->sec_label_len);
@@ -336,7 +336,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
       return NULL;
     }
 
-  bus_make_size = sizeof(struct kdbus_cmd_make) + KDBUS_PART_SIZE(name_size) + KDBUS_PART_SIZE(sizeof(__u64));
+  bus_make_size = sizeof(struct kdbus_cmd_make) + KDBUS_ITEM_SIZE(name_size) + KDBUS_ITEM_SIZE(sizeof(__u64));
   bus_make = alloca(bus_make_size);
   if (!bus_make)
     {
@@ -352,7 +352,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
   item = bus_make->items;
 
   item->type = KDBUS_ITEM_MAKE_NAME;
-  item->size = KDBUS_PART_HEADER_SIZE + name_size;
+  item->size = KDBUS_ITEM_HEADER_SIZE + name_size;
   if(type == DBUS_BUS_SYSTEM)
     sprintf(name, "%u-kdbus-%s", getuid(), "system");
   else if(type == DBUS_BUS_SESSION)
@@ -363,7 +363,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
 
   item = KDBUS_PART_NEXT(item);
   item->type = KDBUS_ITEM_BLOOM_SIZE;
-  item->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+  item->size = KDBUS_ITEM_HEADER_SIZE + sizeof(__u64);
   item->data64[0] = 64;
 
   addr_value = strchr(address, ':') + 1;
@@ -432,7 +432,7 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
     }
 
   size = sizeof(struct kdbus_cmd_match);
-  size += KDBUS_PART_SIZE(1)*3 + KDBUS_PART_SIZE(sizeof(__u64))*2;  /*3 name related items plus 2 id related items*/
+  size += KDBUS_ITEM_SIZE(1)*3 + KDBUS_ITEM_SIZE(sizeof(__u64))*2;  /*3 name related items plus 2 id related items*/
 
   pCmd_match = alloca(size);
   if(pCmd_match == NULL)
@@ -448,20 +448,20 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
 
   pItem = pCmd_match->items;
   pItem->type = KDBUS_MATCH_NAME_CHANGE;
-  pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+  pItem->size = KDBUS_ITEM_HEADER_SIZE + 1;
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_NAME_ADD;
-  pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+  pItem->size = KDBUS_ITEM_HEADER_SIZE + 1;
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_NAME_REMOVE;
-  pItem->size = KDBUS_PART_HEADER_SIZE + 1;
+  pItem->size = KDBUS_ITEM_HEADER_SIZE + 1;
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_ID_ADD;
-  pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+  pItem->size = KDBUS_ITEM_HEADER_SIZE + sizeof(__u64);
   pItem->id = KDBUS_MATCH_SRC_ID_ANY;
   pItem = KDBUS_PART_NEXT(pItem);
   pItem->type = KDBUS_MATCH_ID_REMOVE;
-  pItem->size = KDBUS_PART_HEADER_SIZE + sizeof(__u64);
+  pItem->size = KDBUS_ITEM_HEADER_SIZE + sizeof(__u64);
   pItem->id = KDBUS_MATCH_SRC_ID_ANY;
 
   if(ioctl(fd, KDBUS_CMD_MATCH_ADD, pCmd_match))

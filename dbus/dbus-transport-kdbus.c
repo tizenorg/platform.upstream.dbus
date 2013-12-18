@@ -85,7 +85,7 @@ if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &string))   \
 
 #define MSG_ITEM_BUILD_VEC(data, datasize)                                    \
 	item->type = KDBUS_ITEM_PAYLOAD_VEC;					\
-        item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_vec);		\
+        item->size = KDBUS_ITEM_HEADER_SIZE + sizeof(struct kdbus_vec);		\
         item->vec.address = (unsigned long) data;       			\
         item->vec.size = datasize;
 
@@ -285,26 +285,26 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
     msg_size = sizeof(struct kdbus_msg);
 
     if(use_memfd == TRUE)  // bulk data - memfd
-        msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_memfd));
+        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_memfd));
     else
       {
-        msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_vec));  //header is a must
+        msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));  //header is a must
         while(body_size > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
           {
-            msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_vec));
+            msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
             body_size -= KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
           }
         if(body_size)
-          msg_size += KDBUS_PART_SIZE(sizeof(struct kdbus_vec));
+          msg_size += KDBUS_ITEM_SIZE(sizeof(struct kdbus_vec));
       }
 
     if(fds_count)
-    	msg_size += KDBUS_PART_SIZE(sizeof(int)*fds_count);
+    	msg_size += KDBUS_ITEM_SIZE(sizeof(int)*fds_count);
 
     if (name)
-    	msg_size += KDBUS_PART_SIZE(strlen(name) + 1);
+    	msg_size += KDBUS_ITEM_SIZE(strlen(name) + 1);
     else if (dst_id == KDBUS_DST_ID_BROADCAST)
-    	msg_size += KDBUS_PART_HEADER_SIZE + transport->bloom_size;
+    	msg_size += KDBUS_ITEM_HEADER_SIZE + transport->bloom_size;
 
     msg = malloc(msg_size);
     if (!msg)
@@ -419,7 +419,7 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
       }
 
       item->type = KDBUS_ITEM_PAYLOAD_MEMFD;
-      item->size = KDBUS_PART_HEADER_SIZE + sizeof(struct kdbus_memfd);
+      item->size = KDBUS_ITEM_HEADER_SIZE + sizeof(struct kdbus_memfd);
       item->memfd.size = ret_size;
       item->memfd.fd = transport->memfd;
     }
@@ -454,7 +454,7 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     {
       item = KDBUS_PART_NEXT(item);
       item->type = KDBUS_ITEM_FDS;
-      item->size = KDBUS_PART_HEADER_SIZE + (sizeof(int) * fds_count);
+      item->size = KDBUS_ITEM_HEADER_SIZE + (sizeof(int) * fds_count);
       memcpy(item->fds, unix_fds, sizeof(int) * fds_count);
     }
 
@@ -462,14 +462,14 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
     {
       item = KDBUS_PART_NEXT(item);
       item->type = KDBUS_ITEM_DST_NAME;
-      item->size = KDBUS_PART_HEADER_SIZE + strlen(destination) + 1;
-      memcpy(item->str, destination, item->size - KDBUS_PART_HEADER_SIZE);
+      item->size = KDBUS_ITEM_HEADER_SIZE + strlen(destination) + 1;
+      memcpy(item->str, destination, item->size - KDBUS_ITEM_HEADER_SIZE);
     }
   else if (dst_id == KDBUS_DST_ID_BROADCAST)
     {
       item = KDBUS_PART_NEXT(item);
       item->type = KDBUS_ITEM_BLOOM;
-      item->size = KDBUS_PART_HEADER_SIZE + transport->bloom_size;
+      item->size = KDBUS_ITEM_HEADER_SIZE + transport->bloom_size;
       strncpy(item->data, dbus_message_get_interface(message), transport->bloom_size);
     }
 
@@ -703,7 +703,7 @@ static int kdbus_message_size(const struct kdbus_msg* msg)
 
 	KDBUS_PART_FOREACH(item, msg, items)
 	{
-		if (item->size <= KDBUS_PART_HEADER_SIZE)
+		if (item->size <= KDBUS_ITEM_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
 			return -1;
@@ -762,7 +762,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 	KDBUS_PART_FOREACH(item, msg, items)
 	{
-		if (item->size <= KDBUS_PART_HEADER_SIZE)
+		if (item->size <= KDBUS_ITEM_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
 			break;  //??? continue (because dbus will find error) or break
@@ -813,7 +813,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 			{
 				int i;
 
-				*n_fds = (item->size - KDBUS_PART_HEADER_SIZE) / sizeof(int);
+				*n_fds = (item->size - KDBUS_ITEM_HEADER_SIZE) / sizeof(int);
 				memcpy(fds, item->fds, *n_fds * sizeof(int));
 	            for (i = 0; i < *n_fds; i++)
 	              _dbus_fd_set_close_on_exec(fds[i]);
@@ -841,7 +841,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 			case KDBUS_ITEM_CMDLINE:
 			case KDBUS_ITEM_NAME: {
-				__u64 size = item->size - KDBUS_PART_HEADER_SIZE;
+				__u64 size = item->size - KDBUS_ITEM_HEADER_SIZE;
 				const char *str = item->str;
 				int count = 0;
 
@@ -871,10 +871,10 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 				_dbus_verbose("  +%s (%llu bytes) len=%llu bytes)\n",
 					   enum_MSG(item->type), item->size,
-					   (unsigned long long)item->size - KDBUS_PART_HEADER_SIZE);
+					   (unsigned long long)item->size - KDBUS_ITEM_HEADER_SIZE);
 
 				cap = item->data32;
-				n = (item->size - KDBUS_PART_HEADER_SIZE) / 4 / sizeof(uint32_t);
+				n = (item->size - KDBUS_ITEM_HEADER_SIZE) / 4 / sizeof(uint32_t);
 
 				_dbus_verbose("    CapInh=");
 				for (i = 0; i < n; i++)
