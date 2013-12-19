@@ -444,7 +444,7 @@ static dbus_bool_t add_matches_for_kdbus_broadcasts(DBusConnection* connection)
   pCmd_match->id = 0;
   pCmd_match->cookie = 1;
   pCmd_match->size = size;
-  pCmd_match->src_id = KDBUS_MATCH_SRC_ID_ANY;
+  pCmd_match->src_id = 0;
 
   pItem = pCmd_match->items;
   pItem->type = KDBUS_MATCH_NAME_CHANGE;
