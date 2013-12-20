@@ -647,6 +647,18 @@ main (int argc, char **argv)
 #endif
 #endif /* DBUS_UNIX */
 
+#ifdef ENABLE_KDBUS_TRANSPORT
+  if (bus_context_get_systemd_activation(context) == TRUE)
+    {
+      if (strncmp(bus_context_get_address(context), "kdbus:", strlen("kdbus:")) == 0 &&
+                  !strcmp(bus_context_get_type(context), "system") &&
+                  getuid() == 0)
+        {
+          kill (1, SIGUSR1);
+        }
+    }
+#endif
+
   _dbus_verbose ("We are on D-Bus...\n");
   _dbus_loop_run (bus_context_get_loop (context));
 
