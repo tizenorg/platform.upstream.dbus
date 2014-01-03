@@ -744,7 +744,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 	DBusMessageIter args;
 	const char* emptyString = "";
 	const char* pString = NULL;
-	char dbus_name[(unsigned int)(snprintf((char*)pString, 0, ":1.%llu0", ULLONG_MAX))];
+	char dbus_name[128];
 	const char* pDBusName = dbus_name;
 #if KDBUS_MSG_DECODE_DEBUG == 1
 	char buf[32];
