@@ -703,7 +703,7 @@ static int kdbus_message_size(const struct kdbus_msg* msg)
 
 	KDBUS_PART_FOREACH(item, msg, items)
 	{
-		if (item->size <= KDBUS_ITEM_HEADER_SIZE)
+		if (item->size < KDBUS_ITEM_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
 			return -1;
@@ -743,7 +743,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 	DBusMessage *message = NULL;
 	DBusMessageIter args;
 	const char* emptyString = "";
-    const char* pString = NULL;
+	const char* pString = NULL;
 	char dbus_name[(unsigned int)(snprintf((char*)pString, 0, ":1.%llu0", ULLONG_MAX))];
 	const char* pDBusName = dbus_name;
 #if KDBUS_MSG_DECODE_DEBUG == 1
@@ -762,7 +762,7 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 
 	KDBUS_PART_FOREACH(item, msg, items)
 	{
-		if (item->size <= KDBUS_ITEM_HEADER_SIZE)
+		if (item->size < KDBUS_ITEM_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
 			break;  //??? continue (because dbus will find error) or break
