@@ -67,7 +67,7 @@ init_dbus()
 			//printf("serwer.c Name registered as %s\n",DBUS_NAME);
 			break;
 		default:
-			printf("serwer.c Error - could not request name\n");
+			printf("serwer.c Error - could not request name, %d\n", flag);
 			return -1;
 	}
 
