@@ -270,6 +270,47 @@ setup_server (BusContext *context,
   return TRUE;
 }
 
+#ifdef ENABLE_KDBUS_TRANSPORT
+static int
+init_server_for_kdbus (BusContext  *context,
+                       const char  *address,
+                       DBusError   *error)
+{
+  DBusBusType type;
+  DBusServer* server;
+  char* bus_address;
+
+  if (!strcmp (context->type, "system"))
+    type = DBUS_BUS_SYSTEM;
+  else if (!strcmp (context->type, "session"))
+    type = DBUS_BUS_SESSION;
+  else
+    type = DBUS_BUS_STARTER;
+
+  bus_address = make_kdbus_bus (type, address, error);
+  if (bus_address == NULL)
+    return -1;
+
+  server = empty_server_init (bus_address);
+  if (server == NULL)
+    {
+      free (bus_address);
+      return -1;
+	}
+  if (!_dbus_list_append (&context->servers, server))
+    {
+      free (bus_address);
+      return -2;
+    }
+
+  context->myKdbusConnection = daemon_as_client (type, bus_address, error);
+  if (context->myKdbusConnection == NULL)
+    return -1;
+
+  return 0;
+}
+#endif
+
 /* This code only gets executed the first time the
  * config files are parsed.  It is not executed
  * when config files are reloaded.
@@ -434,39 +475,16 @@ process_config_first_time_only (BusContext       *context,
     {
 #ifdef ENABLE_KDBUS_TRANSPORT
       if(!strncmp(_dbus_string_get_const_data(address), "kdbus:", strlen("kdbus:")))
-      {
-    	  DBusBusType type;
-    	  DBusServer* server;
-    	  char* bus_address;
+        {
+          int ret;
 
-    	  if(!strcmp (context->type, "system"))
-    		  type = DBUS_BUS_SYSTEM;
-    	  else if(!strcmp (context->type, "session"))
-    		  type = DBUS_BUS_SESSION;
-    	  else
-    		  type = DBUS_BUS_STARTER;
+          ret = init_server_for_kdbus (context, _dbus_string_get_const_data (address), error);
 
-    	  bus_address = make_kdbus_bus(type, _dbus_string_get_const_data(address), error);
-    	  if(bus_address == NULL)
-    	  	  goto failed;
-
-    	  server = empty_server_init(bus_address);
-    	  if(server == NULL)
-    	  {
-    		  free(bus_address);
-    		  goto failed;
-    	  }
-
-    	  if (!_dbus_list_append (&context->servers, server))
-    	  {
-    		  free(bus_address);
-    		  goto oom;
-    	  }
-
-    	  context->myKdbusConnection = daemon_as_client(type, bus_address, error);
-    	  if(context->myKdbusConnection == NULL)
-    		  goto failed;
-      }
+          if (ret == -1)
+            goto failed;
+          else if (ret == -2)
+            goto oom;
+        }
       else
 #endif
         {
@@ -493,27 +511,43 @@ process_config_first_time_only (BusContext       *context,
       addresses = bus_config_parser_get_addresses (parser);
 
       link = _dbus_list_get_first_link (addresses);
-      while (link != NULL)
+#ifdef ENABLE_KDBUS_TRANSPORT
+	  if (!strcmp (link->data, "kdbus:"))
         {
-          DBusServer *server;
+          int ret;
 
-          server = dbus_server_listen (link->data, error);
-          if (server == NULL)
-            {
-              _DBUS_ASSERT_ERROR_IS_SET (error);
-              goto failed;
-            }
-          else if (!setup_server (context, server, auth_mechanisms, error))
-            {
-              _DBUS_ASSERT_ERROR_IS_SET (error);
-              goto failed;
-            }
+          ret = init_server_for_kdbus (context, link->data, error);
 
-          if (!_dbus_list_append (&context->servers, server))
+          if (ret == -1)
+            goto failed;
+          else if (ret == -2)
             goto oom;
-
-          link = _dbus_list_get_next_link (addresses, link);
         }
+      else
+#endif
+        {
+          while (link != NULL)
+            {
+              DBusServer *server;
+
+              server = dbus_server_listen (link->data, error);
+              if (server == NULL)
+                {
+                  _DBUS_ASSERT_ERROR_IS_SET (error);
+                  goto failed;
+                }
+              else if (!setup_server (context, server, auth_mechanisms, error))
+                {
+                  _DBUS_ASSERT_ERROR_IS_SET (error);
+                  goto failed;
+                }
+
+              if (!_dbus_list_append (&context->servers, server))
+                goto oom;
+
+              link = _dbus_list_get_next_link (addresses, link);
+            }
+       }
     }
 
   context->fork = bus_config_parser_get_fork (parser);

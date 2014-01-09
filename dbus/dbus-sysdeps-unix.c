@@ -3513,11 +3513,6 @@ _dbus_get_autolaunch_address (const char *scope,
   ++i;
   argv[i] = "--close-stderr";
   ++i;
-  if(strcmp(scope, "kdbus") == 0)
-  {
-	  argv[i] = "--kdbus";
-	  ++i;
-  }
   argv[i] = NULL;
   ++i;
 
