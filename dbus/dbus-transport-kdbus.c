@@ -765,7 +765,8 @@ static int kdbus_decode_msg(const struct kdbus_msg* msg, char *data, DBusTranspo
 		if (item->size < KDBUS_ITEM_HEADER_SIZE)
 		{
 			_dbus_verbose("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
-			break;  //??? continue (because dbus will find error) or break
+			ret_size = -1;
+			break;
 		}
 
 		switch (item->type)
