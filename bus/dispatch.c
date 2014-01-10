@@ -223,12 +223,8 @@ bus_dispatch (DBusConnection *connection,
 #endif /* DBUS_ENABLE_VERBOSE_MODE */
 
   /* Create our transaction */
-  transaction = bus_transaction_new (context);
-  if (transaction == NULL)
-    {
-      BUS_SET_OOM (&error);
-      goto out;
-    }
+  while ((transaction = bus_transaction_new (context)) == NULL)
+            _dbus_wait_for_memory ();
 
   /* If service_name is NULL, if it's a signal we send it to all
    * connections with a match rule. If it's not a signal, there
