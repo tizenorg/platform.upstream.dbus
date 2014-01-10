@@ -337,7 +337,7 @@ static struct kdbus_msg* kdbus_init_msg(const char* name, __u64 dst_id, uint64_t
  */
 static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, const char* destination)
 {
-  struct kdbus_msg *msg;
+  struct kdbus_msg *msg = NULL;
   struct kdbus_item *item;
   uint64_t dst_id = KDBUS_DST_ID_BROADCAST;
   const DBusString *header;
@@ -356,7 +356,14 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
       dst_id = KDBUS_DST_ID_NAME;
       if((destination[0] == ':') && (destination[1] == '1') && (destination[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
         {
+          errno = 0;
           dst_id = strtoull(&destination[3], NULL, 10);
+          if(errno)
+          {
+            _dbus_verbose("error: unique name is not a number: %s (%m)\n", destination);
+            ret_size = -1;
+            goto out;
+          }
           destination = NULL;
         }
     }
@@ -498,7 +505,8 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
       ret_size = -1;
     }
   out:
-  free(msg);
+  if(msg)
+    free(msg);
   if(use_memfd)
     close(transport->memfd);
 
