@@ -376,14 +376,22 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
   // check whether we can and should use memfd
   if((dst_id != KDBUS_DST_ID_BROADCAST) && (ret_size > MEMFD_SIZE_THRESHOLD))
     {
-      use_memfd = TRUE;
-      kdbus_init_memfd(transport);
+      if(kdbus_init_memfd(transport) == 0)
+        {
+          use_memfd = TRUE;
+        }
     }
 
   _dbus_message_get_unix_fds(message, &unix_fds, &fds_count);
 
   // init basic message fields
   msg = kdbus_init_msg(destination, dst_id, body_size, use_memfd, fds_count, transport);
+  if(msg == NULL)
+    {
+      _dbus_verbose("Can't alloc memory for new message\n");
+      ret_size = -1;
+      goto out;
+    }
   msg->cookie = dbus_message_get_serial(message);
   autostart = dbus_message_get_auto_start (message);
   if(!autostart)
@@ -392,13 +400,14 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
   // build message contents
   item = msg->items;
 
-  if(use_memfd)
+  if(use_memfd == TRUE)
     {
       char *buf;
 
       if(ioctl(transport->memfd, KDBUS_CMD_MEMFD_SEAL_SET, 0) < 0)
         {
           _dbus_verbose("memfd sealing failed: \n");
+          ret_size = -1;
           goto out;
         }
 
@@ -406,6 +415,7 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
       if (buf == MAP_FAILED)
         {
           _dbus_verbose("mmap() fd=%i failed:%m", transport->memfd);
+          ret_size = -1;
           goto out;
         }
 
@@ -488,18 +498,28 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
       else if(errno == ENXIO) //no such id on the bus
         {
           if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
-            goto out;
+            {
+              ret_size = -1;
+              goto out;
+            }
+
         }
       else if((errno == ESRCH) || (errno = EADDRNOTAVAIL))  //when well known name is not available on the bus
         {
           if(autostart)
             {
               if(!reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
-                goto out;
+                {
+                  ret_size = -1;
+                  goto out;
+                }
             }
           else
             if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
-              goto out;
+              {
+                ret_size = -1;
+                goto out;
+              }
         }
       _dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
       ret_size = -1;
