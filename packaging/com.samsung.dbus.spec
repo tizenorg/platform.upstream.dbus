@@ -8,6 +8,10 @@ Source0:    	%{name}-%{version}.tar.gz
 Source2:	dbus-user.socket
 Source3:	dbus-user.service
 Source4:	system.conf
+Source5:	switch-to-dbus.sh
+Source6:	switch-to-kdbus.sh
+Source7:	conf_dbus.tar.gz
+Source8:	conf_kdbus.tar.gz
 BuildRequires:  which
 BuildRequires:  expat-devel
 BuildRequires:  libtool
@@ -43,6 +47,7 @@ Headers and static libraries for D-Bus.
 %build
 ./autogen.sh --enable-abstract-sockets --enable-x11-autolaunch --with-x \
     --enable-kdbus-transport \
+    --enable-kdbus-for-sbb \
     --disable-static \
     --exec-prefix=/ \
     --bindir=%{_bindir} \
@@ -90,6 +95,12 @@ mkdir -p %{buildroot}%{_libdir}/systemd/user
 install -m0644 %{SOURCE2} %{buildroot}%{_libdir}/systemd/user/dbus.socket
 install -m0644 %{SOURCE3} %{buildroot}%{_libdir}/systemd/user/dbus.service
 
+install -m0755 %{SOURCE5} %{buildroot}%{_bindir}/switch-to-dbus.sh
+install -m0755 %{SOURCE6} %{buildroot}%{_bindir}/switch-to-kdbus.sh
+
+tar -xvzf %{SOURCE7} -C %{buildroot}/etc/dbus-1
+tar -xvzf %{SOURCE8} -C %{buildroot}/etc/dbus-1
+
 %post
 mkdir -p /opt/var/lib/dbus
 
@@ -117,6 +128,10 @@ mkdir -p /opt/var/lib/dbus
 %{_libdir}/systemd/user/*
 %dir %{_datadir}/dbus-1
 %{_datadir}/dbus-1/interfaces
+%{_bindir}/switch-to-dbus.sh
+%{_bindir}/switch-to-kdbus.sh
+%{_sysconfdir}/dbus-1/conf_dbus
+%{_sysconfdir}/dbus-1/conf_kdbus
 
 %files libs
 %{_libdir}/libdbus-1.so.3*

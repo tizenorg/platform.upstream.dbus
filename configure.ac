@@ -157,6 +157,7 @@ AC_ARG_ENABLE(userdb-cache, AS_HELP_STRING([--enable-userdb-cache],[build with u
 AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
 AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
 AC_ARG_ENABLE(kdbus-transport, AS_HELP_STRING([--enable-kdbus-transport],[build with kdbus transport support]),enable_kdbus_transport=$enableval,enable_kdbus_transport=no)
+AC_ARG_ENABLE(kdbus-for-sbb, AS_HELP_STRING([--enable-kdbus-for-sbb],[build with kdbus sbb support]),enable_kdbus_for_sbb=$enableval,enable_kdbus_for_sbb=no)
 
 AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
 AC_ARG_WITH(session-socket-dir, AS_HELP_STRING([--with-session-socket-dir=[dirname]],[Where to put sockets for the per-login-session message bus]))
@@ -1284,6 +1285,18 @@ fi
 
 AM_CONDITIONAL([ENABLE_KDBUS_TRANSPORT], [test x$enable_kdbus_transport = xyes])
 
+### sbb support
+if test x$enable_kdbus_for_sbb = xyes; then
+    KDBUS_LIBS=
+    #"-lcrypto"
+    #AC_SUBST([KDBUS_LIBS])
+    AC_DEFINE(KDBUS_FOR_SBB,1,[Enable SBB support])
+else
+    KDBUS_LIBS=
+fi
+
+AM_CONDITIONAL([ENABLE_KDBUS_FOR_SBB], [test x$enable_kdbus_for_sbb = xyes])
+
 #### Set up final flags
 LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs $KDBUS_LIBS"
 AC_SUBST([LIBDBUS_LIBS])
@@ -1877,7 +1890,8 @@ echo "
         Building XML docs:        ${enable_xml_docs}
         Building cache support:   ${enable_userdb_cache}
         Building launchd support: ${have_launchd}
-	Building kdbus support:   ${enable_kdbus_transport}
+        Building kdbus support:   ${enable_kdbus_transport}
+        Building kdbus for sbb:   ${enable_kdbus_for_sbb}
         Init scripts style:       ${with_init_scripts}
         Abstract socket names:    ${ac_cv_have_abstract_sockets}
         System bus socket:        ${DBUS_SYSTEM_SOCKET}
@@ -1888,8 +1902,8 @@ echo "
         Console auth dir:         ${DBUS_CONSOLE_AUTH_DIR}
         Console owner file:       ${have_console_owner_file}
         Console owner file path:  ${DBUS_CONSOLE_OWNER_FILE}
-	System bus user:          ${DBUS_USER}
-	Session bus services dir: ${EXPANDED_DATADIR}/dbus-1/services
+        System bus user:          ${DBUS_USER}
+        Session bus services dir: ${EXPANDED_DATADIR}/dbus-1/services
         'make check' socket dir:  ${TEST_SOCKET_DIR}
 "
 if test x$have_launchd = xyes; then
