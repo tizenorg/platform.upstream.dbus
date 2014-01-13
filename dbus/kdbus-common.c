@@ -231,3 +231,156 @@ int release_kdbus_name(int fd, const char *name, __u64 id)
 
   return DBUS_RELEASE_NAME_REPLY_RELEASED;
 }
+
+/**
+ * Performs kdbus query of id of the given name
+ *
+ * @param name name to query for
+ * @param transport transport
+ * @param pInfo nameInfo structure address to store info about the name
+ * @return 0 on success, -errno if failed
+ */
+int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo* pInfo)
+{
+  struct kdbus_cmd_conn_info *cmd;
+  int ret;
+  int fd;
+  uint64_t size;
+  __u64 id = 0;
+
+  memset(pInfo, 0, sizeof(struct nameInfo));
+
+  if(!_dbus_transport_get_socket_fd(transport, &fd))
+    return -EPERM;
+
+  size = sizeof(struct kdbus_cmd_conn_info);
+  if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
+     id = strtoull(&name[3], NULL, 10);
+  if(id == 0)
+    size += strlen(name) + 1;
+
+  cmd = alloca(size);
+  if (!cmd)
+  {
+    _dbus_verbose("Error allocating memory for: %s,%s\n", _dbus_strerror (errno), _dbus_error_from_errno (errno));
+    return -errno;
+  }
+
+  memset(cmd, 0, sizeof(struct kdbus_cmd_conn_info));
+  cmd->size = size;
+  cmd->id = id;
+  if(id == 0)
+    memcpy(cmd->name, name, strlen(name) + 1);
+
+  again:
+  ret = ioctl(fd, KDBUS_CMD_CONN_INFO, cmd);
+  if (ret < 0)
+  {
+    if(errno == EINTR)
+      goto again;
+    pInfo->uniqueId = 0;
+    return -errno;
+  }
+  else
+  {
+    struct kdbus_conn_info *info;
+    struct kdbus_item *item;
+
+    info = (struct kdbus_conn_info *)((char*)dbus_transport_get_pool_pointer(transport) + cmd->offset);
+    pInfo->uniqueId = info->id;
+
+    item = info->items;
+    while((uint8_t *)(item) < (uint8_t *)(info) + info->size)
+    {
+      if(item->type == KDBUS_ITEM_CREDS)
+        {
+          pInfo->userId = item->creds.uid;
+          pInfo->processId = item->creds.pid;
+        }
+
+      if(item->type == KDBUS_ITEM_SECLABEL)
+        {
+          pInfo->sec_label_len = item->size - KDBUS_ITEM_HEADER_SIZE - 1;
+          if(pInfo->sec_label_len != 0)
+            {
+              pInfo->sec_label = malloc(pInfo->sec_label_len);
+              if(pInfo->sec_label == NULL)
+                ret = -1;
+              else
+                memcpy(pInfo->sec_label, item->data, pInfo->sec_label_len);
+            }
+        }
+
+      item = KDBUS_PART_NEXT(item);
+    }
+
+    again2:
+    if (ioctl(fd, KDBUS_CMD_FREE, &cmd->offset) < 0)
+    {
+      if(errno == EINTR)
+        goto again2;
+      _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
+      return -errno;
+    }
+  }
+
+  return ret;
+}
+
+/*
+ *  Asks kdbus for uid of the owner of the name given in the message
+ */
+dbus_bool_t kdbus_connection_get_unix_user(DBusConnection* connection, const char* name, unsigned long* uid, DBusError* error)
+{
+  struct nameInfo info;
+  int inter_ret;
+  dbus_bool_t ret = FALSE;
+
+  inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
+  if(inter_ret == 0) //name found
+  {
+    _dbus_verbose("User id:%llu\n", (unsigned long long) info.userId);
+    *uid = info.userId;
+    return TRUE;
+  }
+  else if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
+    {
+      _dbus_verbose ("Name %s has no owner.\n", name);
+      dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get UID of name '%s': no such name", name);
+    }
+
+  else
+  {
+    _dbus_verbose("kdbus error determining UID: err %d (%m)\n", errno);
+    dbus_set_error (error, DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name);
+  }
+
+  return ret;
+}
+
+/*
+ *  Asks kdbus for pid of the owner of the name given in the message
+ */
+dbus_bool_t kdbus_connection_get_unix_process_id(DBusConnection* connection, const char* name, unsigned long* pid, DBusError* error)
+{
+	struct nameInfo info;
+	int inter_ret;
+	dbus_bool_t ret = FALSE;
+
+	inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
+	if(inter_ret == 0) //name found
+	{
+		_dbus_verbose("Process id:%llu\n", (unsigned long long) info.processId);
+		*pid = info.processId;
+		return TRUE;
+	}
+	else if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
+		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get PID of name '%s': no such name", name);
+	else
+	{
+		_dbus_verbose("kdbus error determining PID: err %d (%m)\n", errno);
+		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not determine PID for '%s'", name);
+	}
+
+	return ret;
+}

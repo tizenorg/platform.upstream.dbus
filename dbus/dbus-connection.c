@@ -47,6 +47,7 @@
 #include "dbus-marshal-basic.h"
 #ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-transport-kdbus.h"
+#include "kdbus-common.h"
 #include <stdlib.h>
 #endif
 
@@ -5254,15 +5255,9 @@ dbus_connection_get_socket(DBusConnection              *connection,
  * @param uid return location for the user ID
  * @returns #TRUE if uid is filled in with a valid user ID
  */
-#ifdef ENABLE_KDBUS_TRANSPORT
-dbus_bool_t
-dbus_connection_get_unix_user_dbus (DBusConnection *connection,
-                               unsigned long  *uid)
-#else
 dbus_bool_t
 dbus_connection_get_unix_user (DBusConnection *connection,
                                unsigned long  *uid)
-#endif
 {
   dbus_bool_t result;
 
@@ -5271,16 +5266,26 @@ dbus_connection_get_unix_user (DBusConnection *connection,
 
   CONNECTION_LOCK (connection);
 
-  if (!_dbus_transport_try_to_authenticate (connection->transport))
-    result = FALSE;
+#ifdef ENABLE_KDBUS_TRANSPORT
+  if (_dbus_connection_get_address (connection) != NULL)
+    {
+      if (!strncmp (_dbus_connection_get_address (connection), "kdbus:", strlen("kdbus:")))
+        result = kdbus_connection_get_unix_user (connection, dbus_bus_get_unique_name (connection), uid, NULL);
+    }
   else
-    result = _dbus_transport_get_unix_user (connection->transport,
-                                            uid);
+#endif
+    {
+      if (!_dbus_transport_try_to_authenticate (connection->transport))
+        result = FALSE;
+      else
+        result = _dbus_transport_get_unix_user (connection->transport,
+                                                uid);
+    }
 
 #ifdef DBUS_WIN
   _dbus_assert (!result);
 #endif
-  
+
   CONNECTION_UNLOCK (connection);
 
   return result;
@@ -5296,15 +5301,9 @@ dbus_connection_get_unix_user (DBusConnection *connection,
  * @param pid return location for the process ID
  * @returns #TRUE if uid is filled in with a valid process ID
  */
-#ifdef ENABLE_KDBUS_TRANSPORT
-dbus_bool_t
-dbus_connection_get_unix_process_id_dbus (DBusConnection *connection,
-             unsigned long  *pid)
-#else
 dbus_bool_t
 dbus_connection_get_unix_process_id (DBusConnection *connection,
 				     unsigned long  *pid)
-#endif
 {
   dbus_bool_t result;
 
@@ -5313,11 +5312,21 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
 
   CONNECTION_LOCK (connection);
 
-  if (!_dbus_transport_try_to_authenticate (connection->transport))
-    result = FALSE;
+#ifdef ENABLE_KDBUS_TRANSPORT
+  if (_dbus_connection_get_address (connection) != NULL)
+    {
+      if (!strncmp (_dbus_connection_get_address (connection), "kdbus:", strlen("kdbus:")))
+        result = kdbus_connection_get_unix_process_id (connection, dbus_bus_get_unique_name (connection), pid, NULL);
+    }
   else
-    result = _dbus_transport_get_unix_process_id (connection->transport,
-						  pid);
+#endif
+    {
+      if (!_dbus_transport_try_to_authenticate (connection->transport))
+        result = FALSE;
+      else
+        result = _dbus_transport_get_unix_process_id (connection->transport,
+                                                      pid);
+    }
 
   CONNECTION_UNLOCK (connection);
 

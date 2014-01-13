@@ -1483,32 +1483,32 @@ bus_driver_handle_get_connection_unix_user (DBusConnection *connection,
     goto oom;
 
 #ifdef ENABLE_KDBUS_TRANSPORT
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
-  {
-	  const char* name;
+  if (bus_context_is_kdbus (bus_transaction_get_context (transaction)))
+    {
+      const char* name;
 
-	  if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
-		  goto failed;
-	  if(!kdbus_get_unix_user(connection, name, &uid, error))
-		  goto failed;
-  }
+      if (!dbus_message_get_args (message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
+        goto failed;
+      if (!kdbus_connection_get_unix_user (connection, name, &uid, error))
+        goto failed;
+    }
   else
 #endif
-  {
-	  conn = bus_driver_get_conn_helper (connection, message, "UID", &service,
-                                     error);
+    {
+      conn = bus_driver_get_conn_helper (connection, message, "UID", &service,
+                                         error);
 
-	  if (conn == NULL)
-		  goto failed;
+      if (conn == NULL)
+        goto failed;
 
-	  if (!dbus_connection_get_unix_user (conn, &uid))
-		{
-		  dbus_set_error (error,
-						  DBUS_ERROR_FAILED,
-						  "Could not determine UID for '%s'", service);
-		  goto failed;
-		}
-  }
+      if (!dbus_connection_get_unix_user (conn, &uid))
+        {
+          dbus_set_error (error,
+                          DBUS_ERROR_FAILED,
+                          "Could not determine UID for '%s'", service);
+          goto failed;
+        }
+    }
 
   uid32 = uid;
   if (! dbus_message_append_args (reply,
@@ -1551,31 +1551,31 @@ bus_driver_handle_get_connection_unix_process_id (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 #ifdef ENABLE_KDBUS_TRANSPORT
-  if(bus_context_is_kdbus(bus_transaction_get_context (transaction)))
+  if (bus_context_is_kdbus (bus_transaction_get_context (transaction)))
     {
       const char* name;
 
-      if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
+      if (!dbus_message_get_args (message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
         goto failed;
-      if(!kdbus_get_connection_unix_process_id(connection, name, &pid, error))
+      if (!kdbus_connection_get_unix_process_id (connection, name, &pid, error))
         goto failed;
     }
-    else
+  else
 #endif
-  {
-    conn = bus_driver_get_conn_helper (connection, message, "PID", &service,
-                       error);
-    if (conn == NULL)
-      goto failed;
-
-    if (!dbus_connection_get_unix_process_id (conn, &pid))
     {
-      dbus_set_error (error,
-                DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,
-                "Could not determine PID for '%s'", service);
-      goto failed;
+      conn = bus_driver_get_conn_helper (connection, message, "PID", &service,
+                                         error);
+      if (conn == NULL)
+        goto failed;
+
+      if (!dbus_connection_get_unix_process_id (conn, &pid))
+        {
+          dbus_set_error (error,
+                          DBUS_ERROR_UNIX_PROCESS_ID_UNKNOWN,
+                          "Could not determine PID for '%s'", service);
+          goto failed;
+        }
     }
-  }
 
   pid32 = pid;
   if (! dbus_message_append_args (reply,
@@ -1767,27 +1767,27 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
 #ifdef ENABLE_KDBUS_TRANSPORT
   }
   else
-  {
-	  const char* name;
+    {
+      const char* name;
 
-	  if(!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
-		  goto failed;
-	  if(kdbus_get_connection_unix_process_id(connection, name, &ulong_val, error))
-	  {
-		  if (!_dbus_asv_add_uint32 (&array_iter, "ProcessID", ulong_val))
-			goto oom;
-	  }
-	  else
-		  goto failed;
+      if (!dbus_message_get_args (message, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID))
+        goto failed;
+      if (kdbus_connection_get_unix_process_id (connection, name, &ulong_val, error))
+        {
+          if (!_dbus_asv_add_uint32 (&array_iter, "ProcessID", ulong_val))
+            goto oom;
+        }
+      else
+        goto failed;
 
-	  if(kdbus_get_unix_user(connection, name, &ulong_val, error))
-	  {
-		  if (!_dbus_asv_add_uint32 (&array_iter, "UnixUserID", ulong_val))
-			goto oom;
-	  }
-	  else
-		  goto failed;
-  }
+      if (kdbus_connection_get_unix_user (connection, name, &ulong_val, error))
+        {
+          if (!_dbus_asv_add_uint32 (&array_iter, "UnixUserID", ulong_val))
+            goto oom;
+        }
+      else
+        goto failed;
+   }
 #endif
 
   if (!_dbus_asv_close (&reply_iter, &array_iter))
