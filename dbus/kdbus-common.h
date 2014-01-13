@@ -41,7 +41,19 @@
 //todo restore if DBus policy will be applied in kdbus somehow
 //#define POLICY_TO_KDBUS
 
-dbus_bool_t register_kdbus_policy(const char* name, DBusTransport *transport, unsigned long int uid);
+struct nameInfo
+{
+  __u64 uniqueId;
+  __u64 userId;
+  __u64 processId;
+  __u32 sec_label_len;
+  char *sec_label;
+};
+int kdbus_NameQuery(const char *name, DBusTransport *transport, struct nameInfo *pInfo);
+dbus_bool_t kdbus_connection_get_unix_user(DBusConnection *connection, const char *name, unsigned long *uid, DBusError *error);
+dbus_bool_t kdbus_connection_get_unix_process_id(DBusConnection *connection, const char *name, unsigned long *uid, DBusError *error);
+
+dbus_bool_t register_kdbus_policy(const char *name, DBusTransport *transport, unsigned long int uid);
 int request_kdbus_name(int fd, const char *name, const __u64 flags, __u64 id);
 int release_kdbus_name(int fd, const char *name, __u64 id);
 

@@ -723,7 +723,7 @@ bus_registry_acquire_kdbus_service (BusRegistry      *registry,
       goto failed;
     }
 
-  if (!kdbus_get_unix_user(phantom, conn_unique_name, &uid, NULL))
+  if (!kdbus_connection_get_unix_user(phantom, conn_unique_name, &uid, NULL))
     goto failed;
 
 #ifdef POLICY_TO_KDBUS

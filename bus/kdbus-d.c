@@ -23,14 +23,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
-
 #include <dbus/dbus-connection-internal.h>
 #include "kdbus-d.h"
-#define KDBUS_FOR_SBB
 #include <dbus/kdbus.h>
 #include <dbus/dbus-bus.h>
 #include "dispatch.h"
-#include <dbus/kdbus-common.h>
 #include <dbus/dbus-transport.h>
 #include <dbus/dbus-transport-kdbus.h>
 #include "connection.h"
@@ -212,101 +209,6 @@ dbus_bool_t remove_match_kdbus (DBusTransport* transport, __u64 id)
   }
 }
 
-/**
- * Performs kdbus query of id of the given name
- *
- * @param name name to query for
- * @param transport transport
- * @param pInfo nameInfo structure address to store info about the name
- * @return 0 on success, -errno if failed
- */
-int kdbus_NameQuery(const char* name, DBusTransport* transport, struct nameInfo* pInfo)
-{
-  struct kdbus_cmd_conn_info *cmd;
-  int ret;
-  int fd;
-  uint64_t size;
-  __u64 id = 0;
-
-  memset(pInfo, 0, sizeof(struct nameInfo));
-
-  if(!_dbus_transport_get_socket_fd(transport, &fd))
-    return -EPERM;
-
-  size = sizeof(struct kdbus_cmd_conn_info);
-  if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))  /* if name starts with ":1." it is a unique name and should be send as number */
-     id = strtoull(&name[3], NULL, 10);
-  if(id == 0)
-    size += strlen(name) + 1;
-
-  cmd = alloca(size);
-  if (!cmd)
-  {
-    _dbus_verbose("Error allocating memory for: %s,%s\n", _dbus_strerror (errno), _dbus_error_from_errno (errno));
-    return -errno;
-  }
-
-  memset(cmd, 0, sizeof(struct kdbus_cmd_conn_info));
-  cmd->size = size;
-  cmd->id = id;
-  if(id == 0)
-    memcpy(cmd->name, name, strlen(name) + 1);
-
-  again:
-  ret = ioctl(fd, KDBUS_CMD_CONN_INFO, cmd);
-  if (ret < 0)
-  {
-    if(errno == EINTR)
-      goto again;
-    pInfo->uniqueId = 0;
-    return -errno;
-  }
-  else
-  {
-    struct kdbus_conn_info *info;
-    struct kdbus_item *item;
-
-    info = (struct kdbus_conn_info *)((char*)dbus_transport_get_pool_pointer(transport) + cmd->offset);
-    pInfo->uniqueId = info->id;
-
-    item = info->items;
-    while((uint8_t *)(item) < (uint8_t *)(info) + info->size)
-    {
-      if(item->type == KDBUS_ITEM_CREDS)
-        {
-          pInfo->userId = item->creds.uid;
-          pInfo->processId = item->creds.pid;
-        }
-
-      if(item->type == KDBUS_ITEM_SECLABEL)
-        {
-          pInfo->sec_label_len = item->size - KDBUS_ITEM_HEADER_SIZE - 1;
-          if(pInfo->sec_label_len != 0)
-            {
-              pInfo->sec_label = malloc(pInfo->sec_label_len);
-              if(pInfo->sec_label == NULL)
-                ret = -1;
-              else
-                memcpy(pInfo->sec_label, item->data, pInfo->sec_label_len);
-            }
-        }
-
-      item = KDBUS_PART_NEXT(item);
-    }
-
-    again2:
-    if (ioctl(fd, KDBUS_CMD_FREE, &cmd->offset) < 0)
-    {
-      if(errno == EINTR)
-        goto again2;
-      _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
-      return -errno;
-    }
-  }
-
-  return ret;
-}
-
 /*
  * Creates kdbus bus of given type.
  */
@@ -366,6 +268,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
   item->size = KDBUS_ITEM_HEADER_SIZE + sizeof(__u64);
   item->data64[0] = 64;
 
+#ifdef KDBUS_FOR_SBB
   addr_value = strchr(address, ':') + 1;
   if(*addr_value)
     {
@@ -377,6 +280,7 @@ char* make_kdbus_bus(DBusBusType type, const char* address, DBusError *error)
           return NULL;
         }
     }
+#endif
 
   _dbus_verbose("Opening /dev/kdbus/control\n");
   fdc = open("/dev/kdbus/control", O_RDWR|O_CLOEXEC);
@@ -768,7 +672,7 @@ dbus_bool_t kdbus_add_match_rule (DBusConnection* connection, DBusMessage* messa
 
 	if(!add_match_kdbus (dbus_connection_get_transport(connection), sender_id, text))
 	{
-	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:%d, %s",
+	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not add match for id:%llu, %s",
 	                      sender_id, _dbus_strerror_from_errno ());
 	      return FALSE;
 	}
@@ -789,7 +693,7 @@ dbus_bool_t kdbus_remove_match (DBusConnection* connection, DBusMessage* message
 
 	if(!remove_match_kdbus (dbus_connection_get_transport(connection), sender_id))
 	{
-	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not remove match rules for id:%d", sender_id);
+	      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not remove match rules for id:%llu", sender_id);
 	      return FALSE;
 	}
 
@@ -811,64 +715,6 @@ int kdbus_get_name_owner(DBusConnection* connection, const char* name, char* own
     _dbus_verbose("kdbus error sending name query: err %d (%m)\n", ret);
 
   return ret;
-}
-
-/*
- *  Asks kdbus for uid of the owner of the name given in the message
- */
-dbus_bool_t kdbus_get_unix_user(DBusConnection* connection, const char* name, unsigned long* uid, DBusError* error)
-{
-  struct nameInfo info;
-  int inter_ret;
-  dbus_bool_t ret = FALSE;
-
-  inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
-  if(inter_ret == 0) //name found
-  {
-    _dbus_verbose("User id:%llu\n", (unsigned long long) info.userId);
-    *uid = info.userId;
-    return TRUE;
-  }
-  else if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
-    {
-      _dbus_verbose ("Name %s has no owner.\n", name);
-      dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get UID of name '%s': no such name", name);
-    }
-
-  else
-  {
-    _dbus_verbose("kdbus error determining UID: err %d (%m)\n", errno);
-    dbus_set_error (error, DBUS_ERROR_FAILED, "Could not determine UID for '%s'", name);
-  }
-
-  return ret;
-}
-
-/*
- *  Asks kdbus for pid of the owner of the name given in the message
- */
-dbus_bool_t kdbus_get_connection_unix_process_id(DBusConnection* connection, const char* name, unsigned long* pid, DBusError* error)
-{
-	struct nameInfo info;
-	int inter_ret;
-	dbus_bool_t ret = FALSE;
-
-	inter_ret = kdbus_NameQuery(name, dbus_connection_get_transport(connection), &info);
-	if(inter_ret == 0) //name found
-	{
-		_dbus_verbose("Process id:%llu\n", (unsigned long long) info.processId);
-		*pid = info.processId;
-		return TRUE;
-	}
-	else if((inter_ret == -ENOENT) || (inter_ret == -ENXIO)) //name has no owner
-		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not get PID of name '%s': no such name", name);
-	else
-	{
-		_dbus_verbose("kdbus error determining PID: err %d (%m)\n", errno);
-		dbus_set_error (error, DBUS_ERROR_FAILED, "Could not determine PID for '%s'", name);
-	}
-
-	return ret;
 }
 
 /*
@@ -903,57 +749,6 @@ dbus_bool_t kdbus_get_connection_unix_selinux_security_context(DBusConnection* c
 	return ret;
 }
 
-/**
- * Gets the UNIX user ID of the connection from kdbus, if known. Returns #TRUE if
- * the uid is filled in.  Always returns #FALSE on non-UNIX platforms
- * for now., though in theory someone could hook Windows to NIS or
- * something.  Always returns #FALSE prior to authenticating the
- * connection.
- *
- * The UID of is only read by bus daemon from kdbus. You can not
- * call this function from client side of the connection.
- *
- * You can ask the bus to tell you the UID of another connection though
- * if you like; this is done with dbus_bus_get_unix_user().
- *
- * @param connection the connection
- * @param uid return location for the user ID
- * @returns #TRUE if uid is filled in with a valid user ID
- */
-dbus_bool_t
-dbus_connection_get_unix_user (DBusConnection *connection,
-                               unsigned long  *uid)
-{
-  _dbus_return_val_if_fail (connection != NULL, FALSE);
-  _dbus_return_val_if_fail (uid != NULL, FALSE);
-
-  if(bus_context_is_kdbus(bus_connection_get_context (connection)))
-    return kdbus_get_unix_user(connection, bus_connection_get_name(connection), uid, NULL);
-
-  return dbus_connection_get_unix_user_dbus(connection, uid);
-}
-
-/**
- * Gets the process ID of the connection if any.
- * Returns #TRUE if the pid is filled in.
- *
- * @param connection the connection
- * @param pid return location for the process ID
- * @returns #TRUE if uid is filled in with a valid process ID
- */
-dbus_bool_t
-dbus_connection_get_unix_process_id (DBusConnection *connection,
-             unsigned long  *pid)
-{
-  _dbus_return_val_if_fail (connection != NULL, FALSE);
-  _dbus_return_val_if_fail (pid != NULL, FALSE);
-
-  if(bus_context_is_kdbus(bus_connection_get_context (connection)))
-    return kdbus_get_connection_unix_process_id(connection, bus_connection_get_name(connection), pid, NULL);
-
-  return dbus_connection_get_unix_process_id_dbus(connection, pid);
-}
-
 /*
  * Create connection structure for given name. It is needed to control starters - activatable services
  * and for ListQueued method (as long as kdbus is not supporting it). This connections don't have it's own
@@ -976,6 +771,7 @@ DBusConnection* create_phantom_connection(DBusConnection* connection, const char
         dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be acquired", name);
         goto out;
     }
+    dbus_bus_set_unique_name(phantom_connection, name);
     if(!bus_connection_complete(phantom_connection, &Sname, error))
     {
         bus_connection_disconnected(phantom_connection);
