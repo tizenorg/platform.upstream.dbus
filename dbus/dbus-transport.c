@@ -112,7 +112,7 @@ _dbus_transport_init_base (DBusTransport             *transport,
   DBusMessageLoader *loader;
   DBusAuth *auth;
   DBusCounter *counter;
-  char *address_copy;
+  char *address_copy = NULL;
   DBusCredentials *creds;
   
   loader = _dbus_message_loader_new ();
@@ -140,6 +140,10 @@ _dbus_transport_init_base (DBusTransport             *transport,
   if (auth == NULL)
     {
       _dbus_message_loader_unref (loader);
+      
+      if (address_copy != NULL)
+        dbus_free(address_copy);
+      
       return FALSE;
     }
 
@@ -148,6 +152,10 @@ _dbus_transport_init_base (DBusTransport             *transport,
     {
       _dbus_auth_unref (auth);
       _dbus_message_loader_unref (loader);
+      
+      if (address_copy != NULL)
+        dbus_free(address_copy);
+      
       return FALSE;
     }  
 
@@ -157,6 +165,10 @@ _dbus_transport_init_base (DBusTransport             *transport,
       _dbus_counter_unref (counter);
       _dbus_auth_unref (auth);
       _dbus_message_loader_unref (loader);
+      
+      if (address_copy != NULL)
+        dbus_free(address_copy);
+      
       return FALSE;
     }
   
