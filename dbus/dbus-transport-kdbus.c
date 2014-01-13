@@ -497,32 +497,26 @@ static int kdbus_write_msg(DBusTransportKdbus *transport, DBusMessage *message, 
         goto again;
       else if(errno == ENXIO) //no such id on the bus
         {
+          ret_size = 0;
           if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
-            {
-              ret_size = -1;
               goto out;
-            }
 
         }
       else if((errno == ESRCH) || (errno = EADDRNOTAVAIL))  //when well known name is not available on the bus
         {
+          ret_size = 0;
           if(autostart)
             {
               if(!reply_with_error(DBUS_ERROR_SERVICE_UNKNOWN, "The name %s was not provided by any .service files", dbus_message_get_destination(message), message, transport->base.connection))
-                {
-                  ret_size = -1;
                   goto out;
-                }
             }
           else
             if(!reply_with_error(DBUS_ERROR_NAME_HAS_NO_OWNER, "Name \"%s\" does not exist", dbus_message_get_destination(message), message, transport->base.connection))
-              {
-                ret_size = -1;
                 goto out;
-              }
         }
+      else
+        ret_size = -1;
       _dbus_verbose("kdbus error sending message: err %d (%m)\n", errno);
-      ret_size = -1;
     }
   out:
   if(msg)
@@ -1399,6 +1393,12 @@ do_writing (DBusTransport *transport)
               do_io_error (transport);
               goto out;
             }
+        }
+      else if (bytes_written == 0)
+        {
+           _dbus_verbose ("Destination is not available\n");
+           _dbus_connection_message_sent_unlocked (transport->connection,
+                   message);
         }
       else
         {
