@@ -846,7 +846,7 @@ AC_CHECK_FUNCS(pipe2 accept4)
 
 #### Abstract sockets
 
-if test x$enable_abstract_sockets = xauto; then
+if test x$enable_abstract_sockets != xno; then
 AC_LANG_PUSH(C)
 warn_on_xcompile=no
 AC_CACHE_CHECK([abstract socket namespace],
