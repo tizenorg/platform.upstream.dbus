@@ -1,7 +1,7 @@
-Name:		com.samsung.dbus
+Name:		dbus
 Summary:	D-Bus message bus with kdbus support
-Version:	1.7.5
-Release:	0
+Version:	1.7.5+tv+kdbus
+Release:	1
 Group:		System/Libraries
 License:	GPLv2+ or AFL
 Source0:    	%{name}-%{version}.tar.gz
