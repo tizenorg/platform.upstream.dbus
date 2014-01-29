@@ -1,3 +1,5 @@
+%bcond_with x
+
 Name:           dbus-x11
 %define _name   dbus
 BuildRequires:  pkgconfig(x11)
@@ -36,6 +38,10 @@ BuildRequires:  libcap-ng-devel
 BuildRequires:  pkgconfig(libsmack)
 # COMMON1-END
 # COMMON1-END
+
+%if !%{with x}
+ExclusiveArch:
+%endif
 
 %description
 D-Bus contains some tools that require Xlib to be installed, those are
