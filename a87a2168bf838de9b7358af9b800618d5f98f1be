@@ -1,0 +1,9 @@
+Code-Review+2: Patrick McCarty <patrick.mccarty@linux.intel.com>
+Code-Review+2: ronan(Eurogiciel) Le Martret <ronan.lemartret@open.eurogiciel.org>
+Verified+1: ronan(Eurogiciel) Le Martret <ronan.lemartret@open.eurogiciel.org>
+Code-Review+1: Maciej Wereski <m.wereski@partner.samsung.com>
+Submitted-by: ronan(Eurogiciel) Le Martret <ronan.lemartret@open.eurogiciel.org>
+Submitted-at: Wed, 12 Feb 2014 00:07:02 -0800
+Reviewed-on: https://review.tizen.org/gerrit/15877
+Project: platform/upstream/dbus
+Branch: refs/heads/tizen
