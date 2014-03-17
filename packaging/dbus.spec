@@ -115,6 +115,8 @@ rm -rf %{buildroot}/%{_includedir}/*
 rm -rf %{buildroot}/%{_libdir}/*.la
 rm -rf %{buildroot}/%{_libdir}/libdbus-1.so
 rm -rf %{buildroot}/%{_libdir}/libdbus-1.so.*
+rm -rf %{buildroot}/%{_libdir}/libdbuspolicy-1.so
+rm -rf %{buildroot}/%{_libdir}/libdbuspolicy-1.so.*
 rm -rf %{buildroot}/%{_libdir}/dbus-1.0/include
 rm -rf %{buildroot}/%{_libdir}/pkgconfig/dbus-1.pc
 rm -rf %{buildroot}/%{_mandir}/man1/dbus-launch.1*
