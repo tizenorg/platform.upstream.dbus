@@ -138,6 +138,12 @@ dbus_bool_t     bus_transaction_add_cancel_hook  (BusTransaction               *
                                                   void                         *data,
                                                   DBusFreeFunction              free_data_function);
 
+/* for libdbuspolicy purposes */
+dbus_bool_t     bus_get_unix_groups              (unsigned long                 uid,
+                                                  unsigned long               **groups,
+                                                  int                          *n_groups,
+                                                  DBusError                    *error);
+
 /* called by stats.c, only present if DBUS_ENABLE_STATS */
 int bus_connections_get_n_active                  (BusConnections *connections);
 int bus_connections_get_n_incomplete              (BusConnections *connections);

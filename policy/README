@@ -1,0 +1,556 @@
+
+README - Table of Contents:
+  1 - About lidbuspolicy,
+  2 - libdbuspolicy API description,
+  3 - libdbuspolicy - testing/debuging,
+  4 - libdbuspolicy_test - source code
+         * libdbuspolicy_test.c,
+         * libdbuspolicy_test.spec,
+  5 - libdbuspolicy - TODO list,
+
+
+***********************
+*                     *
+* About libdbuspolicy *
+*                     *
+***********************
+
+
+libdbuspolicy is a helper library for fine-grained userspace policy handling
+(with SMACK support) which allows (k)dbus binding libraries (like glib and
+libdbus) to access legacy dbus policy database (as stored in configuration
+files under /etc/dbus-1/).
+
+More info about standard dbus policy you can find here:
+http://dbus.freedesktop.org/doc/dbus-daemon.1.html
+
+
+***********************
+*                     *
+* libdbuspolicy - API *
+*                     *
+***********************
+
+
++----------------+
+| Initialization |
++----------------+
+
+DESCRIPTION:
+
+dbus_policy_init() reads XML configuration files and loads policies. This
+function should be called only once at the beginning of application starts
+(in case of kdbus -> before ioctl KDBUS_CMD_HELLO).
+
+Function parameters:
+  1) bus type:
+       - SYSTEM_BUS - for system bus (read /etc/dbus-1/system.conf and
+                                           /etc/dbus-1/system.d/),
+       - SESSION_BUS - for session bus (read /etc/dbus-1/session.conf and
+                                             /etc/dbus-1/session.d/),
+
+Function returns void pointer to policy rules.
+
+CODE:
+
+  void *my_policy;
+  my_policy = dbus_policy_init (SYSTEM_BUS);
+
+
++------------------+
+| Owning bus names |
++------------------+
+
+DESCRIPTION:
+
+dbus_policy_check_can_own() reads "own" and "own_prefix" rules and checks
+whether our application can own specified name. In case of kdbus, this function
+should be called before KDBUS_CMD_NAME_ACQUIRE ioctl.
+
+Function parameters:
+  1) void pointer to policy rules
+  2) service name -> name to own
+
+Function returns:
+  0 - application can't own specified bus names
+  1 - application can own specified bus names
+
+CODE:
+
+  if (dbus_policy_check_can_own (my_policy, name_to_own))
+    puts ("OK");
+  else
+    puts ("ERROR");
+
+
++------------------+
+| Sending messages |
++------------------+
+
+DESCRIPTION:
+
+dbus_policy_check_can_send() reads all "send_*" attributes
+and checks whether our application can send specified messages.
+This function should be called before KDBUS_CMD_MSG_SEND ioctl.
+
+Function parameters:
+  1) void pointer to policy rules
+
+  2) message type,
+       * 1 - MESSAGE_METHOD_CALL,
+       * 2 - MESSAGE_METHOD_RETURN,
+       * 3 - MESSAGE_SIGNAL,
+       * 4 - MESSAGE_ERROR,
+
+  3) message destination,
+  4) message path,
+  5) message interface,
+  6) message member,
+  7) message error name,
+
+  8) message reply serial,
+       * set 0 if this message isn't a reply
+
+  9) message reqested reply,
+       * NO_REQUESTED_REPLY - if this message is a reply
+       * REQUESTED_REPLY - if this message isn't a reply
+
+Function returns:
+  0 - application can't send this message
+  1 - application can send this message
+
+CODE:
+
+  if (dbus_policy_check_can_send (my_policy,
+                                  1,                /* method call */
+                                  msg_destination,  /* destination */
+                                  msg_path,         /* path */
+                                  msg_interface,    /* interface */
+                                  msg_member,       /* member */
+                                  msg_error_name,   /* error name */
+                                  msg_reply_serial, /* reply serial */
+                                  msg_req_reply))   /* requested reply */
+    puts ("OK");
+  else
+    puts ("ERROR");
+
+
++--------------------+
+| Receiving messages |
++--------------------+
+
+DESCRIPTION:
+
+dbus_policy_check_can_recv() reads all "receive_*" attributes and checks
+whether our application can receive specified messages. In case of kdbus
+this function should be called after KDBUS_CMD_MSG_RECV ioctl.
+
+Function parameters:
+  1) void pointer to policy rules
+
+  2) message type,
+       * 1 - MESSAGE_METHOD_CALL,
+       * 2 - MESSAGE_METHOD_RETURN,
+       * 3 - MESSAGE_SIGNAL,
+       * 4 - MESSAGE_ERROR,
+
+  3) message destination,
+  4) message path,
+  5) message interface,
+  6) message member,
+  7) message error name,
+
+  8) message reply serial,
+       * set 0 if this message isn't a reply
+
+  9) message reqested reply,
+       * NO_REQUESTED_REPLY - if this message is a reply
+       * REQUESTED_REPLY - if this message isn't a reply
+
+Function returns:
+  0 - application should drop this message
+  1 - application can process this message
+
+CODE:
+
+  if (dbus_policy_check_can_recv (my_policy,
+                                  1,                /* method call */
+                                  msg_destination,  /* sender(!) */
+                                  msg_path,         /* path */
+                                  msg_interface,    /* interface */
+                                  msg_member,       /* member */
+                                  msg_error_name,   /* error name */
+                                  msg_reply_serial, /* reply serial */
+                                  msg_req_reply))   /* requested reply */
+    puts ("OK");
+  else
+    puts ("ERROR");
+
+
++---------------------------------+
+| Printing optimized policy rules |
++---------------------------------+
+
+DESCRIPTION:
+
+Function parameters:
+  1) void pointer to policy rules
+
+Function prints optimized policy rules on STDOUT.
+
+CODE:
+
+  dbus_policy_print_rules (my_policy);
+
+
++----------------+
+| Freeing memory |
++----------------+
+
+DESCRIPTION:
+
+This function should be called before application quits.
+
+Function parameters:
+  1) void pointer to policy rules
+
+CODE:
+
+  dbus_policy_free (my_policy);
+
+
+*****************************************
+*                                       *
+* libdbuspolicy_test - testing/debuging *
+*                                       *
+*****************************************
+
+
+1) Download and build libdbuspolicy library:
+
+  * git clone ssh://user@review.tizen.org:29418/platform/upstream/dbus.git \
+    -b sandbox/lskalski/libdbuspolicy
+
+  * gbs build -A armv7l (or gbs build -A armv7l --spec libdbuspolicy.spec)
+
+2) Install libdbuspolicy on target with enabled SMACK:
+
+  * rpm -Uhv libdbuspolicy-1.6.12-0.armv7l.rpm
+
+3) Build and install libdbuspolicy_test on target (required files are below):
+
+  * gbs build -A armv7l
+
+  * rpm -Uhv libdbuspolicy_test-1-1.0.armv7l.rpm
+
+4) How to use libdbuspolicy_test?
+
+libdbuspolicy_test <own> <dst> <pth> <ifc> <mem> <err> <rep> <dbg>
+
+own - valid D-Bus name to own or '-' as a NULL,
+dst - valid D-Bus destination or '-' as a NULL for broadcast messages,
+pth - valid D-Bus object path or '-' as a NULL,
+ifc - valid D-Bus interface name or '-' as a NULL,
+mem - valid D-Bus method name or '-' as a NULL,
+err - valid D-Bus error name or '-' as a NULL,
+rep - 'yes' if this message should be treated as a reply, otherwise set to '-',
+dbg - 'debug' or 'print_rules' to see additional info, otherwise set to '-',
+
+Example:
+
+libdbuspolicy_test org.test.name org.test.destination / org.test.interface \
+                   member - - debug
+
+Output:
+
+SERVICE NAME     = org.test.name
+MSG_DESTINATION  = org.test.destination
+MSG_PATH         = /
+MSG_INTERFACE    = org.test.interface
+MSG_MEMBER       = member
+MSG_ERRORNAME    = (null)
+IS REPLY?        = -
+
+OK	-> yes, I can own 'org.test.name' name,
+ERROR   -> no, I can't send this message to destination,
+OK      -> yes, I can receive this message,
+
+
+5) Let’s check out some examples taken from "real system":
+
+  * cat /etc/dbus-1/system.d/org.freedesktop.systemd1.conf
+
+<busconfig>
+   <policy user="root">
+           <allow own="org.freedesktop.systemd1"/>
+
+           <!-- Root clients can do everything -->
+           <allow send_destination="org.freedesktop.systemd1"/>
+           <allow receive_sender="org.freedesktop.systemd1"/>
+
+           <!-- systemd may receive activator requests -->
+           <allow receive_interface="org.freedesktop.systemd1.Activator"
+                  receive_member="ActivationRequest"/>
+   </policy>
+
+   <policy context="default">
+          <deny send_destination="org.freedesktop.systemd1"/>
+
+          <allow send_destination="org.freedesktop.systemd1"
+                 send_interface="org.freedesktop.DBus.Properties"
+                 send_member="GetAll"/>
+          <allow receive_sender="org.freedesktop.systemd1"/>
+   </policy>
+</busconfig>
+
+  * As a 'root':
+
+    libdbuspolicy_test org.freedesktop.systemd1 org.freedesktop.systemd1 /  \
+                       org.freedesktop.DBus.Properties GetAll - - debug
+
+    Result:
+
+    SERVICE NAME     = org.freedesktop.systemd1
+    MSG_DESTINATION  = org.freedesktop.systemd1
+    MSG_PATH         = /
+    MSG_INTERFACE    = org.freedesktop.DBus.Properties
+    MSG_MEMBER       = GetAll
+    MSG_ERRORNAME    = (null)
+    IS REPLY?        = -
+
+    OK	-> yes, as a root we can own 'org.freedesktop.systemd1' name,
+    OK  -> root clients can do everything,
+    OK  -> root clients can do everything,
+
+  * As a 'normal' user:
+
+    Result:
+
+    SERVICE NAME     = org.freedesktop.systemd1
+    MSG_DESTINATION  = org.freedesktop.systemd1
+    MSG_PATH         = /
+    MSG_INTERFACE    = org.freedesktop.DBus.Properties
+    MSG_MEMBER       = GetAll
+    MSG_ERRORNAME    = (null)
+    IS REPLY?        = -
+
+    ERROR -> no, only root can own 'org.freedesktop.systemd1' name,
+    OK    -> normal user can call 'GetAll' method,
+    OK    -> normal user can receive messages from 'org.freedesktop.systemd1',
+
+  * We can also test libdbuspolicy with SMACK labels. To test SMACK add
+    following entry to org.freedesktop.systemd1.conf:
+
+   <policy smack="System">
+           <allow own="org.freedesktop.systemd1"/>
+   </policy>
+
+   Now our application (without root privileges, but with "System" label) can
+   own "org.freedesktop.systemd1" name.
+
+6) In case of an problems with libdbuspolicy you can add DBUS_VERBOSE=1
+   parameter to your app:
+
+   DBUS_VERBOSE=1 libdbuspolicy_test org.freedesktop.systemd2 \
+   org.freedesktop.systemd1 / org.freedesktop.DBus.Properties GetAll - - debug
+
+   In output log you can also find info about SMACK label and access:
+
+     [...]
+     4860:[SMACK] Subject label: System
+     4860:permission request subject (System) -> object (System) : GRANTED
+     [...]
+
+7) Or you can also print list of parsed and optimized policy rules (set
+   'print_rules' instead of 'debug' as a last argument:
+
+   libdbuspolicy_test org.freedesktop.systemd2 org.freedesktop.systemd1 / \
+   org.freedesktop.DBus.Properties GetAll - - print_rules
+
+   OUTPUT:
+
+   [...]
+   send rule (deny): dest(org.tizen.manager) path((null)) interface((null))
+   own rule (deny): service(org.tizen.lbs)
+   own rule (deny): service(org.tizen.lbs.Manager)
+   own rule (deny): service(org.tizen.lbs.Providers.GpsManager)
+   own rule (deny): service(org.tizen.lbs.Providers.Xps)
+   send rule (deny): dest(org.tizen.lbs) path((null)) member((null))
+   [...]
+
+
+************************************
+*                                  *
+* libdbuspolicy_test - source code *
+*                                  *
+************************************
+
+
++----------------------+
+| libdbuspolicy_test.c |
++----------------------+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <dbus/dbus-policy.h>
+
+int main (int argc, char **argv)
+{
+  const char *name_to_own = NULL;
+  const char *msg_destination = NULL;
+  const char *msg_path = NULL;
+  const char *msg_interface = NULL;
+  const char *msg_member = NULL;
+  const char *msg_error_name = NULL;
+  const char *debug = NULL;
+  int msg_reply_serial;
+  int msg_req_reply;
+
+  name_to_own = argv[1];
+  msg_destination = argv[2];
+  msg_path = argv[3];
+  msg_interface = argv[4];
+  msg_member = argv[5];
+  msg_error_name = argv[6];
+  debug = argv[8];
+
+  if(strcmp(argv[2], "-") == 0)
+    msg_destination = NULL;
+
+  if(strcmp(argv[3], "-") == 0)
+    msg_path = NULL;
+
+  if(strcmp(argv[4], "-") == 0)
+    msg_interface = NULL;
+
+  if(strcmp(argv[5], "-") == 0)
+    msg_member = NULL;
+
+  if(strcmp(argv[6], "-") == 0)
+    msg_error_name = NULL;
+
+  if(strcmp(argv[7], "yes") == 0)
+    {
+      msg_reply_serial = 1;
+      msg_req_reply = REQUESTED_REPLY;
+    }
+  else
+    {
+      msg_reply_serial = 0;
+      msg_req_reply = NO_REQUESTED_REPLY;
+    }
+
+  if(strcmp(argv[8], "debug") == 0)
+    {
+      printf ("\n");
+      printf ("SERVICE NAME     = %s\n", name_to_own);
+      printf ("MSG_DESTINATION  = %s\n", msg_destination);
+      printf ("MSG_PATH         = %s\n", msg_path);
+      printf ("MSG_INTERFACE    = %s\n", msg_interface);
+      printf ("MSG_MEMBER       = %s\n", msg_member);
+      printf ("MSG_ERRORNAME    = %s\n", msg_error_name);
+      printf ("IS REPLY?        = %s\n", argv[7]);
+    }
+
+  void *my_policy;
+  my_policy = dbus_policy_init (SYSTEM_BUS);
+
+  if (strcmp(argv[8], "print_rules") == 0)
+    {
+      dbus_policy_print_rules (my_policy);
+    }
+  puts(" ");
+
+  if (dbus_policy_check_can_own (my_policy, name_to_own))
+    puts ("OK");
+  else
+    puts ("ERROR");
+
+  if (dbus_policy_check_can_send (my_policy,
+                                  1,                /* method call */
+                                  msg_destination,  /* destination */
+                                  msg_path,         /* path */
+                                  msg_interface,    /* interface */
+                                  msg_member,       /* member */
+                                  msg_error_name,   /* error name */
+                                  msg_reply_serial, /* reply serial */
+                                  msg_req_reply))   /* requested reply */
+    puts ("OK");
+  else
+    puts ("ERROR");
+
+  if (dbus_policy_check_can_recv (my_policy,
+                                  1,                /* method call */
+                                  msg_destination,  /* sender(!) */
+                                  msg_path,         /* path */
+                                  msg_interface,    /* interface */
+                                  msg_member,       /* member */
+                                  msg_error_name,   /* error name */
+                                  msg_reply_serial, /* reply serial */
+                                  msg_req_reply))   /* requested reply */
+    puts ("OK");
+  else
+    puts ("ERROR");
+
+  dbus_policy_free (my_policy);
+
+  puts (" ");
+  return EXIT_SUCCESS;
+
+}
+
+
++-------------------------+
+| libdbuspolicy_test.spec |
++-------------------------+
+
+Name:       libdbuspolicy_test
+Summary:    Test for libdbuspolicy library
+Version:    1
+Release:    1.0
+Group:      System/Base
+License:    GPLv2
+URL:        none
+Source:     %{name}-%{version}.tar.gz
+Source1001: %{name}.manifest
+BuildRequires: pkg-config
+BuildRequires: libdbuspolicy
+BuildRequires: pkgconfig(dbus-1)
+
+%description
+Test for libdbuspolicy library.
+
+%prep
+%setup -q -n %{name}-%{version}
+
+%build
+# >> build pre
+# << build pre
+
+cp %{SOURCE1001} .
+make %{?jobs:-j%jobs}
+
+# >> build post
+# << build post
+%install
+rm -rf %{buildroot}
+# >> install pre
+# << install pre
+%make_install
+
+# >> install post
+
+
+# << install post
+%files
+%defattr(-,root,root,-)
+/bin/libdbuspolicy_test
+
+
+************************
+*                      *
+* libdbuspolicy - TODO *
+*                      *
+************************
+
+MORE TESTS!!! :)

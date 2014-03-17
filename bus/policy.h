@@ -164,6 +164,31 @@ dbus_bool_t      bus_client_policy_append_rule       (BusClientPolicy  *policy,
                                                       BusPolicyRule    *rule);
 void             bus_client_policy_optimize          (BusClientPolicy  *policy);
 
+/* for libdbuspolicy purposes */
+dbus_bool_t      bus_policy_check_can_send           (BusClientPolicy *policy,
+                                                      dbus_bool_t      requested_reply,
+                                                      int              msg_type,
+                                                      const char      *msg_destination,
+                                                      const char      *msg_path,
+                                                      const char      *msg_interface,
+                                                      const char      *msg_member,
+                                                      const char      *msg_error_name,
+                                                      int              msg_reply_serial);
+
+/* for libdbuspolicy purposes */
+dbus_bool_t      bus_policy_check_can_receive        (BusClientPolicy *policy,
+                                                      dbus_bool_t      requested_reply,
+                                                      int              msg_type,
+                                                      const char      *msg_sender,
+                                                      const char      *msg_path,
+                                                      const char      *msg_interface,
+                                                      const char      *msg_member,
+                                                      const char      *msg_error_name,
+                                                      int              msg_reply_serial);
+
+/* for libdbuspolicy purposes */
+void             bus_client_policy_print             (BusClientPolicy  *policy);
+
 #ifdef DBUS_BUILD_TESTS
 dbus_bool_t      bus_policy_check_can_own     (BusPolicy  *policy,
                                                const DBusString *service_name);

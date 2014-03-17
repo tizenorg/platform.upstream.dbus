@@ -1730,6 +1730,7 @@ bus/dbus.socket
 Makefile
 dbus/Makefile
 bus/Makefile
+policy/Makefile
 tools/Makefile
 test/Makefile
 test/name-test/Makefile

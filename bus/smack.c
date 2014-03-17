@@ -21,6 +21,7 @@
  * 02110-1301 USA
  */
 
+#include <stdio.h>
 #include <config.h>
 #include "smack.h"
 
@@ -38,7 +39,7 @@
 #define SMACK_WRITE "W"
 #define SMACK_READ "R"
 #define SMACK_READ_WRITE "RW"
-
+#define SMACK_MAX_LABEL_LENGTH 24
 
 #ifdef DBUS_ENABLE_SMACK
 static char *
@@ -161,16 +162,42 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
                                  dbus_bool_t *nomem_err)
 {
 #ifdef DBUS_ENABLE_SMACK
-  char *subject_label;
+  char *subject_label = NULL;
+  char subject_label_from_file [SMACK_MAX_LABEL_LENGTH];
   DBusHashIter iter;
   dbus_bool_t is_allowed;
   DBusList **allowed_list;
 
-  /* the label of the subject, is the label on the new connection,
-     either the service itself or one of its clients */
-  subject_label = bus_smack_get_label (connection);
+  /* only for libdbuspolicy purposes */
+  if (connection == NULL)
+    {
+      FILE *file;
+
+      file = fopen ("/proc/self/attr/current", "r");
+      if(file == NULL)
+        {
+          _dbus_verbose ("[SMACK] Can't open /proc/self/attr/current file\n");
+          return NULL;
+        }
+
+      fgets(subject_label_from_file,SMACK_MAX_LABEL_LENGTH,file);
+      _dbus_verbose ("[SMACK] Subject label: %s\n", subject_label_from_file);
+      subject_label = subject_label_from_file;
+
+      fclose(file);
+    }
+  else
+    {
+      /* the label of the subject, is the label on the new connection,
+         either the service itself or one of its clients */
+      subject_label = bus_smack_get_label (connection);
+    }
+
   if (subject_label == NULL)
-    return NULL;
+    {
+      _dbus_verbose ("[SMACK] Subject label is NULL\n");
+      return NULL;
+    }
 
   allowed_list = dbus_new0 (DBusList*, 1);
   if (allowed_list == NULL)
@@ -226,14 +253,17 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
         }
     }
 
-  dbus_free(subject_label);
+  if (connection != NULL)
+    dbus_free(subject_label);
   return allowed_list;
 
 nomem:
   if (allowed_list != NULL)
     _dbus_list_clear (allowed_list);
 
-  dbus_free(subject_label);
+  if (connection != NULL)
+    dbus_free(subject_label);
+
   *nomem_err = TRUE;
   return NULL;
 

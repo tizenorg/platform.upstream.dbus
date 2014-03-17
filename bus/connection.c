@@ -833,6 +833,30 @@ expire_incomplete_timeout (void *data)
   return TRUE;
 }
 
+/* for libdbuspolicy purposes */
+dbus_bool_t
+bus_get_unix_groups  (unsigned long   uid,
+                      unsigned long **groups,
+                      int            *n_groups,
+                      DBusError      *error)
+{
+  *groups = NULL;
+  *n_groups = 0;
+
+  if (!_dbus_unix_groups_from_uid (uid, groups, n_groups))
+    {
+      _dbus_verbose ("Did not get any groups for UID %lu\n",
+                     uid);
+      return FALSE;
+    }
+  else
+    {
+      _dbus_verbose ("Got %d groups for UID %lu\n",
+                     *n_groups, uid);
+      return TRUE;
+    }
+}
+
 dbus_bool_t
 bus_connection_get_unix_groups  (DBusConnection   *connection,
                                  unsigned long   **groups,
