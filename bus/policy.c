@@ -310,6 +310,10 @@ bus_policy_create_client_policy (BusPolicy      *policy,
                            client))
     goto nomem;
 
+  /* only for libdbuspolicy purposes */
+  if (connection == NULL)
+    uid = getuid();
+
   /* we avoid the overhead of looking up user's groups
    * if we don't have any group rules anyway
    */
@@ -327,7 +331,6 @@ bus_policy_create_client_policy (BusPolicy      *policy,
       else
         {
           /* only for libdbuspolicy purposes */
-          uid = getuid();
           if (!bus_get_unix_groups (uid, &groups, &n_groups, error))
             goto failed;
         }
