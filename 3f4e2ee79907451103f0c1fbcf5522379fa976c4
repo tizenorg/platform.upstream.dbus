@@ -1,0 +1,7 @@
+Code-Review+2: Karol Lewandowski <k.lewandowsk@samsung.com>
+Verified+1: Lukasz Skalski <l.skalski@samsung.com>
+Submitted-by: Karol Lewandowski <k.lewandowsk@samsung.com>
+Submitted-at: Wed, 09 Apr 2014 06:12:08 -0700
+Reviewed-on: https://review.tizen.org/gerrit/19259
+Project: platform/upstream/dbus
+Branch: refs/heads/libdbuspolicy-dev
