@@ -84,7 +84,7 @@ libdbuspolicy_1_la_LIBADD= \
 
 libdbuspolicy_1_la_LDFLAGS = \
         $(AM_LDFLAGS) \
-        $(export_symbols) \
+        -export-symbols-regex '^dbus_policy_' \
         -version-info $(LT_CURRENT):$(LT_REVISION):$(LT_AGE) \
         -no-undefined \
         $(NULL)
