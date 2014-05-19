@@ -17,8 +17,7 @@ BuildRequires:  libzio
 BuildRequires:  pkg-config
 BuildRequires:  xmlto
 %if %{with_systemd}
-BuildRequires:  pkgconfig(libsystemd-daemon)
-BuildRequires:  pkgconfig(libsystemd-login)
+BuildRequires:  pkgconfig(libsystemd)
 %endif
 Version:        1.6.12
 Release:        0
