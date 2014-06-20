@@ -1564,6 +1564,16 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
         goto oom;
     }
 
+#ifdef DBUS_ENABLE_SMACK
+  {
+    const char *smack_label;
+    if (dbus_connection_get_smack_label (conn, &smack_label)) {
+      if (!_dbus_asv_add_string (&array_iter, "SmackLabel", smack_label))
+        goto oom;
+    }
+  }
+#endif
+
   if (!_dbus_asv_close (&reply_iter, &array_iter))
     goto oom;
 
