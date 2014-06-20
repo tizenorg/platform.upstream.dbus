@@ -40,22 +40,6 @@
 #define SMACK_READ_WRITE "RW"
 
 
-#ifdef DBUS_ENABLE_SMACK
-static char *
-bus_smack_get_label (DBusConnection *connection)
-{
-  char *label;
-  int sock_fd;
-
-  if (!dbus_connection_get_socket(connection, &sock_fd))
-    return NULL;
-
-  if (smack_new_label_from_socket(sock_fd, &label) < 0)
-    return NULL;
-  return label;
-}
-#endif
-
 dbus_bool_t
 bus_smack_handle_get_connection_context (DBusConnection *connection,
                                          BusTransaction *transaction,
@@ -69,7 +53,7 @@ bus_smack_handle_get_connection_context (DBusConnection *connection,
   BusService *service;
   DBusConnection *remote_connection;
   DBusMessage *reply = NULL;
-  char *label;
+  const char *label;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -99,8 +83,7 @@ bus_smack_handle_get_connection_context (DBusConnection *connection,
   if (reply == NULL)
     goto oom;
 
-  label = bus_smack_get_label (remote_connection);
-  if (label == NULL)
+  if (!dbus_connection_get_smack_label(remote_connection, &label))
     {
       dbus_set_error (error, DBUS_ERROR_FAILED,
                       "Failed to get the socket fd of the connection",
@@ -116,7 +99,6 @@ bus_smack_handle_get_connection_context (DBusConnection *connection,
     goto oom;
 
   dbus_message_unref (reply);
-  dbus_free(label);
 
   return TRUE;
 
@@ -126,8 +108,6 @@ oom:
 err:
   if (reply != NULL)
     dbus_message_unref (reply);
-
-  dbus_free(label);
 
   return FALSE;
 #else
@@ -161,15 +141,15 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
                                  dbus_bool_t *nomem_err)
 {
 #ifdef DBUS_ENABLE_SMACK
-  char *subject_label;
+  const char *subject_label;
   DBusHashIter iter;
   dbus_bool_t is_allowed;
   DBusList **allowed_list;
 
   /* the label of the subject, is the label on the new connection,
      either the service itself or one of its clients */
-  subject_label = bus_smack_get_label (connection);
-  if (subject_label == NULL)
+
+  if (!dbus_connection_get_smack_label(connection, &subject_label))
     return NULL;
 
   allowed_list = dbus_new0 (DBusList*, 1);
@@ -226,14 +206,12 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
         }
     }
 
-  dbus_free(subject_label);
   return allowed_list;
 
 nomem:
   if (allowed_list != NULL)
     _dbus_list_clear (allowed_list);
 
-  dbus_free(subject_label);
   *nomem_err = TRUE;
   return NULL;
 
