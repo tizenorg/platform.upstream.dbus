@@ -3,7 +3,7 @@ Url:            http://dbus.freedesktop.org/
 Summary:        Library package for D-Bus
 License:        GPL-2.0+ or AFL-2.1
 Group:          System/Libraries
-Version:        1.6.12
+Version:        1.8.2
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 

@@ -20,7 +20,7 @@ BuildRequires:  xmlto
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
 %endif
-Version:        1.6.12
+Version:        1.8.2
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
@@ -146,6 +146,7 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %{_bindir}/dbus-cleanup-sockets
 %{_bindir}/dbus-daemon
 %{_bindir}/dbus-monitor
+%{_bindir}/dbus-run-session
 %{_bindir}/dbus-send
 %{_bindir}/dbus-uuidgen
 # See doc/system-activation.txt in source tarball for the rationale
@@ -177,10 +178,17 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %defattr(-,root,root)
 %dir %{_datadir}/doc/dbus
 %{_datadir}/doc/dbus/api/
+%doc %{_datadir}/doc/dbus/dbus-cleanup-sockets.1.html
+%doc %{_datadir}/doc/dbus/dbus-daemon.1.html
 %doc %{_datadir}/doc/dbus/dbus-faq.html
+%doc %{_datadir}/doc/dbus/dbus-launch.1.html
+%doc %{_datadir}/doc/dbus/dbus-monitor.1.html
+%doc %{_datadir}/doc/dbus/dbus-run-session.1.html
+%doc %{_datadir}/doc/dbus/dbus-send.1.html
 %doc %{_datadir}/doc/dbus/dbus-specification.html
 %doc %{_datadir}/doc/dbus/dbus-test-plan.html
 %doc %{_datadir}/doc/dbus/dbus-tutorial.html
+%doc %{_datadir}/doc/dbus/dbus-uuidgen.1.html
 %doc %{_datadir}/doc/dbus/dbus.devhelp
 %doc %{_datadir}/doc/dbus/diagram.*
 %doc %{_datadir}/doc/dbus/system-activation.txt
