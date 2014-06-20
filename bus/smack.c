@@ -41,7 +41,7 @@
 
 
 #ifdef DBUS_ENABLE_SMACK
-static char *
+char *
 bus_smack_get_label (DBusConnection *connection)
 {
   char *label;
@@ -52,6 +52,7 @@ bus_smack_get_label (DBusConnection *connection)
 
   if (smack_new_label_from_socket(sock_fd, &label) < 0)
     return NULL;
+
   return label;
 }
 #endif
