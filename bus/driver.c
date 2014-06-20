@@ -30,7 +30,6 @@
 #include "services.h"
 #include "selinux.h"
 #include "signals.h"
-#include "smack.h"
 #include "stats.h"
 #include "utils.h"
 
@@ -1566,12 +1565,9 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
 
 #ifdef DBUS_ENABLE_SMACK
   {
-    char *smack_label = bus_smack_get_label (connection);
-    if (smack_label) {
-      int success = _dbus_asv_add_string (&array_iter, "SmackLabel", smack_label);
-      /* was allocated with smack_new_label_from_socket, must free() and not dbus_free() */
-      free (smack_label);
-      if (!success)
+    const char *smack_label;
+    if (dbus_connection_get_smack_label (conn, &smack_label)) {
+      if (!_dbus_asv_add_string (&array_iter, "SmackLabel", smack_label))
         goto oom;
     }
   }
