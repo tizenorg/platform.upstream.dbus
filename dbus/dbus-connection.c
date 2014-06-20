@@ -45,6 +45,11 @@
 #include "dbus-bus.h"
 #include "dbus-marshal-basic.h"
 
+#ifdef DBUS_ENABLE_SMACK
+#include <sys/smack.h>
+#include <stdlib.h>
+#endif
+
 #ifdef DBUS_DISABLE_CHECKS
 #define TOOK_LOCK_CHECK(connection)
 #define RELEASING_LOCK_CHECK(connection)
@@ -304,6 +309,9 @@ struct DBusConnection
   DBusObjectTree *objects; /**< Object path handlers registered with this connection */
 
   char *server_guid; /**< GUID of server if we are in shared_connections, #NULL if server GUID is unknown or connection is private */
+#ifdef DBUS_ENABLE_SMACK
+  char *peer_smack_label; /** Smack label of the peer at the time when the connection was established. Allocated with malloc(), NULL if unknown. */
+#endif
 
   /* These two MUST be bools and not bitfields, because they are protected by a separate lock
    * from connection->mutex and all bitfields in a word have to be read/written together.
@@ -1284,6 +1292,19 @@ _dbus_connection_new_for_transport (DBusTransport *transport)
   connection = dbus_new0 (DBusConnection, 1);
   if (connection == NULL)
     goto error;
+
+#ifdef DBUS_ENABLE_SMACK
+  /* If we cannot get the Smack label, proceed without. */
+  {
+    DBusSocket sock_fd;
+    if (_dbus_transport_get_socket_fd(transport, &sock_fd)) {
+      char *label;
+      if (smack_new_label_from_socket(_dbus_socket_get_int (sock_fd), &label) >= 0) {
+        connection->peer_smack_label = label;
+      }
+    }
+  }
+#endif
 
   _dbus_rmutex_new_at_location (&connection->mutex);
   if (connection->mutex == NULL)
@@ -2790,7 +2811,12 @@ _dbus_connection_last_unref (DBusConnection *connection)
   _dbus_rmutex_free_at_location (&connection->slot_mutex);
 
   _dbus_rmutex_free_at_location (&connection->mutex);
-  
+
+#ifdef DBUS_ENABLE_SMACK
+  if (connection->peer_smack_label)
+    free (connection->peer_smack_label);
+#endif
+
   dbus_free (connection);
 }
 
@@ -5274,6 +5300,27 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
 
   return result;
 }
+
+#ifdef DBUS_ENABLE_SMACK
+/**
+ * Gets the Smack label of the peer at the time when the connection
+ * was established. Returns #TRUE if the label is filled in.
+ *
+ * @param connection the connection
+ * @param label return location for the Smack label; returned value is valid as long as the connection exists
+ * @returns #TRUE if uid is filled in with a valid process ID
+ */
+dbus_bool_t
+dbus_connection_get_smack_label (DBusConnection *connection,
+				 const char **label)
+{
+  _dbus_return_val_if_fail (connection != NULL, FALSE);
+  _dbus_return_val_if_fail (label != NULL, FALSE);
+
+  *label = connection->peer_smack_label;
+  return *label != NULL;
+}
+#endif
 
 /**
  * Gets the ADT audit data of the connection if any.

@@ -6,6 +6,7 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir) \
 	$(DBUS_STATIC_BUILD_CPPFLAGS) \
 	$(SYSTEMD_CFLAGS) \
+	$(LIBSMACK_CFLAGS) \
 	$(VALGRIND_CFLAGS) \
 	-DDBUS_COMPILATION \
 	-DDBUS_MACHINE_UUID_FILE=\""$(localstatedir)/lib/dbus/machine-id"\" \
@@ -291,7 +292,7 @@ else
 SYMBOL_EXPORT_LDFLAGS=
 endif
 
-libdbus_1_la_LIBADD= $(LIBDBUS_LIBS)
+libdbus_1_la_LIBADD= $(LIBDBUS_LIBS) $(LIBSMACK_LIBS)
 libdbus_1_la_LDFLAGS = \
 	$(AM_LDFLAGS) \
 	-version-info $(LT_CURRENT):$(LT_REVISION):$(LT_AGE) \
@@ -299,7 +300,11 @@ libdbus_1_la_LDFLAGS = \
 	-no-undefined \
 	$(NULL)
 
-libdbus_internal_la_LIBADD=$(LIBDBUS_LIBS) libdbus-1.la
+libdbus_internal_la_CPPFLAGS = \
+	$(AM_CPPFLAGS) \
+	-DDBUS_STATIC_BUILD \
+	$(NULL)
+libdbus_internal_la_LIBADD=$(LIBDBUS_LIBS) libdbus-1.la $(SYSTEMD_LIBS) $(LIBSMACK_LIBS)
 
 if DBUS_WIN
 # This must be a separate convenience library, otherwise libtool notices

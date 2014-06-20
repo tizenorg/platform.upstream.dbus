@@ -6075,7 +6075,12 @@
                   </para>
                 </entry>
               </row>
-
+              <row>
+                <entry>SmackLabel</entry>
+                <entry>STRING</entry>
+                <entry>The Smack label of the process at the time when it connected
+                  to D-Bus, on platforms that have this concept.</entry>
+              </row>
             </tbody>
           </tgroup>
         </informaltable>
