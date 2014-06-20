@@ -35,7 +35,7 @@
 #endif
 
 #ifdef DBUS_ENABLE_SMACK
-static char *
+char *
 bus_smack_get_label (DBusConnection *connection)
 {
   char *label;
@@ -46,87 +46,7 @@ bus_smack_get_label (DBusConnection *connection)
 
   if (smack_new_label_from_socket(sock_fd, &label) < 0)
     return NULL;
+
   return label;
 }
 #endif
-
-dbus_bool_t
-bus_smack_handle_get_connection_context (DBusConnection *connection,
-                                         BusTransaction *transaction,
-                                         DBusMessage    *message,
-                                         DBusError      *error)
-{
-#ifdef DBUS_ENABLE_SMACK
-  const char *remote_end = NULL;
-  BusRegistry *registry;
-  DBusString remote_end_str;
-  BusService *service;
-  DBusConnection *remote_connection;
-  DBusMessage *reply = NULL;
-  char *label;
-
-  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
-
-  registry = bus_connection_get_registry (connection);
-
-  if (!dbus_message_get_args (message, error, DBUS_TYPE_STRING, &remote_end,
-                              DBUS_TYPE_INVALID))
-    return FALSE;
-
-  _dbus_verbose ("asked for label of connection %s\n", remote_end);
-
-  _dbus_string_init_const (&remote_end_str, remote_end);
-
-  service = bus_registry_lookup (registry, &remote_end_str);
-  if (service == NULL)
-    {
-      dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
-                      "Bus name '%s' has no owner", remote_end);
-      return FALSE;
-    }
-
-  remote_connection = bus_service_get_primary_owners_connection (service);
-  if (remote_connection == NULL)
-    goto oom;
-
-  reply = dbus_message_new_method_return (message);
-  if (reply == NULL)
-    goto oom;
-
-  label = bus_smack_get_label (remote_connection);
-  if (label == NULL)
-    {
-      dbus_set_error (error, DBUS_ERROR_FAILED,
-                      "Failed to get the socket fd of the connection",
-                      remote_end);
-      goto err;
-    }
-
-  if (!dbus_message_append_args (reply, DBUS_TYPE_STRING,
-                                 &label, DBUS_TYPE_INVALID))
-    goto oom;
-
-  if (!bus_transaction_send_from_driver (transaction, connection, reply))
-    goto oom;
-
-  dbus_message_unref (reply);
-  dbus_free(label);
-
-  return TRUE;
-
-oom:
-  BUS_SET_OOM (error);
-
-err:
-  if (reply != NULL)
-    dbus_message_unref (reply);
-
-  dbus_free(label);
-
-  return FALSE;
-#else
-  dbus_set_error (error, DBUS_ERROR_NOT_SUPPORTED,
-                  "SMACK support is not enabled");
-  return FALSE;
-#endif
-}

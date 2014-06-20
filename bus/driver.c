@@ -1564,6 +1564,19 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
         goto oom;
     }
 
+#ifdef DBUS_ENABLE_SMACK
+  {
+    char *smack_label = bus_smack_get_label (connection);
+    if (smack_label) {
+      int success = _dbus_asv_add_string (&array_iter, "SmackLabel", smack_label);
+      /* was allocated with smack_new_label_from_socket, must free() and not dbus_free() */
+      free (smack_label);
+      if (!success)
+        goto oom;
+    }
+  }
+#endif
+
   if (!_dbus_asv_close (&reply_iter, &array_iter))
     goto oom;
 
@@ -1775,10 +1788,6 @@ static const MessageHandler dbus_message_handlers[] = {
     bus_driver_handle_get_id },
   { "GetConnectionCredentials", "s", "a{sv}",
     bus_driver_handle_get_connection_credentials },
-  { "GetConnectionSmackContext",
-    DBUS_TYPE_STRING_AS_STRING,
-    DBUS_TYPE_STRING_AS_STRING,
-    bus_smack_handle_get_connection_context },
   { NULL, NULL, NULL, NULL }
 };
 
