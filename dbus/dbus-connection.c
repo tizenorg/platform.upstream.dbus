@@ -5243,6 +5243,7 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
   return result;
 }
 
+#ifdef DBUS_ENABLE_SMACK
 /**
  * Gets the Smack label of the peer at the time when the connection
  * was established. Returns #TRUE if the label is filled in.
@@ -5258,15 +5259,10 @@ dbus_connection_get_smack_label (DBusConnection *connection,
   _dbus_return_val_if_fail (connection != NULL, FALSE);
   _dbus_return_val_if_fail (label != NULL, FALSE);
 
-  *label =
-#ifdef DBUS_ENABLE_SMACK
-    connection->peer_smack_label
-#else
-    NULL
-#endif
-    ;
+  *label = connection->peer_smack_label;
   return *label != NULL;
 }
+#endif
 
 /**
  * Gets the ADT audit data of the connection if any.
