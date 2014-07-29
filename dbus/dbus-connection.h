@@ -267,8 +267,8 @@ dbus_bool_t        dbus_connection_get_unix_process_id          (DBusConnection 
 #ifdef DBUS_ENABLE_SMACK
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_smack_label              (DBusConnection             *connection,
-#endif
                                                                  const char                **label);
+#endif
 DBUS_EXPORT
 dbus_bool_t        dbus_connection_get_adt_audit_session_data   (DBusConnection             *connection,
                                                                  void                      **data,
