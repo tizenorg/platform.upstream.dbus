@@ -32,7 +32,7 @@
 
 BusPolicyRule*
 bus_policy_rule_new (BusPolicyRuleType type,
-                     dbus_bool_t       allow)
+                     BusPolicyRuleAccess access)
 {
   BusPolicyRule *rule;
 
@@ -42,7 +42,7 @@ bus_policy_rule_new (BusPolicyRuleType type,
 
   rule->type = type;
   rule->refcount = 1;
-  rule->allow = allow;
+  rule->access = access;
 
   switch (rule->type)
     {
@@ -57,15 +57,17 @@ bus_policy_rule_new (BusPolicyRuleType type,
 
       /* allow rules default to TRUE (only requested replies allowed)
        * deny rules default to FALSE (only unrequested replies denied)
+       * TODO: default for check rules?
        */
-      rule->d.send.requested_reply = rule->allow;
+      rule->d.send.requested_reply = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
       break;
     case BUS_POLICY_RULE_RECEIVE:
       rule->d.receive.message_type = DBUS_MESSAGE_TYPE_INVALID;
       /* allow rules default to TRUE (only requested replies allowed)
        * deny rules default to FALSE (only unrequested replies denied)
+       * TODO: default for check rules?
        */
-      rule->d.receive.requested_reply = rule->allow;
+      rule->d.receive.requested_reply = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
       break;
     case BUS_POLICY_RULE_OWN:
       break;
@@ -117,7 +119,8 @@ bus_policy_rule_unref (BusPolicyRule *rule)
         case BUS_POLICY_RULE_GROUP:
           break;
         }
-      
+
+      dbus_free (rule->privilege);
       dbus_free (rule);
     }
 }
@@ -427,7 +430,8 @@ list_allows_user (dbus_bool_t           def,
       else
         continue;
 
-      allowed = rule->allow;
+      /* TODO: implement BUS_POLICY_RULE_ACCESS_CHECK. At the moment it is treated like _DENY. */
+      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
     }
   
   return allowed;
@@ -916,7 +920,7 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
            * only when reply was requested. requested_reply=false means
            * always allow.
            */
-          if (!requested_reply && rule->allow && rule->d.send.requested_reply && !rule->d.send.eavesdrop)
+          if (!requested_reply && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW && rule->d.send.requested_reply && !rule->d.send.eavesdrop)
             {
               _dbus_verbose ("  (policy) skipping allow rule since it only applies to requested replies and does not allow eavesdropping\n");
               continue;
@@ -926,7 +930,7 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
            * when the reply was not requested. requested_reply=true means the
            * rule always applies.
            */
-          if (requested_reply && !rule->allow && !rule->d.send.requested_reply)
+          if (requested_reply && rule->access == BUS_POLICY_RULE_ACCESS_DENY && !rule->d.send.requested_reply)
             {
               _dbus_verbose ("  (policy) skipping deny rule since it only applies to unrequested replies\n");
               continue;
@@ -955,7 +959,7 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
 
           no_interface = dbus_message_get_interface (message) == NULL;
           
-          if ((no_interface && rule->allow) ||
+          if ((no_interface && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW) ||
               (!no_interface && 
                strcmp (dbus_message_get_interface (message),
                        rule->d.send.interface) != 0))
@@ -1028,8 +1032,13 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
             }
         }
 
+      /* TODO: implement BUS_POLICY_RULE_ACCESS_CHECK. Once we know
+         whether it is "allow" or "deny", check
+         rule->d.send.requested_reply and d.send.interface to see
+         whether it really applies (couldn't be checked above). */
+
       /* Use this rule */
-      allowed = rule->allow;
+      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
       *log = rule->d.send.log;
       (*toggles)++;
 
@@ -1094,7 +1103,7 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
       /* for allow, eavesdrop=false means the rule doesn't apply when
        * eavesdropping. eavesdrop=true means always allow.
        */
-      if (eavesdropping && rule->allow && !rule->d.receive.eavesdrop)
+      if (eavesdropping && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW && !rule->d.receive.eavesdrop)
         {
           _dbus_verbose ("  (policy) skipping allow rule since it doesn't apply to eavesdropping\n");
           continue;
@@ -1103,7 +1112,7 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
       /* for deny, eavesdrop=true means the rule applies only when
        * eavesdropping; eavesdrop=false means always deny.
        */
-      if (!eavesdropping && !rule->allow && rule->d.receive.eavesdrop)
+      if (!eavesdropping && rule->access == BUS_POLICY_RULE_ACCESS_DENY && rule->d.receive.eavesdrop)
         {
           _dbus_verbose ("  (policy) skipping deny rule since it only applies to eavesdropping\n");
           continue;
@@ -1116,7 +1125,7 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
            * only when reply was requested. requested_reply=false means
            * always allow.
            */
-          if (!requested_reply && rule->allow && rule->d.receive.requested_reply && !rule->d.receive.eavesdrop)
+          if (!requested_reply && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW && rule->d.receive.requested_reply && !rule->d.receive.eavesdrop)
             {
               _dbus_verbose ("  (policy) skipping allow rule since it only applies to requested replies and does not allow eavesdropping\n");
               continue;
@@ -1126,7 +1135,7 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
            * when the reply was not requested. requested_reply=true means the
            * rule always applies.
            */
-          if (requested_reply && !rule->allow && !rule->d.receive.requested_reply)
+          if (requested_reply && rule->access == BUS_POLICY_RULE_ACCESS_DENY && !rule->d.receive.requested_reply)
             {
               _dbus_verbose ("  (policy) skipping deny rule since it only applies to unrequested replies\n");
               continue;
@@ -1155,7 +1164,7 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
 
           no_interface = dbus_message_get_interface (message) == NULL;
           
-          if ((no_interface && rule->allow) ||
+          if ((no_interface && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW) ||
               (!no_interface &&
                strcmp (dbus_message_get_interface (message),
                        rule->d.receive.interface) != 0))
@@ -1229,8 +1238,14 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
             }
         }
       
+      /* TODO: implement BUS_POLICY_RULE_ACCESS_CHECK. Once we know
+         whether it is "allow" or "deny", check
+         rule->d.receive.eavesdrop, rule->d.receive.requested_reply
+         and receive.interface to see whether it really applies
+         (couldn't be checked above). */
+
       /* Use this rule */
-      allowed = rule->allow;
+      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
       (*toggles)++;
 
       _dbus_verbose ("  (policy) used rule, allow now = %d\n",
@@ -1289,7 +1304,7 @@ bus_rules_check_can_own (DBusList *rules,
         }
 
       /* Use this rule */
-      allowed = rule->allow;
+      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
     }
 
   return allowed;
