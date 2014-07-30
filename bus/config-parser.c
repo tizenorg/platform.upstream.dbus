@@ -2818,6 +2818,8 @@ do_load (const DBusString *full_path,
   dbus_error_init (&error);
 
   parser = bus_config_load (full_path, TRUE, NULL, &error);
+  if (dbus_error_is_set (&error))
+    _dbus_verbose ("Failed to load file: %s\n", error.message);
   if (parser == NULL)
     {
       _DBUS_ASSERT_ERROR_IS_SET (&error);
