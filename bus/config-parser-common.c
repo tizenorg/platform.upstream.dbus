@@ -75,6 +75,10 @@ bus_config_parser_element_name_to_type (const char *name)
     {
       return ELEMENT_DENY;
     }
+  else if (strcmp (name, "check") == 0)
+    {
+      return ELEMENT_CHECK;
+    }
   else if (strcmp (name, "servicehelper") == 0)
     {
       return ELEMENT_SERVICEHELPER;
@@ -159,6 +163,8 @@ bus_config_parser_element_type_to_name (ElementType type)
       return "allow";
     case ELEMENT_DENY:
       return "deny";
+    case ELEMENT_CHECK:
+      return "check";
     case ELEMENT_FORK:
       return "fork";
     case ELEMENT_PIDFILE:
