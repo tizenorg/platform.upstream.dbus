@@ -1159,7 +1159,7 @@ append_rule_from_element (BusConfigParser   *parser,
                           const char        *element_name,
                           const char       **attribute_names,
                           const char       **attribute_values,
-                          dbus_bool_t        allow,
+                          BusPolicyRuleAccess access,
                           DBusError         *error)
 {
   const char *log;
@@ -1182,6 +1182,7 @@ append_rule_from_element (BusConfigParser   *parser,
   const char *own_prefix;
   const char *user;
   const char *group;
+  const char *privilege;
 
   BusPolicyRule *rule;
   
@@ -1209,6 +1210,7 @@ append_rule_from_element (BusConfigParser   *parser,
                           "user", &user,
                           "group", &group,
                           "log", &log,
+                          "privilege", &privilege,
                           NULL))
     return FALSE;
 
@@ -1217,6 +1219,7 @@ append_rule_from_element (BusConfigParser   *parser,
         receive_interface || receive_member || receive_error || receive_sender ||
         receive_type || receive_path || eavesdrop ||
         send_requested_reply || receive_requested_reply ||
+        privilege ||
         own || own_prefix || user || group))
     {
       dbus_set_error (error, DBUS_ERROR_FAILED,
@@ -1233,7 +1236,30 @@ append_rule_from_element (BusConfigParser   *parser,
                       element_name);
       return FALSE;
     }
-  
+
+  if (access == BUS_POLICY_RULE_ACCESS_CHECK)
+    {
+      if (privilege == NULL || !*privilege)
+        {
+          dbus_set_error (error, DBUS_ERROR_FAILED,
+                          "On element <%s>, you must specify the privilege to be checked.",
+                          element_name);
+          return FALSE;
+        }
+    }
+  else
+    {
+      if (privilege != NULL && *privilege)
+        {
+          dbus_set_error (error, DBUS_ERROR_FAILED,
+                          "On element <%s>, privilege %s is used outside of a check rule.",
+                          element_name, privilege);
+          return FALSE;
+        }
+      else
+        privilege = NULL; /* replace (potentially) empty string with NULL pointer, it wouldn't be used anyway */
+    }
+
   /* Allowed combinations of elements are:
    *
    *   base, must be all send or all receive:
@@ -1407,7 +1433,7 @@ append_rule_from_element (BusConfigParser   *parser,
           return FALSE;
         }
       
-      rule = bus_policy_rule_new (BUS_POLICY_RULE_SEND, allow); 
+      rule = bus_policy_rule_new (BUS_POLICY_RULE_SEND, access);
       if (rule == NULL)
         goto nomem;
       
@@ -1489,7 +1515,7 @@ append_rule_from_element (BusConfigParser   *parser,
           return FALSE;
         }
       
-      rule = bus_policy_rule_new (BUS_POLICY_RULE_RECEIVE, allow); 
+      rule = bus_policy_rule_new (BUS_POLICY_RULE_RECEIVE, access);
       if (rule == NULL)
         goto nomem;
 
@@ -1519,7 +1545,7 @@ append_rule_from_element (BusConfigParser   *parser,
     }
   else if (own || own_prefix)
     {
-      rule = bus_policy_rule_new (BUS_POLICY_RULE_OWN, allow); 
+      rule = bus_policy_rule_new (BUS_POLICY_RULE_OWN, access);
       if (rule == NULL)
         goto nomem;
 
@@ -1545,7 +1571,7 @@ append_rule_from_element (BusConfigParser   *parser,
     {      
       if (IS_WILDCARD (user))
         {
-          rule = bus_policy_rule_new (BUS_POLICY_RULE_USER, allow); 
+          rule = bus_policy_rule_new (BUS_POLICY_RULE_USER, access);
           if (rule == NULL)
             goto nomem;
 
@@ -1560,7 +1586,7 @@ append_rule_from_element (BusConfigParser   *parser,
       
           if (_dbus_parse_unix_user_from_config (&username, &uid))
             {
-              rule = bus_policy_rule_new (BUS_POLICY_RULE_USER, allow); 
+              rule = bus_policy_rule_new (BUS_POLICY_RULE_USER, access);
               if (rule == NULL)
                 goto nomem;
 
@@ -1577,7 +1603,7 @@ append_rule_from_element (BusConfigParser   *parser,
     {
       if (IS_WILDCARD (group))
         {
-          rule = bus_policy_rule_new (BUS_POLICY_RULE_GROUP, allow); 
+          rule = bus_policy_rule_new (BUS_POLICY_RULE_GROUP, access);
           if (rule == NULL)
             goto nomem;
 
@@ -1592,7 +1618,7 @@ append_rule_from_element (BusConfigParser   *parser,
           
           if (_dbus_parse_unix_group_from_config (&groupname, &gid))
             {
-              rule = bus_policy_rule_new (BUS_POLICY_RULE_GROUP, allow); 
+              rule = bus_policy_rule_new (BUS_POLICY_RULE_GROUP, access);
               if (rule == NULL)
                 goto nomem;
 
@@ -1615,6 +1641,10 @@ append_rule_from_element (BusConfigParser   *parser,
       pe = peek_element (parser);      
       _dbus_assert (pe != NULL);
       _dbus_assert (pe->type == ELEMENT_POLICY);
+
+      rule->privilege = _dbus_strdup (privilege);
+      if (privilege && !rule->privilege)
+        goto nomem;
 
       switch (pe->d.policy.type)
         {
@@ -1692,7 +1722,7 @@ start_policy_child (BusConfigParser   *parser,
     {
       if (!append_rule_from_element (parser, element_name,
                                      attribute_names, attribute_values,
-                                     TRUE, error))
+                                     BUS_POLICY_RULE_ACCESS_ALLOW, error))
         return FALSE;
       
       if (push_element (parser, ELEMENT_ALLOW) == NULL)
@@ -1707,7 +1737,7 @@ start_policy_child (BusConfigParser   *parser,
     {
       if (!append_rule_from_element (parser, element_name,
                                      attribute_names, attribute_values,
-                                     FALSE, error))
+                                     BUS_POLICY_RULE_ACCESS_DENY, error))
         return FALSE;
       
       if (push_element (parser, ELEMENT_DENY) == NULL)
@@ -1716,6 +1746,21 @@ start_policy_child (BusConfigParser   *parser,
           return FALSE;
         }
       
+      return TRUE;
+    }
+  else if (strcmp (element_name, "check") == 0)
+    {
+      if (!append_rule_from_element (parser, element_name,
+                                     attribute_names, attribute_values,
+                                     BUS_POLICY_RULE_ACCESS_CHECK, error))
+        return FALSE;
+
+      if (push_element (parser, ELEMENT_CHECK) == NULL)
+        {
+          BUS_SET_OOM (error);
+          return FALSE;
+        }
+
       return TRUE;
     }
   else
@@ -2071,6 +2116,7 @@ bus_config_parser_end_element (BusConfigParser   *parser,
     case ELEMENT_POLICY:
     case ELEMENT_ALLOW:
     case ELEMENT_DENY:
+    case ELEMENT_CHECK:
     case ELEMENT_FORK:
     case ELEMENT_SYSLOG:
     case ELEMENT_KEEP_UMASK:
@@ -2370,6 +2416,7 @@ bus_config_parser_content (BusConfigParser   *parser,
     case ELEMENT_POLICY:
     case ELEMENT_ALLOW:
     case ELEMENT_DENY:
+    case ELEMENT_CHECK:
     case ELEMENT_FORK:
     case ELEMENT_SYSLOG:
     case ELEMENT_KEEP_UMASK:
@@ -2834,6 +2881,8 @@ do_load (const DBusString *full_path,
   dbus_error_init (&error);
 
   parser = bus_config_load (full_path, TRUE, NULL, &error);
+  if (dbus_error_is_set (&error))
+    _dbus_verbose ("Failed to load file: %s\n", error.message);
   if (parser == NULL)
     {
       _DBUS_ASSERT_ERROR_IS_SET (&error);

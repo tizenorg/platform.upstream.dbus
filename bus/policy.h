@@ -39,6 +39,14 @@ typedef enum
   BUS_POLICY_RULE_GROUP
 } BusPolicyRuleType;
 
+typedef enum
+{
+  BUS_POLICY_RULE_ACCESS_DENY,
+  BUS_POLICY_RULE_ACCESS_ALLOW,
+  /** runtime check resulting in allow or deny */
+  BUS_POLICY_RULE_ACCESS_CHECK
+} BusPolicyRuleAccess;
+
 /** determines whether the rule affects a connection, or some global item */
 #define BUS_POLICY_RULE_IS_PER_CLIENT(rule) (!((rule)->type == BUS_POLICY_RULE_USER || \
                                                (rule)->type == BUS_POLICY_RULE_GROUP))
@@ -49,8 +57,9 @@ struct BusPolicyRule
   
   BusPolicyRuleType type;
 
-  unsigned int allow : 1; /**< #TRUE if this allows, #FALSE if it denies */
-  
+  unsigned int access : 2; /**< BusPolicyRuleAccess */
+  char *privilege; /**< for BUS_POLICY_RULE_ACCESS_CHECK */
+
   union
   {
     struct
@@ -106,7 +115,7 @@ struct BusPolicyRule
 };
 
 BusPolicyRule* bus_policy_rule_new   (BusPolicyRuleType type,
-                                      dbus_bool_t       allow);
+                                      BusPolicyRuleAccess access);
 BusPolicyRule* bus_policy_rule_ref   (BusPolicyRule    *rule);
 void           bus_policy_rule_unref (BusPolicyRule    *rule);
 
