@@ -149,7 +149,8 @@ dbus_bool_t      bus_policy_merge                 (BusPolicy        *policy,
 BusClientPolicy* bus_client_policy_new               (void);
 BusClientPolicy* bus_client_policy_ref               (BusClientPolicy  *policy);
 void             bus_client_policy_unref             (BusClientPolicy  *policy);
-dbus_bool_t      bus_client_policy_check_can_send    (BusClientPolicy  *policy,
+BusResult        bus_client_policy_check_can_send    (DBusConnection   *sender,
+                                                      BusClientPolicy  *policy,
                                                       BusRegistry      *registry,
                                                       dbus_bool_t       requested_reply,
                                                       DBusConnection   *receiver,

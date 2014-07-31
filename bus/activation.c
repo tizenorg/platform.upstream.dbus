@@ -1190,11 +1190,21 @@ bus_activation_send_pending_auto_activation_messages (BusActivation  *activation
           addressed_recipient = bus_service_get_primary_owners_connection (service);
 
           /* Resume dispatching where we left off in bus_dispatch() */
-          if (!bus_dispatch_matches (transaction,
-                                     entry->connection,
-                                     addressed_recipient,
-                                     entry->activation_message, error))
-            goto error;
+          switch (bus_dispatch_matches (transaction,
+                                        entry->connection,
+                                        addressed_recipient,
+                                        entry->activation_message, error))
+            {
+            case BUS_RESULT_TRUE:
+              break;
+            case BUS_RESULT_FALSE:
+              goto error;
+              break;
+            case BUS_RESULT_LATER:
+              /* TODO: deal with pending check while auto-activating */
+              goto error;
+              break;
+            }
         }
 
       link = next;
@@ -1976,8 +1986,20 @@ bus_activation_activate_service (BusActivation  *activation,
                                service_name,
                                entry->systemd_service);
               /* Wonderful, systemd is connected, let's just send the msg */
-              retval = bus_dispatch_matches (activation_transaction, NULL, bus_service_get_primary_owners_connection (service),
-                                             message, error);
+              switch (bus_dispatch_matches (activation_transaction, NULL, bus_service_get_primary_owners_connection (service),
+                                            message, error))
+                {
+                case BUS_RESULT_TRUE:
+                  retval = TRUE;
+                  break;
+                case BUS_RESULT_FALSE:
+                  retval = FALSE;
+                  break;
+                case BUS_RESULT_LATER:
+                  /* TODO: handle systemd */
+                  retval = FALSE;
+                  break;
+                }
             }
           else
             {

@@ -62,6 +62,8 @@ BUS_SOURCES=					\
 	activation-exit-codes.h			\
 	bus.c					\
 	bus.h					\
+	check.c					\
+	check.h					\
 	config-parser.c				\
 	config-parser.h				\
 	config-parser-common.c			\

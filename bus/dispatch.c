@@ -56,13 +56,23 @@ send_one_message (DBusConnection *connection,
                   BusTransaction *transaction,
                   DBusError      *error)
 {
-  if (!bus_context_check_security_policy (context, transaction,
-                                          sender,
-                                          addressed_recipient,
-                                          connection,
-                                          message,
-                                          NULL))
-    return TRUE; /* silently don't send it */
+  switch (bus_context_check_security_policy (context, transaction,
+                                             sender,
+                                             addressed_recipient,
+                                             connection,
+                                             message,
+                                             NULL))
+    {
+    case BUS_RESULT_TRUE:
+      break;
+    case BUS_RESULT_FALSE:
+      return TRUE; /* silently don't send it */
+      break;
+    case BUS_RESULT_LATER:
+      /* TODO: queue the message at the recipient and rerun the policy check again later. */
+      return TRUE; /* pretend to have sent it */
+      break;
+    }
 
   if (dbus_message_contains_unix_fds(message) &&
       !dbus_connection_can_send_type(connection, DBUS_TYPE_UNIX_FD))
@@ -79,7 +89,7 @@ send_one_message (DBusConnection *connection,
   return TRUE;
 }
 
-dbus_bool_t
+BusResult
 bus_dispatch_matches (BusTransaction *transaction,
                       DBusConnection *sender,
                       DBusConnection *addressed_recipient,
@@ -107,11 +117,25 @@ bus_dispatch_matches (BusTransaction *transaction,
   /* First, send the message to the addressed_recipient, if there is one. */
   if (addressed_recipient != NULL)
     {
-      if (!bus_context_check_security_policy (context, transaction,
-                                              sender, addressed_recipient,
-                                              addressed_recipient,
-                                              message, error))
-        return FALSE;
+      switch (bus_context_check_security_policy (context, transaction,
+                                                 sender, addressed_recipient,
+                                                 addressed_recipient,
+                                                 message, error))
+        {
+        case BUS_RESULT_TRUE:
+          break;
+        case BUS_RESULT_FALSE:
+          return BUS_RESULT_FALSE;
+          break;
+        case BUS_RESULT_LATER:
+          /*
+           * This is the only place where we prevent sending a message and
+           * block the sender. We don't know how long we need to block it, though :-/
+           * TODO: figure that out.
+           */
+          return BUS_RESULT_LATER;
+          break;
+        }
 
       if (dbus_message_contains_unix_fds (message) &&
           !dbus_connection_can_send_type (addressed_recipient,
@@ -121,14 +145,14 @@ bus_dispatch_matches (BusTransaction *transaction,
                           DBUS_ERROR_NOT_SUPPORTED,
                           "Tried to send message with Unix file descriptors"
                           "to a client that doesn't support that.");
-          return FALSE;
+          return BUS_RESULT_FALSE;
       }
 
       /* Dispatch the message */
       if (!bus_transaction_send (transaction, addressed_recipient, message))
         {
           BUS_SET_OOM (error);
-          return FALSE;
+          return BUS_RESULT_FALSE;
         }
     }
 
@@ -143,7 +167,7 @@ bus_dispatch_matches (BusTransaction *transaction,
                                       &recipients))
     {
       BUS_SET_OOM (error);
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   link = _dbus_list_get_first_link (&recipients);
@@ -165,10 +189,10 @@ bus_dispatch_matches (BusTransaction *transaction,
   if (dbus_error_is_set (&tmp_error))
     {
       dbus_move_error (&tmp_error, error);
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
   else
-    return TRUE;
+    return BUS_RESULT_TRUE;
 }
 
 static DBusHandlerResult
@@ -273,11 +297,19 @@ bus_dispatch (DBusConnection *connection,
   if (service_name &&
       strcmp (service_name, DBUS_SERVICE_DBUS) == 0) /* to bus driver */
     {
-      if (!bus_context_check_security_policy (context, transaction,
-                                              connection, NULL, NULL, message, &error))
+      switch (bus_context_check_security_policy (context, transaction,
+                                                 connection, NULL, NULL, message, &error))
         {
+        case BUS_RESULT_TRUE:
+          break;
+        case BUS_RESULT_FALSE:
           _dbus_verbose ("Security policy rejected message\n");
           goto out;
+          break;
+        case BUS_RESULT_LATER:
+          _dbus_verbose ("Security policy unexpectedly needs time to check message to bus driver - dropping the message.\n");
+          goto out;
+          break;
         }
 
       _dbus_verbose ("Giving message to %s\n", DBUS_SERVICE_DBUS);
@@ -341,8 +373,26 @@ bus_dispatch (DBusConnection *connection,
    * addressed_recipient == NULL), and match it against other connections'
    * match rules.
    */
-  if (!bus_dispatch_matches (transaction, connection, addressed_recipient, message, &error))
-    goto out;
+  switch (bus_dispatch_matches (transaction, connection, addressed_recipient, message, &error))
+    {
+    case BUS_RESULT_TRUE:
+    case BUS_RESULT_FALSE:
+      break;
+    case BUS_RESULT_LATER:
+      /* Roll back by treating this like an out-of-memory error. It
+       * would be a bit cleaner to have a dedicated DBUS_HANDLER_RESULT_LATER
+       * status, but in practice the difference is very minor: returning
+       * DBUS_HANDLER_RESULT_NEED_MEMORY merely causes a erroneous debug message
+       * in dbus_connection_dispatch().
+       */
+      if (transaction != NULL)
+        {
+          bus_transaction_cancel_and_free (transaction);
+          transaction = NULL;
+        }
+      result = DBUS_HANDLER_RESULT_NEED_MEMORY;
+      break;
+    }
 
  out:
   if (dbus_error_is_set (&error))

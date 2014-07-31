@@ -1410,7 +1410,7 @@ complain_about_message (BusContext     *context,
  * NULL for addressed_recipient may mean the bus driver, or may mean
  * no destination was specified in the message (e.g. a signal).
  */
-dbus_bool_t
+BusResult
 bus_context_check_security_policy (BusContext     *context,
                                    BusTransaction *transaction,
                                    DBusConnection *sender,
@@ -1453,7 +1453,7 @@ bus_context_check_security_policy (BusContext     *context,
       dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
                       "Message bus will not accept messages of unknown type\n");
 
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   requested_reply = FALSE;
@@ -1481,7 +1481,7 @@ bus_context_check_security_policy (BusContext     *context,
               _dbus_verbose ("SELinux security check denying send to service\n");
             }
 
-          return FALSE;
+          return BUS_RESULT_FALSE;
         }
 
       if (bus_connection_is_active (sender))
@@ -1507,7 +1507,7 @@ bus_context_check_security_policy (BusContext     *context,
                   if (dbus_error_is_set (&error2))
                     {
                       dbus_move_error (&error2, error);
-                      return FALSE;
+                      return BUS_RESULT_FALSE;
                     }
                 }
             }
@@ -1524,7 +1524,7 @@ bus_context_check_security_policy (BusContext     *context,
             {
               _dbus_verbose ("security check allowing %s message\n",
                              "Hello");
-              return TRUE;
+              return BUS_RESULT_TRUE;
             }
           else
             {
@@ -1535,7 +1535,7 @@ bus_context_check_security_policy (BusContext     *context,
                               "Client tried to send a message other than %s without being registered",
                               "Hello");
 
-              return FALSE;
+              return BUS_RESULT_FALSE;
             }
         }
     }
@@ -1584,20 +1584,32 @@ bus_context_check_security_policy (BusContext     *context,
                 (proposed_recipient == NULL && recipient_policy == NULL));
 
   log = FALSE;
-  if (sender_policy &&
-      !bus_client_policy_check_can_send (sender_policy,
-                                         context->registry,
-                                         requested_reply,
-                                         proposed_recipient,
-                                         message, &toggles, &log))
-    {
-      complain_about_message (context, DBUS_ERROR_ACCESS_DENIED,
-          "Rejected send message", toggles,
-          message, sender, proposed_recipient, requested_reply,
-          (addressed_recipient == proposed_recipient), error);
-      _dbus_verbose ("security policy disallowing message due to sender policy\n");
-      return FALSE;
-    }
+  if (sender_policy) {
+    switch (bus_client_policy_check_can_send (sender,
+                                              sender_policy,
+                                              context->registry,
+                                              requested_reply,
+                                              proposed_recipient,
+                                              message, &toggles, &log))
+      {
+      case BUS_RESULT_TRUE:
+        break;
+      case BUS_RESULT_FALSE:
+        /* TODO: if the message failed a privilege check, then include
+         * the privilege in the error message.
+         */
+        complain_about_message (context, DBUS_ERROR_ACCESS_DENIED,
+                                "Rejected send message", toggles,
+                                message, sender, proposed_recipient, requested_reply,
+                                (addressed_recipient == proposed_recipient), error);
+        _dbus_verbose ("security policy disallowing message due to sender policy\n");
+        return BUS_RESULT_FALSE;
+        break;
+      case BUS_RESULT_LATER:
+        return BUS_RESULT_LATER;
+        break;
+      }
+  }
 
   if (log)
     {
@@ -1622,7 +1634,7 @@ bus_context_check_security_policy (BusContext     *context,
           message, sender, proposed_recipient, requested_reply,
           (addressed_recipient == proposed_recipient), NULL);
       _dbus_verbose ("security policy disallowing message due to recipient policy\n");
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   /* See if limits on size have been exceeded */
@@ -1635,7 +1647,7 @@ bus_context_check_security_policy (BusContext     *context,
           0, message, sender, proposed_recipient, requested_reply, TRUE,
           error);
       _dbus_verbose ("security policy disallowing message due to full message queue\n");
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   /* Record that we will allow a reply here in the future (don't
@@ -1652,9 +1664,9 @@ bus_context_check_security_policy (BusContext     *context,
                                      message, error))
     {
       _dbus_verbose ("Failed to record reply expectation or problem with the message expecting a reply\n");
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   _dbus_verbose ("security policy allowing message\n");
-  return TRUE;
+  return BUS_RESULT_TRUE;
 }

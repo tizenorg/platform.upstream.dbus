@@ -44,6 +44,22 @@ typedef struct BusTransaction   BusTransaction;
 typedef struct BusMatchmaker    BusMatchmaker;
 typedef struct BusMatchRule     BusMatchRule;
 
+/**
+ * This uses BUS_RESULT_TRUE = 0 != TRUE intentionally, to trigger
+ * runtime failures where code uses a simple boolean check or
+ * comparison with TRUE/FALSE or returns TRUE/FALSE when it should use
+ * one of these enums. Such broken code unfortunately does not trigger
+ * compile time errors in C.
+ */
+typedef enum {
+  /** operation allowed or succeeded */
+  BUS_RESULT_TRUE,
+  /** operation denied or failed */
+  BUS_RESULT_FALSE,
+  /** no result yet, ask again later */
+  BUS_RESULT_LATER
+} BusResult;
+
 typedef struct
 {
   long max_incoming_bytes;          /**< How many incoming message bytes for a single connection */
@@ -118,7 +134,7 @@ void              bus_context_log                                (BusContext    
                                                                   DBusSystemLogSeverity severity,
                                                                   const char       *msg,
                                                                   ...);
-dbus_bool_t       bus_context_check_security_policy              (BusContext       *context,
+BusResult         bus_context_check_security_policy              (BusContext       *context,
                                                                   BusTransaction   *transaction,
                                                                   DBusConnection   *sender,
                                                                   DBusConnection   *addressed_recipient,

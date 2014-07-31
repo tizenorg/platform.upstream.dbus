@@ -2059,10 +2059,20 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
   /* If security policy doesn't allow the message, we silently
    * eat it; the driver doesn't care about getting a reply.
    */
-  if (!bus_context_check_security_policy (bus_transaction_get_context (transaction),
-                                          transaction,
-                                          NULL, connection, connection, message, NULL))
-    return TRUE;
+  switch (bus_context_check_security_policy (bus_transaction_get_context (transaction),
+                                             transaction,
+                                             NULL, connection, connection, message, NULL))
+    {
+    case BUS_RESULT_TRUE:
+      break;
+    case BUS_RESULT_FALSE:
+      return TRUE;
+      break;
+    case BUS_RESULT_LATER:
+      _dbus_verbose ("Cannot delay sending message from bus driver, dropping it\n");
+      return TRUE;
+      break;
+    }
 
   return bus_transaction_send (transaction, connection, message);
 }

@@ -22,6 +22,7 @@
  */
 
 #include <config.h>
+#include "check.h"
 #include "policy.h"
 #include "services.h"
 #include "test.h"
@@ -866,8 +867,9 @@ bus_client_policy_append_rule (BusClientPolicy *policy,
   return TRUE;
 }
 
-dbus_bool_t
-bus_client_policy_check_can_send (BusClientPolicy *policy,
+BusResult
+bus_client_policy_check_can_send (DBusConnection  *sender,
+                                  BusClientPolicy *policy,
                                   BusRegistry     *registry,
                                   dbus_bool_t      requested_reply,
                                   DBusConnection  *receiver,
@@ -876,7 +878,7 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
                                   dbus_bool_t     *log)
 {
   DBusList *link;
-  dbus_bool_t allowed;
+  BusResult result;
   
   /* policy->rules is in the order the rules appeared
    * in the config file, i.e. last rule that applies wins
@@ -885,11 +887,12 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
   _dbus_verbose ("  (policy) checking send rules\n");
   *toggles = 0;
   
-  allowed = FALSE;
+  result = BUS_RESULT_FALSE;
   link = _dbus_list_get_first_link (&policy->rules);
-  while (link != NULL)
+  while (link != NULL && result != BUS_RESULT_LATER)
     {
       BusPolicyRule *rule = link->data;
+      BusResult rule_result;
 
       link = _dbus_list_get_next_link (&policy->rules, link);
       
@@ -1032,21 +1035,33 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
             }
         }
 
-      /* TODO: implement BUS_POLICY_RULE_ACCESS_CHECK. Once we know
-         whether it is "allow" or "deny", check
-         rule->d.send.requested_reply and d.send.interface to see
-         whether it really applies (couldn't be checked above). */
+      switch (rule->access)
+        {
+        case BUS_POLICY_RULE_ACCESS_CHECK:
+          rule_result = bus_check_privilege (sender, rule->privilege);
+          /* TODO: Once we know
+             whether it is "allow" or "deny", check
+             rule->d.send.requested_reply and d.send.interface to see
+             whether it really applies (couldn't be checked above). */
+          break;
+        case BUS_POLICY_RULE_ACCESS_ALLOW:
+          rule_result = BUS_RESULT_TRUE;
+          break;
+        case BUS_POLICY_RULE_ACCESS_DENY:
+          rule_result = BUS_RESULT_FALSE;
+          break;
+        }
 
       /* Use this rule */
-      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
+      result = rule_result;
       *log = rule->d.send.log;
       (*toggles)++;
 
-      _dbus_verbose ("  (policy) used rule, allow now = %d\n",
-                     allowed);
+      _dbus_verbose ("  (policy) used rule, result now = %d\n",
+                     result);
     }
 
-  return allowed;
+  return result;
 }
 
 /* See docs on what the args mean on bus_context_check_security_policy()
