@@ -956,13 +956,15 @@ bus_client_policy_check_can_send (DBusConnection  *sender,
           /* The interface is optional in messages. For allow rules, if the message
            * has no interface we want to skip the rule (and thus not allow);
            * for deny rules, if the message has no interface we want to use the
-           * rule (and thus deny).
+           * rule (and thus deny). Check rules are meant to be used like allow
+           * rules (they can grant access, but not remove it), so we treat it like
+           * allow here.
            */
           dbus_bool_t no_interface;
 
           no_interface = dbus_message_get_interface (message) == NULL;
           
-          if ((no_interface && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW) ||
+          if ((no_interface && rule->access != BUS_POLICY_RULE_ACCESS_DENY) ||
               (!no_interface && 
                strcmp (dbus_message_get_interface (message),
                        rule->d.send.interface) != 0))
@@ -1041,7 +1043,7 @@ bus_client_policy_check_can_send (DBusConnection  *sender,
           rule_result = bus_check_privilege (sender, rule->privilege);
           /* TODO: Once we know
              whether it is "allow" or "deny", check
-             rule->d.send.requested_reply and d.send.interface to see
+             rule->d.send.requested_reply to see
              whether it really applies (couldn't be checked above). */
           break;
         case BUS_POLICY_RULE_ACCESS_ALLOW:
@@ -1173,13 +1175,13 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
           /* The interface is optional in messages. For allow rules, if the message
            * has no interface we want to skip the rule (and thus not allow);
            * for deny rules, if the message has no interface we want to use the
-           * rule (and thus deny).
+           * rule (and thus deny). Check rules are treated like allow rules.
            */
           dbus_bool_t no_interface;
 
           no_interface = dbus_message_get_interface (message) == NULL;
           
-          if ((no_interface && rule->access == BUS_POLICY_RULE_ACCESS_ALLOW) ||
+          if ((no_interface && rule->access != BUS_POLICY_RULE_ACCESS_DENY) ||
               (!no_interface &&
                strcmp (dbus_message_get_interface (message),
                        rule->d.receive.interface) != 0))
