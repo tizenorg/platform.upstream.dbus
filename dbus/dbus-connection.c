@@ -319,7 +319,8 @@ struct DBusConnection
    */
   dbus_bool_t dispatch_acquired; /**< Someone has dispatch path (can drain incoming queue) */
   dbus_bool_t io_path_acquired;  /**< Someone has transport io path (can use the transport to read/write messages) */
-  
+
+  unsigned int dispatch_disabled : 1;  /**< if true, then dispatching incoming messages is stopped until enabled again */
   unsigned int shareable : 1; /**< #TRUE if libdbus owns a reference to the connection and can return it from dbus_connection_open() more than once */
   
   unsigned int exit_on_disconnect : 1; /**< If #TRUE, exit after handling disconnect signal */
@@ -446,6 +447,39 @@ _dbus_connection_wakeup_mainloop (DBusConnection *connection)
   if (connection->wakeup_main_function)
     (*connection->wakeup_main_function) (connection->wakeup_main_data);
 }
+
+static void
+_dbus_connection_set_dispatch(DBusConnection *connection,
+                              dbus_bool_t disabled)
+{
+  CONNECTION_LOCK (connection);
+  if (connection->dispatch_disabled != disabled)
+    {
+      DBusDispatchStatus status;
+
+      connection->dispatch_disabled = disabled;
+      status = _dbus_connection_get_dispatch_status_unlocked (connection);
+      _dbus_connection_update_dispatch_status_and_unlock (connection, status);
+    }
+  else
+    {
+      CONNECTION_UNLOCK (connection);
+    }
+}
+
+
+void
+_dbus_connection_enable_dispatch (DBusConnection *connection)
+{
+  _dbus_connection_set_dispatch (connection, FALSE);
+}
+
+void
+ _dbus_connection_disable_dispatch (DBusConnection *connection)
+{
+  _dbus_connection_set_dispatch (connection, TRUE);
+}
+
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 /**
@@ -4250,8 +4284,11 @@ static DBusDispatchStatus
 _dbus_connection_get_dispatch_status_unlocked (DBusConnection *connection)
 {
   HAVE_LOCK_CHECK (connection);
-  
-  if (connection->n_incoming > 0)
+  if (connection->dispatch_disabled)
+    /* TODO: this avoids the disconnect check below. We must ensure that we somehow still
+       detect disconnects. */
+    return DBUS_DISPATCH_COMPLETE;
+  else if (connection->n_incoming > 0)
     return DBUS_DISPATCH_DATA_REMAINS;
   else if (!_dbus_transport_queue_messages (connection->transport))
     return DBUS_DISPATCH_NEED_MEMORY;

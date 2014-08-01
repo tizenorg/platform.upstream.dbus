@@ -101,6 +101,9 @@ void              _dbus_connection_test_get_locks                 (DBusConnectio
                                                                    DBusCondVar **dispatch_cond_loc,
                                                                    DBusCondVar **io_path_cond_loc);
 
+void              _dbus_connection_enable_dispatch                (DBusConnection *connection);
+void              _dbus_connection_disable_dispatch               (DBusConnection *connection);
+
 /* if DBUS_ENABLE_STATS */
 void _dbus_connection_get_stats (DBusConnection *connection,
                                  dbus_uint32_t  *in_messages,
