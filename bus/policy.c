@@ -1040,6 +1040,15 @@ bus_client_policy_check_can_send (DBusConnection  *sender,
       switch (rule->access)
         {
         case BUS_POLICY_RULE_ACCESS_CHECK:
+          /*
+           * <check> rules are meant to be used only for overriding a default deny.
+           * If the result so far isn't deny, then we don't need to check.
+           */
+          if (result != BUS_RESULT_FALSE)
+            {
+              _dbus_verbose ("  (policy) skipping <check> rule because result is already ALLOW\n");
+              continue;
+            }
           rule_result = bus_check_privilege (sender, rule->privilege);
           /* TODO: Once we know
              whether it is "allow" or "deny", check
