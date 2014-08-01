@@ -115,8 +115,8 @@ static dbus_bool_t expire_incomplete_timeout (void *data);
 
 #define BUS_CONNECTION_DATA(connection) (dbus_connection_get_data ((connection), connection_data_slot))
 
-static DBusLoop*
-connection_get_loop (DBusConnection *connection)
+DBusLoop*
+bus_connection_get_loop (DBusConnection *connection)
 {
   BusConnectionData *d;
 
@@ -315,7 +315,7 @@ add_connection_watch (DBusWatch      *watch,
 {
   DBusConnection *connection = data;
 
-  return _dbus_loop_add_watch (connection_get_loop (connection), watch);
+  return _dbus_loop_add_watch (bus_connection_get_loop (connection), watch);
 }
 
 static void
@@ -324,7 +324,7 @@ remove_connection_watch (DBusWatch      *watch,
 {
   DBusConnection *connection = data;
   
-  _dbus_loop_remove_watch (connection_get_loop (connection), watch);
+  _dbus_loop_remove_watch (bus_connection_get_loop (connection), watch);
 }
 
 static void
@@ -333,7 +333,7 @@ toggle_connection_watch (DBusWatch      *watch,
 {
   DBusConnection *connection = data;
 
-  _dbus_loop_toggle_watch (connection_get_loop (connection), watch);
+  _dbus_loop_toggle_watch (bus_connection_get_loop (connection), watch);
 }
 
 static dbus_bool_t
@@ -342,7 +342,7 @@ add_connection_timeout (DBusTimeout    *timeout,
 {
   DBusConnection *connection = data;
   
-  return _dbus_loop_add_timeout (connection_get_loop (connection), timeout);
+  return _dbus_loop_add_timeout (bus_connection_get_loop (connection), timeout);
 }
 
 static void
@@ -351,7 +351,7 @@ remove_connection_timeout (DBusTimeout    *timeout,
 {
   DBusConnection *connection = data;
   
-  _dbus_loop_remove_timeout (connection_get_loop (connection), timeout);
+  _dbus_loop_remove_timeout (bus_connection_get_loop (connection), timeout);
 }
 
 static void
