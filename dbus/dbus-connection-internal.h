@@ -103,6 +103,9 @@ void              _dbus_connection_test_get_locks                 (DBusConnectio
 
 void              _dbus_connection_enable_dispatch                (DBusConnection *connection);
 void              _dbus_connection_disable_dispatch               (DBusConnection *connection);
+dbus_bool_t       _dbus_connection_putback_message                (DBusConnection *connection,
+                                                                   DBusMessage    *message,
+                                                                   DBusError      *error);
 
 /* if DBUS_ENABLE_STATS */
 void _dbus_connection_get_stats (DBusConnection *connection,

@@ -4101,6 +4101,50 @@ _dbus_connection_putback_message_link_unlocked (DBusConnection *connection,
       "_dbus_connection_putback_message_link_unlocked");
 }
 
+dbus_bool_t
+_dbus_connection_putback_message (DBusConnection *connection,
+                                  DBusMessage    *message,
+                                  DBusError      *error)
+{
+  DBusDispatchStatus status;
+  DBusList *message_link = _dbus_list_alloc_link (message);
+  if (message_link == NULL)
+    {
+      _DBUS_SET_OOM (error);
+      return FALSE;
+    }
+  dbus_message_ref (message);
+
+  CONNECTION_LOCK (connection);
+  _dbus_connection_acquire_dispatch (connection);
+  HAVE_LOCK_CHECK (connection);
+  _dbus_list_prepend_link (&connection->incoming_messages,
+                           message_link);
+  connection->n_incoming += 1;
+
+  _dbus_verbose ("Message %p (%s %s %s '%s') put back into queue %p, %d incoming\n",
+                 message_link->data,
+                 dbus_message_type_to_string (dbus_message_get_type (message_link->data)),
+                 dbus_message_get_interface (message_link->data) ?
+                 dbus_message_get_interface (message_link->data) :
+                 "no interface",
+                 dbus_message_get_member (message_link->data) ?
+                 dbus_message_get_member (message_link->data) :
+                 "no member",
+                 dbus_message_get_signature (message_link->data),
+                 connection, connection->n_incoming);
+
+  _dbus_message_trace_ref (message_link->data, -1, -1,
+      "_dbus_connection_putback_message");
+
+  _dbus_connection_release_dispatch (connection);
+
+  status = _dbus_connection_get_dispatch_status_unlocked (connection);
+  _dbus_connection_update_dispatch_status_and_unlock (connection, status);
+
+  return TRUE;
+}
+
 /**
  * Returns the first-received message from the incoming message queue,
  * removing it from the queue. The caller owns a reference to the
