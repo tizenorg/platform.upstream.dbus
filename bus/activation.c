@@ -31,6 +31,7 @@
 #include "services.h"
 #include "test.h"
 #include "utils.h"
+#include <dbus/dbus-connection-internal.h>
 #include <dbus/dbus-internals.h>
 #include <dbus/dbus-hash.h>
 #include <dbus/dbus-list.h>
@@ -1201,8 +1202,25 @@ bus_activation_send_pending_auto_activation_messages (BusActivation  *activation
               goto error;
               break;
             case BUS_RESULT_LATER:
-              /* TODO: deal with pending check while auto-activating */
-              goto error;
+              /*
+               * This must be a method call. Nothing else triggers auto-activation (?!).
+               * Therefore we can put the message back into the queue of the sender
+               * and let it go through bus_dispatch() once more without accidentally
+               * sending to other recipients twice.
+               *
+               * TODO: once we hit a BUS_RESULT_LATER, we also need to put back all
+               * further messages of the same sender. Otherwise message order
+               * is not preserved. We could track this for each sender, or we could put
+               * back *all* messages for this services. Those which could have been
+               * sent because they are from other senders then will get dispatched
+               * immediately. This is probably easier.
+               *
+               * TODO: when we put back multiple messages of the same
+               * sender, we need to preserve ordering. Probably best
+               * done in _dbus_connection_putback_message().
+               */
+              if (!_dbus_connection_putback_message (entry->connection, entry->activation_message, error))
+                goto error;
               break;
             }
         }
