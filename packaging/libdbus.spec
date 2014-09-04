@@ -18,7 +18,6 @@ BuildRequires:  pkgconfig(libsmack)
 Summary:        Developer package for D-Bus
 Group:          Development/Libraries
 Requires:       libdbus = %{version}
-Provides:       dbus-1
 
 
 
