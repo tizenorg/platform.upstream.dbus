@@ -32,6 +32,7 @@ BuildRequires:  libcap-ng-devel
 BuildRequires:  pkgconfig(libsmack)
 # COMMON1-END
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
+Provides:       dbus-1
 
 
 
