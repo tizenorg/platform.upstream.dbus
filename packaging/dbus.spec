@@ -28,6 +28,7 @@ Source3:        dbus_at_console.ck
 Source4:        baselibs.conf
 Source5:        dbus-user.service
 Source6:        dbus-user.socket
+Source7:        dbus.sh
 BuildRequires:  libcap-ng-devel
 BuildRequires:  pkgconfig(libsmack)
 # COMMON1-END
@@ -121,6 +122,9 @@ rm -rf %{buildroot}/%{_libdir}/pkgconfig/dbus-1.pc
 rm -rf %{buildroot}/%{_mandir}/man1/dbus-launch.1*
 rm -rf %{buildroot}/%{_bindir}/dbus-launch
 
+# install script for login shells (/etc/profile.d)
+install -d %{buildroot}%{_sysconfdir}/profile.d
+install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 
 %pre
 # Add the "dbus" user and group
@@ -135,7 +139,7 @@ rm -rf %{buildroot}/%{_bindir}/dbus-launch
 %dir %{_localstatedir}/lib/dbus
 %dir /lib/dbus-1
 %dir /lib/dbus-1/system-services
-%license  COPYING 
+%license  COPYING
 %config(noreplace) %{_sysconfdir}/dbus-1/session.conf
 %config(noreplace) %{_sysconfdir}/dbus-1/system.conf
 %{_sysconfdir}/ConsoleKit
@@ -167,6 +171,7 @@ rm -rf %{buildroot}/%{_bindir}/dbus-launch
 %dir %{_datadir}/dbus-1/interfaces
 %dir %{_datadir}/dbus-1/services
 %dir %{_datadir}/dbus-1/system-services
+%{_sysconfdir}/profile.d/dbus.sh
 
 %files devel-doc
 %defattr(-,root,root)
