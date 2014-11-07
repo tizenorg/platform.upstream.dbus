@@ -155,7 +155,7 @@ bus_smack_has_access (const char *subject, const char *object,
  * @param nomem_err (out) If a nomem situation is encountered this value is set to TRUE.
  * @returns the list of permitted rules if it exists and no errors were encountered otherwise NULL.
  */
-DBusList**
+DBusList*
 bus_smack_generate_allowed_list (DBusConnection *connection,
                                  DBusHashTable  *rules_by_smack_label,
                                  dbus_bool_t *nomem_err)
@@ -164,17 +164,13 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
   char *subject_label;
   DBusHashIter iter;
   dbus_bool_t is_allowed;
-  DBusList **allowed_list;
+  DBusList *allowed_list = NULL;
 
   /* the label of the subject, is the label on the new connection,
      either the service itself or one of its clients */
   subject_label = bus_smack_get_label (connection);
   if (subject_label == NULL)
     return NULL;
-
-  allowed_list = dbus_new0 (DBusList*, 1);
-  if (allowed_list == NULL)
-    goto nomem;
 
   /* Iterate over all the smack labels we have parsed from the .conf files */
   _dbus_hash_iter_init (rules_by_smack_label, &iter);
@@ -216,7 +212,7 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
 
           if (is_allowed)
             {
-              if (!_dbus_list_append (allowed_list, rule))
+              if (!_dbus_list_append (&allowed_list, rule))
                 goto nomem;
 
               bus_policy_rule_ref (rule);
@@ -231,7 +227,7 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
 
 nomem:
   if (allowed_list != NULL)
-    _dbus_list_clear (allowed_list);
+    _dbus_list_clear (&allowed_list);
 
   dbus_free(subject_label);
   *nomem_err = TRUE;

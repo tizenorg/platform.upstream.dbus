@@ -375,15 +375,15 @@ bus_policy_create_client_policy (BusPolicy      *policy,
   if (policy->rules_by_smack_label &&
       _dbus_hash_table_get_n_entries (policy->rules_by_smack_label) > 0)
     {
-      DBusList **list;
+      DBusList *list;
       dbus_bool_t nomem_err = FALSE;
 
       list = bus_smack_generate_allowed_list(connection, policy->rules_by_smack_label, &nomem_err);
 
       if (list != NULL)
         {
-          nomem_err = !add_list_to_client (list, client);
-          _dbus_list_clear (list);
+          nomem_err = !add_list_to_client (&list, client);
+          _dbus_list_clear (&list);
         }
 
       if (nomem_err)

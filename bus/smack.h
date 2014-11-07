@@ -34,7 +34,7 @@ dbus_bool_t bus_smack_handle_get_connection_context (DBusConnection *connection,
                                                      DBusMessage    *message,
                                                      DBusError      *error);
 
-DBusList **bus_smack_generate_allowed_list (DBusConnection *connection,
-                                            DBusHashTable *label_rules,
-                                            dbus_bool_t *error);
+DBusList *bus_smack_generate_allowed_list (DBusConnection *connection,
+                                           DBusHashTable *label_rules,
+                                           dbus_bool_t *error);
 #endif // SMACK_H
