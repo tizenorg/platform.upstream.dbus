@@ -6,6 +6,7 @@ Group:          System/Libraries
 Version:        1.8.2
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
+Source1001:     libdbus.manifest
 
 BuildRequires:  expat-devel
 BuildRequires:  libtool
@@ -44,7 +45,7 @@ bus daemon).
 %prep
 # COMMON2-BEGIN
 %setup -n dbus-%{version} -q
-
+cp %{SOURCE1001} .
 
 
 %build
@@ -93,6 +94,7 @@ make DESTDIR=%{buildroot} install-pkgconfigDATA
 
 
 %files
+%manifest %{name}.manifest
 %defattr(-, root, root)
 %{_libdir}/libdbus-1.so.*
 # Own those directories in the library instead of dbus-1, since dbus users
@@ -108,6 +110,7 @@ make DESTDIR=%{buildroot} install-pkgconfigDATA
 
 
 %files -n dbus-devel
+%manifest %{name}.manifest
 %defattr(-,root,root)
 %{_includedir}/*
 %{_libdir}/libdbus-1.la
