@@ -31,6 +31,7 @@ Source4:        baselibs.conf
 Source5:        dbus-user.service
 Source6:        dbus-user.socket
 Source7:        dbus.sh
+Source1001:     dbus.manifest
 BuildRequires:  libcap-ng-devel
 BuildRequires:  pkgconfig(libsmack)
 # COMMON1-END
@@ -65,6 +66,7 @@ bus daemon).
 %prep
 # COMMON2-BEGIN
 %setup -n dbus-%{version} -q
+cp %{SOURCE1001} .
 
 %build
 autoreconf -fi
@@ -136,8 +138,10 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
         -s /sbin/nologin -r -d '/' dbus 2> /dev/null || :
 
 %docs_package
+%manifest dbus.manifest
 
 %files
+%manifest %{name}.manifest
 %defattr(-, root, root)
 %dir %{_localstatedir}/lib/dbus
 %dir /lib/dbus-1
@@ -178,6 +182,7 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %{_sysconfdir}/profile.d/dbus.sh
 
 %files devel-doc
+%manifest %{name}.manifest
 %defattr(-,root,root)
 %dir %{_datadir}/doc/dbus
 %{_datadir}/doc/dbus/api/
