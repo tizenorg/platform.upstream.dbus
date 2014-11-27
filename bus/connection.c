@@ -36,6 +36,10 @@
 #include <dbus/dbus-timeout.h>
 #include <dbus/dbus-connection-internal.h>
 #include <dbus/dbus-internals.h>
+#ifdef DBUS_ENABLE_CYNARA
+#include <stdlib.h>
+#include <cynara-session.h>
+#endif
 
 /* Trim executed commands to this length; we want to keep logs readable */
 #define MAX_LOG_COMMAND_LEN 50
@@ -116,6 +120,9 @@ typedef struct
 
   /** non-NULL if and only if this is a monitor */
   DBusList *link_in_monitors;
+#ifdef DBUS_ENABLE_CYNARA
+  char *cynara_session_id;
+#endif
 } BusConnectionData;
 
 static dbus_bool_t bus_pending_reply_expired (BusExpireList *list,
@@ -129,8 +136,8 @@ static dbus_bool_t expire_incomplete_timeout (void *data);
 
 #define BUS_CONNECTION_DATA(connection) (dbus_connection_get_data ((connection), connection_data_slot))
 
-static DBusLoop*
-connection_get_loop (DBusConnection *connection)
+DBusLoop*
+bus_connection_get_loop (DBusConnection *connection)
 {
   BusConnectionData *d;
 
@@ -354,7 +361,7 @@ add_connection_watch (DBusWatch      *watch,
 {
   DBusConnection *connection = data;
 
-  return _dbus_loop_add_watch (connection_get_loop (connection), watch);
+  return _dbus_loop_add_watch (bus_connection_get_loop (connection), watch);
 }
 
 static void
@@ -363,7 +370,7 @@ remove_connection_watch (DBusWatch      *watch,
 {
   DBusConnection *connection = data;
   
-  _dbus_loop_remove_watch (connection_get_loop (connection), watch);
+  _dbus_loop_remove_watch (bus_connection_get_loop (connection), watch);
 }
 
 static void
@@ -372,7 +379,7 @@ toggle_connection_watch (DBusWatch      *watch,
 {
   DBusConnection *connection = data;
 
-  _dbus_loop_toggle_watch (connection_get_loop (connection), watch);
+  _dbus_loop_toggle_watch (bus_connection_get_loop (connection), watch);
 }
 
 static dbus_bool_t
@@ -381,7 +388,7 @@ add_connection_timeout (DBusTimeout    *timeout,
 {
   DBusConnection *connection = data;
   
-  return _dbus_loop_add_timeout (connection_get_loop (connection), timeout);
+  return _dbus_loop_add_timeout (bus_connection_get_loop (connection), timeout);
 }
 
 static void
@@ -390,7 +397,7 @@ remove_connection_timeout (DBusTimeout    *timeout,
 {
   DBusConnection *connection = data;
   
-  _dbus_loop_remove_timeout (connection_get_loop (connection), timeout);
+  _dbus_loop_remove_timeout (bus_connection_get_loop (connection), timeout);
 }
 
 static void
@@ -451,6 +458,10 @@ free_connection_data (void *data)
   
   dbus_free (d->name);
   
+#ifdef DBUS_ENABLE_CYNARA
+  free (d->cynara_session_id);
+#endif
+
   dbus_free (d);
 }
 
@@ -1036,6 +1047,22 @@ bus_connection_get_policy (DBusConnection *connection)
   
   return d->policy;
 }
+
+#ifdef DBUS_ENABLE_CYNARA
+const char *bus_connection_get_cynara_session_id (DBusConnection *connection)
+{
+  BusConnectionData *d = BUS_CONNECTION_DATA (connection);
+  _dbus_assert (d != NULL);
+
+  if (d->cynara_session_id == NULL)
+    {
+      unsigned long pid;
+      if (dbus_connection_get_unix_process_id(connection, &pid))
+        d->cynara_session_id = cynara_session_from_pid(pid);
+    }
+  return d->cynara_session_id;
+}
+#endif
 
 static dbus_bool_t
 foreach_active (BusConnections               *connections,
@@ -2300,10 +2327,14 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
    * if we're actively capturing messages, it's nice to log that we
    * tried to send it and did not allow ourselves to do so.
    */
-  if (!bus_context_check_security_policy (bus_transaction_get_context (transaction),
-                                          transaction,
-                                          NULL, connection, connection, message, &error))
+  switch (bus_context_check_security_policy (bus_transaction_get_context (transaction),
+                                             transaction,
+                                             NULL, connection, connection, message, &error,
+                                             NULL))
     {
+    case BUS_RESULT_TRUE:
+      break;
+    case BUS_RESULT_FALSE:
       if (!bus_transaction_capture_error_reply (transaction, &error, message))
         {
           bus_context_log (transaction->context, DBUS_SYSTEM_LOG_WARNING,
@@ -2315,6 +2346,11 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
        * message (see reasoning above) */
       dbus_error_free (&error);
       return TRUE;
+      break;
+    case BUS_RESULT_LATER:
+      _dbus_verbose ("Cannot delay sending message from bus driver, dropping it\n");
+      return TRUE;
+      break;
     }
 
   return bus_transaction_send (transaction, connection, message);

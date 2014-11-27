@@ -22,6 +22,7 @@
  */
 
 #include <config.h>
+#include "check.h"
 #include "policy.h"
 #include "services.h"
 #include "test.h"
@@ -992,17 +993,22 @@ bus_client_policy_append_rule (BusClientPolicy *policy,
   return TRUE;
 }
 
-dbus_bool_t
-bus_client_policy_check_can_send (BusClientPolicy *policy,
-                                  BusRegistry     *registry,
-                                  dbus_bool_t      requested_reply,
-                                  DBusConnection  *receiver,
-                                  DBusMessage     *message,
-                                  dbus_int32_t    *toggles,
-                                  dbus_bool_t     *log)
+BusResult
+bus_client_policy_check_can_send (DBusConnection      *sender,
+                                  BusClientPolicy     *policy,
+                                  BusRegistry         *registry,
+                                  dbus_bool_t          requested_reply,
+                                  DBusConnection      *addressed_recipient,
+                                  DBusConnection      *receiver,
+                                  DBusMessage         *message,
+                                  dbus_int32_t        *toggles,
+                                  dbus_bool_t         *log,
+                                  const char         **privilege_param,
+                                  BusDeferredMessage **deferred_message)
 {
   DBusList *link;
-  dbus_bool_t allowed;
+  BusResult result;
+  const char *privilege;
 
   /* policy->rules is in the order the rules appeared
    * in the config file, i.e. last rule that applies wins
@@ -1011,7 +1017,7 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
   _dbus_verbose ("  (policy) checking send rules\n");
   *toggles = 0;
   
-  allowed = FALSE;
+  result = BUS_RESULT_FALSE;
   link = _dbus_list_get_first_link (&policy->rules);
   while (link != NULL)
     {
@@ -1162,33 +1168,63 @@ bus_client_policy_check_can_send (BusClientPolicy *policy,
         }
 
       /* Use this rule */
-      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
+      switch (rule->access)
+        {
+        case BUS_POLICY_RULE_ACCESS_ALLOW:
+          result = BUS_RESULT_TRUE;
+          break;
+        case BUS_POLICY_RULE_ACCESS_DENY:
+          result = BUS_RESULT_FALSE;
+          break;
+        case BUS_POLICY_RULE_ACCESS_CHECK:
+          result = BUS_RESULT_LATER;
+          privilege = rule->privilege;
+          break;
+        }
+
       *log = rule->d.send.log;
       (*toggles)++;
 
-      _dbus_verbose ("  (policy) used rule, allow now = %d\n",
-                     allowed);
+      _dbus_verbose ("  (policy) used rule, result now = %d\n",
+                     result);
     }
 
-  return allowed;
+  if (result == BUS_RESULT_LATER)
+    {
+      BusContext *context = bus_connection_get_context(sender);
+      BusCheck *check = bus_context_get_check(context);
+
+      result = bus_check_privilege(check, message, sender, addressed_recipient, receiver,
+          privilege, BUS_DEFERRED_MESSAGE_CHECK_SEND, deferred_message);
+    }
+  else
+    privilege = NULL;
+
+  if (privilege_param != NULL)
+    *privilege_param = privilege;
+
+  return result;
 }
 
 /* See docs on what the args mean on bus_context_check_security_policy()
  * comment
  */
-dbus_bool_t
-bus_client_policy_check_can_receive (BusClientPolicy *policy,
-                                     BusRegistry     *registry,
-                                     dbus_bool_t      requested_reply,
-                                     DBusConnection  *sender,
-                                     DBusConnection  *addressed_recipient,
-                                     DBusConnection  *proposed_recipient,
-                                     DBusMessage     *message,
-                                     dbus_int32_t    *toggles)
+BusResult
+bus_client_policy_check_can_receive (BusClientPolicy     *policy,
+                                     BusRegistry         *registry,
+                                     dbus_bool_t          requested_reply,
+                                     DBusConnection      *sender,
+                                     DBusConnection      *addressed_recipient,
+                                     DBusConnection      *proposed_recipient,
+                                     DBusMessage         *message,
+                                     dbus_int32_t        *toggles,
+                                     const char         **privilege_param,
+                                     BusDeferredMessage **deferred_message)
 {
   DBusList *link;
-  dbus_bool_t allowed;
   dbus_bool_t eavesdropping;
+  BusResult result;
+  const char *privilege;
 
   eavesdropping =
     addressed_recipient != proposed_recipient &&
@@ -1201,7 +1237,7 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
   _dbus_verbose ("  (policy) checking receive rules, eavesdropping = %d\n", eavesdropping);
   *toggles = 0;
   
-  allowed = FALSE;
+  result = BUS_RESULT_FALSE;
   link = _dbus_list_get_first_link (&policy->rules);
   while (link != NULL)
     {
@@ -1366,14 +1402,42 @@ bus_client_policy_check_can_receive (BusClientPolicy *policy,
         }
       
       /* Use this rule */
-      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
+      switch (rule->access)
+      {
+        case BUS_POLICY_RULE_ACCESS_ALLOW:
+          result = BUS_RESULT_TRUE;
+          break;
+        case BUS_POLICY_RULE_ACCESS_DENY:
+          result = BUS_RESULT_FALSE;
+          break;
+        case BUS_POLICY_RULE_ACCESS_CHECK:
+          result = BUS_RESULT_LATER;
+          privilege = rule->privilege;
+          break;
+      }
+
       (*toggles)++;
 
-      _dbus_verbose ("  (policy) used rule, allow now = %d\n",
-                     allowed);
+      _dbus_verbose ("  (policy) used rule, result now = %d\n",
+                     result);
     }
 
-  return allowed;
+
+  if (result == BUS_RESULT_LATER)
+    {
+      BusContext *context = bus_connection_get_context(proposed_recipient);
+      BusCheck *check = bus_context_get_check(context);
+
+      result = bus_check_privilege(check, message, sender, addressed_recipient, proposed_recipient,
+                 privilege, BUS_DEFERRED_MESSAGE_CHECK_RECEIVE, deferred_message);
+    }
+  else
+      privilege = NULL;
+
+  if (privilege_param != NULL)
+     *privilege_param = privilege;
+
+  return result;
 }
 
 
