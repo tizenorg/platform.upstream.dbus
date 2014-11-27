@@ -20,6 +20,8 @@ BuildRequires:  xmlto
 BuildRequires:  pkgconfig(libsystemd-daemon)
 BuildRequires:  pkgconfig(libsystemd-login)
 %endif
+BuildRequires:  pkgconfig(cynara-client-async)
+BuildRequires:  pkgconfig(cynara-session)
 Version:        1.8.18
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
@@ -88,7 +90,9 @@ export V=1
     --enable-systemd							\
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
-    --with-systemdsystemunitdir=%{_unitdir}                     
+    --with-systemdsystemunitdir=%{_unitdir}				\
+    --enable-cynara
+
 make %{?_smp_mflags}
 
 %install

@@ -7,6 +7,7 @@ DBUS_BUS_LIBS = \
 	$(THREAD_LIBS) \
 	$(ADT_LIBS) \
 	$(NETWORK_libs) \
+	$(CYNARA_LIBS) \
 	$(NULL)
 
 DBUS_LAUNCHER_LIBS = \
@@ -21,6 +22,7 @@ AM_CPPFLAGS = \
 	-DDBUS_SYSTEM_CONFIG_FILE=\""$(configdir)/system.conf"\" \
 	-DDBUS_COMPILATION \
 	-DDBUS_STATIC_BUILD \
+	$(CYNARA_CFLAGS) \
 	$(NULL)
 
 # if assertions are enabled, improve backtraces
@@ -60,12 +62,16 @@ BUS_SOURCES=					\
 	activation-exit-codes.h			\
 	bus.c					\
 	bus.h					\
+	check.c					\
+	check.h					\
 	config-parser.c				\
 	config-parser.h				\
 	config-parser-common.c			\
 	config-parser-common.h			\
 	connection.c				\
 	connection.h				\
+	cynara.c				\
+	cynara.h				\
 	desktop-file.c				\
 	desktop-file.h				\
 	$(DIR_WATCH_SOURCE)			\

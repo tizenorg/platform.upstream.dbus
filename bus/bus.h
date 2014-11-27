@@ -30,19 +30,35 @@
 #include <dbus/dbus-pipe.h>
 #include <dbus/dbus-sysdeps.h>
 
-typedef struct BusActivation    BusActivation;
-typedef struct BusConnections   BusConnections;
-typedef struct BusContext       BusContext;
-typedef struct BusPolicy        BusPolicy;
-typedef struct BusClientPolicy  BusClientPolicy;
-typedef struct BusPolicyRule    BusPolicyRule;
-typedef struct BusRegistry      BusRegistry;
-typedef struct BusSELinuxID     BusSELinuxID;
-typedef struct BusService       BusService;
-typedef struct BusOwner		BusOwner;
-typedef struct BusTransaction   BusTransaction;
-typedef struct BusMatchmaker    BusMatchmaker;
-typedef struct BusMatchRule     BusMatchRule;
+typedef struct BusActivation      BusActivation;
+typedef struct BusConnections     BusConnections;
+typedef struct BusContext         BusContext;
+typedef struct BusPolicy          BusPolicy;
+typedef struct BusClientPolicy    BusClientPolicy;
+typedef struct BusPolicyRule      BusPolicyRule;
+typedef struct BusRegistry        BusRegistry;
+typedef struct BusSELinuxID       BusSELinuxID;
+typedef struct BusService         BusService;
+typedef struct BusOwner           BusOwner;
+typedef struct BusTransaction     BusTransaction;
+typedef struct BusMatchmaker      BusMatchmaker;
+typedef struct BusMatchRule       BusMatchRule;
+typedef struct BusCheck           BusCheck;
+typedef struct BusDeferredMessage BusDeferredMessage;
+typedef struct BusCynara          BusCynara;
+
+/**
+ * BusResult is defined as a pointer to a dummy structure to allow detection of type mismatches.
+ * The disadvantage of such solution is that now BusResult variables cannot be used in switch
+ * statement.
+ * Additionally, BUS_RESULT_TRUE is defined as 0 instead of 1 to help detect type mismatches
+ * at runtime.
+ */
+typedef const struct BusResultStruct { int dummy; } *BusResult;
+
+static const BusResult BUS_RESULT_TRUE  = (BusResult)0x0;
+static const BusResult BUS_RESULT_FALSE = (BusResult)0x1;
+static const BusResult BUS_RESULT_LATER = (BusResult)0x2;
 
 typedef struct
 {
@@ -96,6 +112,7 @@ BusConnections*   bus_context_get_connections                    (BusContext    
 BusActivation*    bus_context_get_activation                     (BusContext       *context);
 BusMatchmaker*    bus_context_get_matchmaker                     (BusContext       *context);
 DBusLoop*         bus_context_get_loop                           (BusContext       *context);
+BusCheck *        bus_context_get_check                          (BusContext       *context);
 dbus_bool_t       bus_context_allow_unix_user                    (BusContext       *context,
                                                                   unsigned long     uid);
 dbus_bool_t       bus_context_allow_windows_user                 (BusContext       *context,
@@ -121,13 +138,14 @@ void              bus_context_log                                (BusContext    
                                                                   DBusSystemLogSeverity severity,
                                                                   const char       *msg,
                                                                   ...);
-dbus_bool_t       bus_context_check_security_policy              (BusContext       *context,
-                                                                  BusTransaction   *transaction,
-                                                                  DBusConnection   *sender,
-                                                                  DBusConnection   *addressed_recipient,
-                                                                  DBusConnection   *proposed_recipient,
-                                                                  DBusMessage      *message,
-                                                                  DBusError        *error);
 void              bus_context_check_all_watches                  (BusContext       *context);
+BusResult         bus_context_check_security_policy              (BusContext          *context,
+                                                                  BusTransaction      *transaction,
+                                                                  DBusConnection      *sender,
+                                                                  DBusConnection      *addressed_recipient,
+                                                                  DBusConnection      *proposed_recipient,
+                                                                  DBusMessage         *message,
+                                                                  DBusError           *error,
+                                                                  BusDeferredMessage **deferred_message);
 
 #endif /* BUS_BUS_H */

@@ -1748,6 +1748,18 @@ if test "x$enable_stats" = xyes; then
     [Define to enable bus daemon usage statistics])
 fi
 
+#enable cynara integration
+AC_ARG_ENABLE([cynara], [AS_HELP_STRING([--enable-cynara], [enable Cynara integration])], [], [enable_cynara=no])
+if test "x$enable_cynara" = xyes; then
+  PKG_CHECK_MODULES([CYNARA], [cynara-client-async >= 0.6.0 cynara-session >= 0.6.0],
+     [AC_DEFINE([DBUS_ENABLE_CYNARA], [1], [Define to enable Cynara privilege checks in dbus-daemon])],
+     [AC_MSG_ERROR([libcynara-client-async and cynara-session are required to enable Cynara integration])])
+fi
+
+AC_SUBST([CYNARA_CFLAGS])
+AC_SUBST([CYNARA_LIBS])
+
+
 AC_CONFIG_FILES([
 Doxyfile
 dbus/versioninfo.rc
@@ -1778,6 +1790,7 @@ dbus-1.pc
 dbus-1-uninstalled.pc
 test/data/valid-config-files/debug-allow-all.conf
 test/data/valid-config-files/debug-allow-all-sha1.conf
+test/data/valid-config-files/debug-check-some.conf
 test/data/valid-config-files/incoming-limit.conf
 test/data/valid-config-files-system/debug-allow-all-pass.conf
 test/data/valid-config-files-system/debug-allow-all-fail.conf
