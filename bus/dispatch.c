@@ -25,6 +25,7 @@
 
 #include <config.h>
 #include "dispatch.h"
+#include "check.h"
 #include "connection.h"
 #include "driver.h"
 #include "services.h"
@@ -56,13 +57,14 @@ send_one_message (DBusConnection *connection,
                   BusTransaction *transaction,
                   DBusError      *error)
 {
-  if (!bus_context_check_security_policy (context, transaction,
-                                          sender,
-                                          addressed_recipient,
-                                          connection,
-                                          message,
-                                          NULL))
-    return TRUE; /* silently don't send it */
+  BusDeferredMessage *deferred_message;
+  BusResult result;
+
+  result = bus_context_check_security_policy (context, transaction, sender, addressed_recipient,
+      connection, message, NULL, &deferred_message);
+
+  if (result != BUS_RESULT_TRUE)
+      return TRUE; /* silently don't send it */
 
   if (dbus_message_contains_unix_fds(message) &&
       !dbus_connection_can_send_type(connection, DBUS_TYPE_UNIX_FD))
@@ -92,6 +94,7 @@ bus_dispatch_matches (BusTransaction *transaction,
   BusMatchmaker *matchmaker;
   DBusList *link;
   BusContext *context;
+  BusDeferredMessage *deferred_message;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 
@@ -107,11 +110,22 @@ bus_dispatch_matches (BusTransaction *transaction,
   /* First, send the message to the addressed_recipient, if there is one. */
   if (addressed_recipient != NULL)
     {
-      if (!bus_context_check_security_policy (context, transaction,
-                                              sender, addressed_recipient,
-                                              addressed_recipient,
-                                              message, error))
-        return FALSE;
+      switch (bus_context_check_security_policy (context, transaction,
+                                                 sender, addressed_recipient,
+                                                 addressed_recipient,
+                                                 message, error,
+                                                 &deferred_message))
+        {
+          case BUS_RESULT_TRUE:
+            break;
+          case BUS_RESULT_FALSE:
+            return BUS_RESULT_FALSE;
+          case BUS_RESULT_LATER:
+            dbus_set_error (error,
+                            DBUS_ERROR_ACCESS_DENIED,
+                            "Rejecting message because time is needed to check security policy");
+            return BUS_RESULT_FALSE;
+        }
 
       if (dbus_message_contains_unix_fds (message) &&
           !dbus_connection_can_send_type (addressed_recipient,
@@ -273,10 +287,21 @@ bus_dispatch (DBusConnection *connection,
   if (service_name &&
       strcmp (service_name, DBUS_SERVICE_DBUS) == 0) /* to bus driver */
     {
-      if (!bus_context_check_security_policy (context, transaction,
-                                              connection, NULL, NULL, message, &error))
+      BusDeferredMessage *deferred_message;
+      switch (bus_context_check_security_policy (context, transaction,
+                                                 connection, NULL, NULL, message, &error,
+                                                 &deferred_message))
         {
+        case BUS_RESULT_TRUE:
+          break;
+        case BUS_RESULT_FALSE:
           _dbus_verbose ("Security policy rejected message\n");
+          goto out;
+        case BUS_RESULT_LATER:
+          dbus_set_error (&error,
+                          DBUS_ERROR_ACCESS_DENIED,
+                          "Rejecting message because time is needed to check security policy");
+          _dbus_verbose ("Security policy needs time to check policy. Dropping message\n");
           goto out;
         }
 
