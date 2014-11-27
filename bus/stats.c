@@ -34,7 +34,7 @@
 
 #ifdef DBUS_ENABLE_STATS
 
-dbus_bool_t
+BusResult
 bus_stats_handle_get_stats (DBusConnection *connection,
                             BusTransaction *transaction,
                             DBusMessage    *message,
@@ -100,17 +100,17 @@ bus_stats_handle_get_stats (DBusConnection *connection,
     goto oom;
 
   dbus_message_unref (reply);
-  return TRUE;
+  return BUS_RESULT_TRUE;
 
 oom:
   if (reply != NULL)
     dbus_message_unref (reply);
 
   BUS_SET_OOM (error);
-  return FALSE;
+  return BUS_RESULT_FALSE;
 }
 
-dbus_bool_t
+BusResult
 bus_stats_handle_get_connection_stats (DBusConnection *caller_connection,
                                        BusTransaction *transaction,
                                        DBusMessage    *message,
@@ -134,7 +134,7 @@ bus_stats_handle_get_connection_stats (DBusConnection *caller_connection,
   if (! dbus_message_get_args (message, error,
                                DBUS_TYPE_STRING, &bus_name,
                                DBUS_TYPE_INVALID))
-      return FALSE;
+      return BUS_RESULT_FALSE;
 
   _dbus_string_init_const (&bus_name_str, bus_name);
   service = bus_registry_lookup (registry, &bus_name_str);
@@ -143,7 +143,7 @@ bus_stats_handle_get_connection_stats (DBusConnection *caller_connection,
     {
       dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
                       "Bus name '%s' has no owner", bus_name);
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   stats_connection = bus_service_get_primary_owners_connection (service);
@@ -205,14 +205,14 @@ bus_stats_handle_get_connection_stats (DBusConnection *caller_connection,
     goto oom;
 
   dbus_message_unref (reply);
-  return TRUE;
+  return BUS_RESULT_TRUE;
 
 oom:
   if (reply != NULL)
     dbus_message_unref (reply);
 
   BUS_SET_OOM (error);
-  return FALSE;
+  return BUS_RESULT_FALSE;
 }
 
 #endif
