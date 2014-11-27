@@ -30,19 +30,38 @@
 #include <dbus/dbus-pipe.h>
 #include <dbus/dbus-sysdeps.h>
 
-typedef struct BusActivation    BusActivation;
-typedef struct BusConnections   BusConnections;
-typedef struct BusContext       BusContext;
-typedef struct BusPolicy        BusPolicy;
-typedef struct BusClientPolicy  BusClientPolicy;
-typedef struct BusPolicyRule    BusPolicyRule;
-typedef struct BusRegistry      BusRegistry;
-typedef struct BusSELinuxID     BusSELinuxID;
-typedef struct BusService       BusService;
-typedef struct BusOwner		BusOwner;
-typedef struct BusTransaction   BusTransaction;
-typedef struct BusMatchmaker    BusMatchmaker;
-typedef struct BusMatchRule     BusMatchRule;
+typedef struct BusActivation      BusActivation;
+typedef struct BusConnections     BusConnections;
+typedef struct BusContext         BusContext;
+typedef struct BusPolicy          BusPolicy;
+typedef struct BusClientPolicy    BusClientPolicy;
+typedef struct BusPolicyRule      BusPolicyRule;
+typedef struct BusRegistry        BusRegistry;
+typedef struct BusSELinuxID       BusSELinuxID;
+typedef struct BusService         BusService;
+typedef struct BusOwner           BusOwner;
+typedef struct BusTransaction     BusTransaction;
+typedef struct BusMatchmaker      BusMatchmaker;
+typedef struct BusMatchRule       BusMatchRule;
+typedef struct BusCheck           BusCheck;
+typedef struct BusDeferredMessage BusDeferredMessage;
+typedef struct BusCynara          BusCynara;
+
+/**
+ * This uses BUS_RESULT_TRUE = 0 != TRUE intentionally, to trigger
+ * runtime failures where code uses a simple boolean check or
+ * comparison with TRUE/FALSE or returns TRUE/FALSE when it should use
+ * one of these enums. Such broken code unfortunately does not trigger
+ * compile time errors in C.
+ */
+typedef enum {
+  /** operation allowed or succeeded */
+  BUS_RESULT_TRUE,
+  /** operation denied or failed */
+  BUS_RESULT_FALSE,
+  /** no result yet, ask again later */
+  BUS_RESULT_LATER
+} BusResult;
 
 typedef struct
 {
@@ -95,6 +114,7 @@ BusConnections*   bus_context_get_connections                    (BusContext    
 BusActivation*    bus_context_get_activation                     (BusContext       *context);
 BusMatchmaker*    bus_context_get_matchmaker                     (BusContext       *context);
 DBusLoop*         bus_context_get_loop                           (BusContext       *context);
+BusCheck *        bus_context_get_check                          (BusContext       *context);
 dbus_bool_t       bus_context_allow_unix_user                    (BusContext       *context,
                                                                   unsigned long     uid);
 dbus_bool_t       bus_context_allow_windows_user                 (BusContext       *context,
@@ -118,12 +138,13 @@ void              bus_context_log                                (BusContext    
                                                                   DBusSystemLogSeverity severity,
                                                                   const char       *msg,
                                                                   ...);
-dbus_bool_t       bus_context_check_security_policy              (BusContext       *context,
-                                                                  BusTransaction   *transaction,
-                                                                  DBusConnection   *sender,
-                                                                  DBusConnection   *addressed_recipient,
-                                                                  DBusConnection   *proposed_recipient,
-                                                                  DBusMessage      *message,
-                                                                  DBusError        *error);
+BusResult         bus_context_check_security_policy              (BusContext          *context,
+                                                                  BusTransaction      *transaction,
+                                                                  DBusConnection      *sender,
+                                                                  DBusConnection      *addressed_recipient,
+                                                                  DBusConnection      *proposed_recipient,
+                                                                  DBusMessage         *message,
+                                                                  DBusError           *error,
+                                                                  BusDeferredMessage **deferred_message);
 
 #endif /* BUS_BUS_H */

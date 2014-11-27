@@ -152,21 +152,27 @@ dbus_bool_t      bus_policy_merge                 (BusPolicy        *policy,
 BusClientPolicy* bus_client_policy_new               (void);
 BusClientPolicy* bus_client_policy_ref               (BusClientPolicy  *policy);
 void             bus_client_policy_unref             (BusClientPolicy  *policy);
-dbus_bool_t      bus_client_policy_check_can_send    (BusClientPolicy  *policy,
-                                                      BusRegistry      *registry,
-                                                      dbus_bool_t       requested_reply,
-                                                      DBusConnection   *receiver,
-                                                      DBusMessage      *message,
-                                                      dbus_int32_t     *toggles,
-                                                      dbus_bool_t      *log);
-dbus_bool_t      bus_client_policy_check_can_receive (BusClientPolicy  *policy,
-                                                      BusRegistry      *registry,
-                                                      dbus_bool_t       requested_reply,
-                                                      DBusConnection   *sender,
-                                                      DBusConnection   *addressed_recipient,
-                                                      DBusConnection   *proposed_recipient,
-                                                      DBusMessage      *message,
-                                                      dbus_int32_t     *toggles);
+BusResult        bus_client_policy_check_can_send    (DBusConnection      *sender,
+                                                      BusClientPolicy     *policy,
+                                                      BusRegistry         *registry,
+                                                      dbus_bool_t          requested_reply,
+                                                      DBusConnection      *addressed_recipient,
+                                                      DBusConnection      *receiver,
+                                                      DBusMessage         *message,
+                                                      dbus_int32_t        *toggles,
+                                                      dbus_bool_t         *log,
+                                                      const char         **privilege_param,
+                                                      BusDeferredMessage **deferred_message);
+BusResult        bus_client_policy_check_can_receive (BusClientPolicy     *policy,
+                                                      BusRegistry         *registry,
+                                                      dbus_bool_t          requested_reply,
+                                                      DBusConnection      *sender,
+                                                      DBusConnection      *addressed_recipient,
+                                                      DBusConnection      *proposed_recipient,
+                                                      DBusMessage         *message,
+                                                      dbus_int32_t        *toggles,
+                                                      const char         **privilege_param,
+                                                      BusDeferredMessage **deferred_message);
 dbus_bool_t      bus_client_policy_check_can_own     (BusClientPolicy  *policy,
                                                       const DBusString *service_name);
 dbus_bool_t      bus_client_policy_append_rule       (BusClientPolicy  *policy,

@@ -31,6 +31,7 @@
 typedef dbus_bool_t (* BusConnectionForeachFunction) (DBusConnection *connection, 
                                                       void           *data);
 
+DBusLoop*       bus_connection_get_loop           (DBusConnection *connection);
 
 BusConnections* bus_connections_new               (BusContext                   *context);
 BusConnections* bus_connections_ref               (BusConnections               *connections);
@@ -115,6 +116,10 @@ dbus_bool_t      bus_connection_get_unix_groups  (DBusConnection       *connecti
                                                   int                  *n_groups,
                                                   DBusError            *error);
 BusClientPolicy* bus_connection_get_policy  (DBusConnection       *connection);
+
+#ifdef DBUS_ENABLE_CYNARA
+const char *bus_connection_get_cynara_session_id (DBusConnection *connection);
+#endif
 
 /* transaction API so we can send or not send a block of messages as a whole */
 
