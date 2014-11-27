@@ -50,8 +50,9 @@ void         bus_registry_foreach         (BusRegistry                 *registry
 dbus_bool_t  bus_registry_list_services   (BusRegistry                 *registry,
                                            char                      ***listp,
                                            int                         *array_len);
-dbus_bool_t  bus_registry_acquire_service (BusRegistry                 *registry,
+BusResult    bus_registry_acquire_service (BusRegistry                 *registry,
                                            DBusConnection              *connection,
+                                           DBusMessage                 *message,
                                            const DBusString            *service_name,
                                            dbus_uint32_t                flags,
                                            dbus_uint32_t               *result,

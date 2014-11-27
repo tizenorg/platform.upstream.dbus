@@ -374,24 +374,26 @@ bus_registry_list_services (BusRegistry *registry,
   return FALSE;
 }
 
-dbus_bool_t
+BusResult
 bus_registry_acquire_service (BusRegistry      *registry,
                               DBusConnection   *connection,
+                              DBusMessage      *message,
                               const DBusString *service_name,
                               dbus_uint32_t     flags,
                               dbus_uint32_t    *result,
                               BusTransaction   *transaction,
                               DBusError        *error)
 {
-  dbus_bool_t retval;
+  BusResult retval;
   DBusConnection *old_owner_conn;
   BusClientPolicy *policy;
   BusService *service;
   BusActivation  *activation;
   BusSELinuxID *sid;
   BusOwner *primary_owner;
+  BusResult res;
  
-  retval = FALSE;
+  retval = BUS_RESULT_FALSE;
 
   if (!_dbus_validate_bus_name (service_name, 0,
                                 _dbus_string_get_length (service_name)))
@@ -459,7 +461,8 @@ bus_registry_acquire_service (BusRegistry      *registry,
       goto out;
     }
   
-  if (!bus_client_policy_check_can_own (policy, service_name))
+  res = bus_client_policy_check_can_own (policy, service_name, connection, message);
+  if (res == BUS_RESULT_FALSE)
     {
       dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
                       "Connection \"%s\" is not allowed to own the service \"%s\" due "
@@ -468,6 +471,11 @@ bus_registry_acquire_service (BusRegistry      *registry,
                       bus_connection_get_name (connection) :
                       "(inactive)",
                       _dbus_string_get_const_data (service_name));
+      goto out;
+    }
+  else if (res == BUS_RESULT_LATER)
+    {
+      retval = BUS_RESULT_LATER;
       goto out;
     }
 
@@ -586,11 +594,13 @@ bus_registry_acquire_service (BusRegistry      *registry,
     }
 
   activation = bus_context_get_activation (registry->context);
-  retval = bus_activation_send_pending_auto_activation_messages (activation,
+  
+  if (bus_activation_send_pending_auto_activation_messages (activation,
 								 service,
-								 transaction);
-  if (!retval)
-    BUS_SET_OOM (error);
+								 transaction))
+      retval = BUS_RESULT_TRUE;
+  else
+      BUS_SET_OOM (error);
   
  out:
   return retval;

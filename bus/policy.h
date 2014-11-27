@@ -170,8 +170,10 @@ BusResult        bus_client_policy_check_can_receive (BusClientPolicy     *polic
                                                       dbus_int32_t        *toggles,
                                                       const char         **privilege_param,
                                                       BusDeferredMessage **deferred_message);
-dbus_bool_t      bus_client_policy_check_can_own     (BusClientPolicy  *policy,
-                                                      const DBusString *service_name);
+BusResult        bus_client_policy_check_can_own     (BusClientPolicy  *policy,
+                                                      const DBusString *service_name,
+                                                      DBusConnection   *connection,
+                                                      DBusMessage      *message);
 dbus_bool_t      bus_client_policy_append_rule       (BusClientPolicy  *policy,
                                                       BusPolicyRule    *rule);
 void             bus_client_policy_optimize          (BusClientPolicy  *policy);
