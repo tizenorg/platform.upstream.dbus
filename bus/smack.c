@@ -40,7 +40,7 @@
 #define SMACK_READ_WRITE "RW"
 
 
-dbus_bool_t
+BusResult
 bus_smack_handle_get_connection_context (DBusConnection *connection,
                                          BusTransaction *transaction,
                                          DBusMessage    *message,
@@ -61,7 +61,7 @@ bus_smack_handle_get_connection_context (DBusConnection *connection,
 
   if (!dbus_message_get_args (message, error, DBUS_TYPE_STRING, &remote_end,
                               DBUS_TYPE_INVALID))
-    return FALSE;
+    return BUS_RESULT_FALSE;
 
   _dbus_verbose ("asked for label of connection %s\n", remote_end);
 
@@ -72,7 +72,7 @@ bus_smack_handle_get_connection_context (DBusConnection *connection,
     {
       dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
                       "Bus name '%s' has no owner", remote_end);
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   remote_connection = bus_service_get_primary_owners_connection (service);
@@ -100,7 +100,7 @@ bus_smack_handle_get_connection_context (DBusConnection *connection,
 
   dbus_message_unref (reply);
 
-  return TRUE;
+  return BUS_RESULT_TRUE;
 
 oom:
   BUS_SET_OOM (error);
@@ -109,11 +109,11 @@ err:
   if (reply != NULL)
     dbus_message_unref (reply);
 
-  return FALSE;
+  return BUS_RESULT_FALSE;
 #else
   dbus_set_error (error, DBUS_ERROR_NOT_SUPPORTED,
                   "SMACK support is not enabled");
-  return FALSE;
+  return BUS_RESULT_FALSE;
 #endif
 }
 

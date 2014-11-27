@@ -514,8 +514,18 @@ bus_dispatch (DBusConnection *connection,
         }
 
       _dbus_verbose ("Giving message to %s\n", DBUS_SERVICE_DBUS);
-      if (!bus_driver_handle_message (connection, transaction, message, &error))
-        goto out;
+      switch (bus_driver_handle_message (connection, transaction, message, &error))
+        {
+        case BUS_RESULT_TRUE:
+          break;
+        case BUS_RESULT_FALSE:
+          goto out;
+        case BUS_RESULT_LATER:
+          bus_transaction_cancel_and_free (transaction);
+          transaction = NULL;
+          result = DBUS_HANDLER_RESULT_LATER;
+          goto out;
+        }
     }
   else if (!bus_connection_is_active (connection)) /* clients must talk to bus driver first */
     {
