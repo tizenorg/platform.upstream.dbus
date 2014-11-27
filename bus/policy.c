@@ -1448,18 +1448,21 @@ bus_client_policy_check_can_receive (BusClientPolicy     *policy,
 
 
 
-static dbus_bool_t
+static BusResult
 bus_rules_check_can_own (DBusList *rules,
-                         const DBusString *service_name)
+                         const DBusString *service_name,
+                         DBusConnection   *connection,
+                         DBusMessage      *message)
 {
   DBusList *link;
-  dbus_bool_t allowed;
+  BusResult result;
+  const char *privilege;
   
   /* rules is in the order the rules appeared
    * in the config file, i.e. last rule that applies wins
    */
 
-  allowed = FALSE;
+  result = BUS_RESULT_FALSE;
   link = _dbus_list_get_first_link (&rules);
   while (link != NULL)
     {
@@ -1495,17 +1498,45 @@ bus_rules_check_can_own (DBusList *rules,
         }
 
       /* Use this rule */
-      allowed = rule->access == BUS_POLICY_RULE_ACCESS_ALLOW;
+      switch (rule->access)
+      {
+      case BUS_POLICY_RULE_ACCESS_ALLOW:
+        result = BUS_RESULT_TRUE;
+        break;
+      case BUS_POLICY_RULE_ACCESS_DENY:
+        result = BUS_RESULT_FALSE;
+        break;
+      case BUS_POLICY_RULE_ACCESS_CHECK:
+        result = BUS_RESULT_LATER;
+        privilege = rule->privilege;
+        break;
+      }
     }
 
-  return allowed;
+  if (result == BUS_RESULT_LATER)
+    {
+      BusContext *context = bus_connection_get_context(connection);
+      BusCheck *check = bus_context_get_check(context);
+      BusDeferredMessage *deferred_message;
+
+      result = bus_check_privilege(check, message, connection, NULL, NULL,
+          privilege, BUS_DEFERRED_MESSAGE_CHECK_OWN, &deferred_message);
+      if (result == BUS_RESULT_LATER)
+        {
+          bus_deferred_message_disable_sender(deferred_message);
+        }
+    }
+
+  return result;
 }
 
-dbus_bool_t
+BusResult
 bus_client_policy_check_can_own (BusClientPolicy  *policy,
-                                 const DBusString *service_name)
+                                 const DBusString *service_name,
+                                 DBusConnection   *connection,
+                                 DBusMessage      *message)
 {
-  return bus_rules_check_can_own (policy->rules, service_name);
+  return bus_rules_check_can_own (policy->rules, service_name, connection, message);
 }
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
@@ -1513,7 +1544,7 @@ dbus_bool_t
 bus_policy_check_can_own (BusPolicy  *policy,
                           const DBusString *service_name)
 {
-  return bus_rules_check_can_own (policy->default_rules, service_name);
+  return bus_rules_check_can_own (policy->default_rules, service_name, NULL, NULL);
 }
 #endif /* DBUS_ENABLE_EMBEDDED_TESTS */
 
