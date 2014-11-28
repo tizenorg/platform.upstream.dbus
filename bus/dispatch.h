@@ -33,6 +33,7 @@ BusResult   bus_dispatch_matches           (BusTransaction *transaction,
                                             DBusConnection *sender,
                                             DBusConnection *recipient,
                                             DBusMessage    *message,
+                                            dbus_bool_t     deferred_dispatch,
                                             DBusError      *error);
 
 #endif /* BUS_DISPATCH_H */

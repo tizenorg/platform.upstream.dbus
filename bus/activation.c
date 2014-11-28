@@ -1197,7 +1197,7 @@ bus_activation_send_pending_auto_activation_messages (BusActivation  *activation
           switch (bus_dispatch_matches (transaction,
                                         entry->connection,
                                         addressed_recipient,
-                                        entry->activation_message, error))
+                                        entry->activation_message, FALSE, error))
             {
             case BUS_RESULT_TRUE:
               break;
@@ -2041,7 +2041,7 @@ bus_activation_activate_service (BusActivation  *activation,
                                entry->systemd_service);
               /* Wonderful, systemd is connected, let's just send the msg */
               switch (bus_dispatch_matches (activation_transaction, NULL, bus_service_get_primary_owners_connection (service),
-                                            message, error))
+                                            message, FALSE, error))
                 {
                 case BUS_RESULT_TRUE:
                   retval = TRUE;

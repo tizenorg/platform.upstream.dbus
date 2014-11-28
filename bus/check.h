@@ -64,11 +64,20 @@ BusDeferredMessage *bus_deferred_message_new                (DBusMessage *messag
 
 BusDeferredMessage *bus_deferred_message_ref                (BusDeferredMessage *message);
 void                bus_deferred_message_unref              (BusDeferredMessage *message);
+BusResult           bus_deferred_message_dispatch           (BusDeferredMessage *message);
+dbus_bool_t         bus_deferred_message_waits_for_check    (BusDeferredMessage *deferred_message);
+DBusConnection     *bus_deferred_message_get_recipient      (BusDeferredMessage *message);
 void                bus_deferred_message_response_received  (BusDeferredMessage *deferred_message,
                                                              BusResult result);
+dbus_bool_t         bus_deferred_message_queue_at_recipient (BusDeferredMessage *deferred_message,
+                                                             dbus_bool_t full_dispatch,
+                                                             dbus_bool_t prepend);
 void                bus_deferred_message_disable_sender     (BusDeferredMessage *deferred_message);
 
 BusDeferredMessageStatus  bus_deferred_message_get_status   (BusDeferredMessage *deferred_message);
+
+void                bus_deferred_message_cancel_transaction_hook (void *data);
+
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 extern dbus_bool_t (*bus_check_test_override) (DBusConnection *connection,

@@ -30,9 +30,12 @@
 #include "signals.h"
 #include "expirelist.h"
 #include "selinux.h"
+#include "check.h"
 #include <dbus/dbus-list.h>
 #include <dbus/dbus-hash.h>
 #include <dbus/dbus-timeout.h>
+#include <dbus/dbus-connection-internal.h>
+#include <dbus/dbus-message-internal.h>
 #ifdef DBUS_ENABLE_CYNARA
 #include <stdlib.h>
 #include <cynara-session.h>
@@ -94,6 +97,7 @@ typedef struct
   DBusMessage *oom_message;
   DBusPreallocatedSend *oom_preallocated;
   BusClientPolicy *policy;
+  DBusList *deferred_messages;  /**< Queue of messages deferred due to pending policy check */
 
   char *cached_loginfo_string;
   BusSELinuxID *selinux_id;
@@ -252,6 +256,8 @@ bus_connection_disconnected (DBusConnection *connection)
         
       bus_transaction_execute_and_free (transaction);
     }
+
+  bus_connection_clear_deferred_messages(connection);
 
   bus_dispatch_remove_connection (connection);
   
@@ -2102,13 +2108,14 @@ bus_transaction_send_from_driver (BusTransaction *transaction,
       break;
     }
 
-  return bus_transaction_send (transaction, connection, message);
+  return bus_transaction_send (transaction, connection, message, FALSE);
 }
 
 dbus_bool_t
 bus_transaction_send (BusTransaction *transaction,
                       DBusConnection *connection,
-                      DBusMessage    *message)
+                      DBusMessage    *message,
+                      dbus_bool_t     deferred_dispatch)
 {
   MessageToSend *to_send;
   BusConnectionData *d;
@@ -2134,7 +2141,36 @@ bus_transaction_send (BusTransaction *transaction,
   
   d = BUS_CONNECTION_DATA (connection);
   _dbus_assert (d != NULL);
-  
+
+  if (!deferred_dispatch && d->deferred_messages != NULL)
+    {
+      BusDeferredMessage *deferred_message;
+      /* sender and addressed recipient are not required at this point as we only need to send message
+       * to a single recipient without performing policy check. */
+      deferred_message = bus_deferred_message_new (message,
+                                                   NULL,
+                                                   NULL,
+                                                   connection,
+                                                   BUS_RESULT_TRUE);
+      if (deferred_message == NULL)
+        return FALSE;
+
+      if (bus_connection_queue_deferred_message(connection, deferred_message, FALSE))
+        {
+          if (bus_transaction_add_cancel_hook(transaction,
+              bus_deferred_message_cancel_transaction_hook, deferred_message, NULL))
+            {
+              bus_deferred_message_unref(deferred_message);
+              return TRUE;
+            }
+
+          bus_connection_remove_deferred_message(connection, deferred_message);
+        }
+      bus_deferred_message_unref(deferred_message);
+
+      return FALSE;
+    }
+
   to_send = dbus_new (MessageToSend, 1);
   if (to_send == NULL)
     {
@@ -2384,6 +2420,110 @@ bus_transaction_add_cancel_hook (BusTransaction               *transaction,
     }
 
   return TRUE;
+}
+
+void
+bus_connection_dispatch_deferred (DBusConnection *connection)
+{
+  BusDeferredMessage *message;
+
+  _dbus_return_if_fail (connection != NULL);
+
+  while ((message = bus_connection_pop_deferred_message(connection)) != NULL)
+    {
+      bus_deferred_message_dispatch(message);
+      bus_deferred_message_unref(message);
+    }
+}
+
+dbus_bool_t
+bus_connection_has_deferred_messages (DBusConnection *connection)
+{
+  BusConnectionData *d = BUS_CONNECTION_DATA(connection);
+  return d->deferred_messages != NULL ? TRUE : FALSE;
+}
+
+dbus_bool_t
+bus_connection_queue_deferred_message (DBusConnection *connection,
+                                       BusDeferredMessage *message,
+                                       dbus_bool_t prepend)
+{
+  BusConnectionData *d = BUS_CONNECTION_DATA(connection);
+  dbus_bool_t success;
+  if (prepend)
+    success = _dbus_list_prepend(&d->deferred_messages, message);
+  else
+    success = _dbus_list_append(&d->deferred_messages, message);
+
+  if (success)
+    {
+      bus_deferred_message_ref(message);
+      return TRUE;
+    }
+
+  return FALSE;
+}
+
+BusDeferredMessage *
+bus_connection_pop_deferred_message (DBusConnection *connection)
+{
+  DBusList *link;
+  BusDeferredMessage *message;
+  BusConnectionData *d = BUS_CONNECTION_DATA(connection);
+
+  link =_dbus_list_get_first_link(&d->deferred_messages);
+  if (link != NULL)
+    {
+      message = link->data;
+      if (!bus_deferred_message_waits_for_check(message))
+        {
+          _dbus_list_remove_link(&d->deferred_messages, link);
+          return message;
+        }
+    }
+
+  return NULL;
+}
+
+dbus_bool_t
+bus_connection_putback_deferred_message (DBusConnection *connection, BusDeferredMessage *message)
+{
+  BusConnectionData *d = BUS_CONNECTION_DATA(connection);
+  if (_dbus_list_prepend(&d->deferred_messages, message))
+    {
+      return TRUE;
+    }
+  return FALSE;
+}
+
+void
+bus_connection_clear_deferred_messages (DBusConnection *connection)
+{
+  BusConnectionData *d = BUS_CONNECTION_DATA(connection);
+  DBusList *link;
+  DBusList *next;
+  BusDeferredMessage *message;
+
+  link =_dbus_list_get_first_link(&d->deferred_messages);
+  while (link != NULL)
+    {
+      next = _dbus_list_get_next_link (&d->deferred_messages, link);
+      message = link->data;
+
+      bus_deferred_message_unref(message);
+      _dbus_list_remove_link(&d->deferred_messages, link);
+
+      link = next;
+    }
+}
+
+void
+bus_connection_remove_deferred_message (DBusConnection *connection,
+                                        BusDeferredMessage *message)
+{
+  BusConnectionData *d = BUS_CONNECTION_DATA(connection);
+  if (_dbus_list_remove(&d->deferred_messages, message))
+    bus_deferred_message_unref(message);
 }
 
 #ifdef DBUS_ENABLE_STATS
