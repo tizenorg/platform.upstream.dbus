@@ -97,6 +97,7 @@ bus_driver_send_service_owner_changed (const char     *service_name,
 {
   DBusMessage *message;
   dbus_bool_t retval;
+  BusResult res;
   const char *null_service;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
@@ -129,7 +130,17 @@ bus_driver_send_service_owner_changed (const char     *service_name,
 
   _dbus_assert (dbus_message_has_signature (message, "sss"));
 
-  retval = bus_dispatch_matches (transaction, NULL, NULL, message, error);
+  res = bus_dispatch_matches (transaction, NULL, NULL, message, error);
+  if (res == BUS_RESULT_TRUE)
+    retval = TRUE;
+  else if (res == BUS_RESULT_FALSE)
+    retval = FALSE;
+  else if (res == BUS_RESULT_LATER)
+    {
+      /* should never happen */
+      _dbus_assert_not_reached ("bus_dispatch_matches returned BUS_RESULT_LATER unexpectedly");
+      retval = FALSE;
+    }
   dbus_message_unref (message);
 
   return retval;

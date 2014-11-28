@@ -36,7 +36,6 @@
 #include <cynara-client-async.h>
 #endif
 
-
 #ifdef DBUS_ENABLE_CYNARA
 typedef struct BusCynara
 {
