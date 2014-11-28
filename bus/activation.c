@@ -2072,7 +2072,7 @@ bus_activation_activate_service (BusActivation  *activation,
                                entry->systemd_service);
               /* Wonderful, systemd is connected, let's just send the msg */
               switch (bus_dispatch_matches (activation_transaction, NULL, bus_service_get_primary_owners_connection (service),
-                                            message, error))
+                                            message, NULL, error))
                 {
                 case BUS_RESULT_TRUE:
                   retval = TRUE;
