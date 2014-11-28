@@ -118,6 +118,20 @@ DBUS_PRIVATE_EXPORT
 dbus_bool_t       _dbus_connection_get_linux_security_label       (DBusConnection  *connection,
                                                                    char           **label_p);
 
+DBUS_PRIVATE_EXPORT
+void              _dbus_connection_enable_dispatch                (DBusConnection *connection);
+DBUS_PRIVATE_EXPORT
+void              _dbus_connection_disable_dispatch               (DBusConnection *connection);
+DBUS_PRIVATE_EXPORT
+dbus_bool_t       _dbus_connection_putback_message                (DBusConnection *connection,
+                                                                   DBusMessage    *after_message,
+                                                                   DBusMessage    *message,
+                                                                   DBusError      *error);
+
+DBUS_PRIVATE_EXPORT
+dbus_bool_t       _dbus_connection_remove_message                 (DBusConnection *connection,
+                                                                   DBusMessage    *message);
+
 /* if DBUS_ENABLE_STATS */
 DBUS_PRIVATE_EXPORT
 void _dbus_connection_get_stats (DBusConnection *connection,

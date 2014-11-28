@@ -29,7 +29,7 @@
 
 dbus_bool_t bus_dispatch_add_connection    (DBusConnection *connection);
 void        bus_dispatch_remove_connection (DBusConnection *connection);
-dbus_bool_t bus_dispatch_matches           (BusTransaction *transaction,
+BusResult   bus_dispatch_matches           (BusTransaction *transaction,
                                             DBusConnection *sender,
                                             DBusConnection *recipient,
                                             DBusMessage    *message,

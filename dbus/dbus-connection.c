@@ -319,7 +319,8 @@ struct DBusConnection
    */
   dbus_bool_t dispatch_acquired; /**< Someone has dispatch path (can drain incoming queue) */
   dbus_bool_t io_path_acquired;  /**< Someone has transport io path (can use the transport to read/write messages) */
-  
+
+  unsigned int dispatch_disabled : 1;  /**< if true, then dispatching incoming messages is stopped until enabled again */
   unsigned int shareable : 1; /**< #TRUE if libdbus owns a reference to the connection and can return it from dbus_connection_open() more than once */
   
   unsigned int exit_on_disconnect : 1; /**< If #TRUE, exit after handling disconnect signal */
@@ -446,6 +447,39 @@ _dbus_connection_wakeup_mainloop (DBusConnection *connection)
   if (connection->wakeup_main_function)
     (*connection->wakeup_main_function) (connection->wakeup_main_data);
 }
+
+static void
+_dbus_connection_set_dispatch(DBusConnection *connection,
+                              dbus_bool_t disabled)
+{
+  CONNECTION_LOCK (connection);
+  if (connection->dispatch_disabled != disabled)
+    {
+      DBusDispatchStatus status;
+
+      connection->dispatch_disabled = disabled;
+      status = _dbus_connection_get_dispatch_status_unlocked (connection);
+      _dbus_connection_update_dispatch_status_and_unlock (connection, status);
+    }
+  else
+    {
+      CONNECTION_UNLOCK (connection);
+    }
+}
+
+
+void
+_dbus_connection_enable_dispatch (DBusConnection *connection)
+{
+  _dbus_connection_set_dispatch (connection, FALSE);
+}
+
+void
+ _dbus_connection_disable_dispatch (DBusConnection *connection)
+{
+  _dbus_connection_set_dispatch (connection, TRUE);
+}
+
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 /**
@@ -4094,6 +4128,82 @@ _dbus_connection_putback_message_link_unlocked (DBusConnection *connection,
       "_dbus_connection_putback_message_link_unlocked");
 }
 
+dbus_bool_t
+_dbus_connection_putback_message (DBusConnection *connection,
+                                  DBusMessage    *after_message,
+                                  DBusMessage    *message,
+                                  DBusError      *error)
+{
+  DBusDispatchStatus status;
+  DBusList *message_link = _dbus_list_alloc_link (message);
+  DBusList *after_link;
+  if (message_link == NULL)
+    {
+      _DBUS_SET_OOM (error);
+      return FALSE;
+    }
+  dbus_message_ref (message);
+
+  CONNECTION_LOCK (connection);
+  _dbus_connection_acquire_dispatch (connection);
+  HAVE_LOCK_CHECK (connection);
+
+  after_link = _dbus_list_find_first(&connection->incoming_messages, after_message);
+  _dbus_list_insert_after_link (&connection->incoming_messages, after_link, message_link);
+  connection->n_incoming += 1;
+
+  _dbus_verbose ("Message %p (%s %s %s '%s') put back into queue %p, %d incoming\n",
+                 message_link->data,
+                 dbus_message_type_to_string (dbus_message_get_type (message_link->data)),
+                 dbus_message_get_interface (message_link->data) ?
+                 dbus_message_get_interface (message_link->data) :
+                 "no interface",
+                 dbus_message_get_member (message_link->data) ?
+                 dbus_message_get_member (message_link->data) :
+                 "no member",
+                 dbus_message_get_signature (message_link->data),
+                 connection, connection->n_incoming);
+
+  _dbus_message_trace_ref (message_link->data, -1, -1,
+      "_dbus_connection_putback_message");
+
+  _dbus_connection_release_dispatch (connection);
+
+  status = _dbus_connection_get_dispatch_status_unlocked (connection);
+  _dbus_connection_update_dispatch_status_and_unlock (connection, status);
+
+  return TRUE;
+}
+
+dbus_bool_t
+_dbus_connection_remove_message (DBusConnection *connection,
+                                 DBusMessage *message)
+{
+  DBusDispatchStatus status;
+  dbus_bool_t removed;
+
+  CONNECTION_LOCK (connection);
+  _dbus_connection_acquire_dispatch (connection);
+  HAVE_LOCK_CHECK (connection);
+
+  removed = _dbus_list_remove(&connection->incoming_messages, message);
+
+  if (removed)
+    {
+      connection->n_incoming -= 1;
+      dbus_message_unref(message);
+      _dbus_verbose ("Message %p removed from incoming queue\n", message);
+    }
+  else
+      _dbus_verbose ("Message %p not found in the incoming queue\n", message);
+
+  _dbus_connection_release_dispatch (connection);
+
+  status = _dbus_connection_get_dispatch_status_unlocked (connection);
+  _dbus_connection_update_dispatch_status_and_unlock (connection, status);
+  return removed;
+}
+
 /**
  * Returns the first-received message from the incoming message queue,
  * removing it from the queue. The caller owns a reference to the
@@ -4277,8 +4387,9 @@ static DBusDispatchStatus
 _dbus_connection_get_dispatch_status_unlocked (DBusConnection *connection)
 {
   HAVE_LOCK_CHECK (connection);
-  
-  if (connection->n_incoming > 0)
+  if (connection->dispatch_disabled && dbus_connection_get_is_connected(connection))
+    return DBUS_DISPATCH_COMPLETE;
+  else if (connection->n_incoming > 0)
     return DBUS_DISPATCH_DATA_REMAINS;
   else if (!_dbus_transport_queue_messages (connection->transport))
     return DBUS_DISPATCH_NEED_MEMORY;
@@ -4741,6 +4852,8 @@ dbus_connection_dispatch (DBusConnection *connection)
   
   CONNECTION_LOCK (connection);
 
+  if (result == DBUS_HANDLER_RESULT_LATER)
+      goto out;
   if (result == DBUS_HANDLER_RESULT_NEED_MEMORY)
     {
       _dbus_verbose ("No memory\n");
@@ -4863,9 +4976,11 @@ dbus_connection_dispatch (DBusConnection *connection)
                  connection);
   
  out:
-  if (result == DBUS_HANDLER_RESULT_NEED_MEMORY)
+  if (result == DBUS_HANDLER_RESULT_LATER ||
+      result == DBUS_HANDLER_RESULT_NEED_MEMORY)
     {
-      _dbus_verbose ("out of memory\n");
+      if (result == DBUS_HANDLER_RESULT_NEED_MEMORY)
+        _dbus_verbose ("out of memory\n");
       
       /* Put message back, and we'll start over.
        * Yes this means handlers must be idempotent if they

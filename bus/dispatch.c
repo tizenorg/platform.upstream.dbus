@@ -117,7 +117,7 @@ send_one_message (DBusConnection *connection,
   return TRUE;
 }
 
-dbus_bool_t
+BusResult
 bus_dispatch_matches (BusTransaction *transaction,
                       DBusConnection *sender,
                       DBusConnection *addressed_recipient,
@@ -157,10 +157,28 @@ bus_dispatch_matches (BusTransaction *transaction,
           case BUS_RESULT_FALSE:
             return BUS_RESULT_FALSE;
           case BUS_RESULT_LATER:
-            dbus_set_error (error,
-                            DBUS_ERROR_ACCESS_DENIED,
-                            "Rejecting message because time is needed to check security policy");
-            return BUS_RESULT_FALSE;
+            {
+              BusDeferredMessageStatus status;
+              status = bus_deferred_message_get_status(deferred_message);
+
+              if (status & BUS_DEFERRED_MESSAGE_CHECK_SEND)
+                {
+                  /* send rule result not available - disable dispatching messages from the sender */
+                  bus_deferred_message_disable_sender(deferred_message);
+                  return BUS_RESULT_LATER;
+                }
+              else if (status & BUS_DEFERRED_MESSAGE_CHECK_RECEIVE)
+                {
+                   dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+                              "Rejecting message because time is needed to check security policy");
+                   return BUS_RESULT_FALSE;
+                }
+              else
+                {
+                  _dbus_verbose("deferred message has no status field set to send or receive unexpectedly\n");
+                  return BUS_RESULT_FALSE;
+                }
+            }
         }
 
       if (dbus_message_contains_unix_fds (message) &&
@@ -171,14 +189,14 @@ bus_dispatch_matches (BusTransaction *transaction,
                           DBUS_ERROR_NOT_SUPPORTED,
                           "Tried to send message with Unix file descriptors"
                           "to a client that doesn't support that.");
-          return FALSE;
-      }
+          return BUS_RESULT_FALSE;
+        }
 
       /* Dispatch the message */
       if (!bus_transaction_send (transaction, addressed_recipient, message))
         {
           BUS_SET_OOM (error);
-          return FALSE;
+          return BUS_RESULT_FALSE;
         }
     }
 
@@ -193,7 +211,7 @@ bus_dispatch_matches (BusTransaction *transaction,
                                       &recipients))
     {
       BUS_SET_OOM (error);
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
 
   link = _dbus_list_get_first_link (&recipients);
@@ -215,10 +233,10 @@ bus_dispatch_matches (BusTransaction *transaction,
   if (dbus_error_is_set (&tmp_error))
     {
       dbus_move_error (&tmp_error, error);
-      return FALSE;
+      return BUS_RESULT_FALSE;
     }
   else
-    return TRUE;
+    return BUS_RESULT_TRUE;
 }
 
 static DBusHandlerResult
@@ -404,10 +422,12 @@ bus_dispatch (DBusConnection *connection,
           _dbus_verbose ("Security policy rejected message\n");
           goto out;
         case BUS_RESULT_LATER:
-          dbus_set_error (&error,
-                          DBUS_ERROR_ACCESS_DENIED,
-                          "Rejecting message because time is needed to check security policy");
-          _dbus_verbose ("Security policy needs time to check policy. Dropping message\n");
+        /* Disable dispatching messages from the sender,
+         * roll back and dispatch the message once the policy result is available */
+          bus_deferred_message_disable_sender(deferred_message);
+          bus_transaction_cancel_and_free (transaction);
+          transaction = NULL;
+          result = DBUS_HANDLER_RESULT_LATER;
           goto out;
         }
 
@@ -472,8 +492,18 @@ bus_dispatch (DBusConnection *connection,
    * addressed_recipient == NULL), and match it against other connections'
    * match rules.
    */
-  if (!bus_dispatch_matches (transaction, connection, addressed_recipient, message, &error))
-    goto out;
+  switch (bus_dispatch_matches (transaction, connection, addressed_recipient, message, &error))
+    {
+    case BUS_RESULT_TRUE:
+    case BUS_RESULT_FALSE:
+      break;
+    case BUS_RESULT_LATER:
+      /* Roll back and dispatch the message once the policy result is available */
+      bus_transaction_cancel_and_free (transaction);
+      transaction = NULL;
+      result = DBUS_HANDLER_RESULT_LATER;
+      break;
+    }
 
  out:
   if (dbus_error_is_set (&error))
@@ -4998,9 +5028,132 @@ bus_dispatch_test_conf_fail (const DBusString *test_data_dir,
   return TRUE;
 }
 
+typedef struct {
+  DBusTimeout *timeout;
+  DBusConnection *connection;
+  dbus_bool_t timedout;
+  int check_counter;
+} BusTestCheckData;
+
+static BusTestCheckData *cdata;
+
+static dbus_bool_t
+bus_dispatch_test_check_timeout (void *data)
+{
+  _dbus_verbose ("timeout triggered - pretend that privilege check result is available\n");
+
+  /* should only happen once during the test */
+  _dbus_assert (!cdata->timedout);
+  cdata->timedout = TRUE;
+  _dbus_connection_enable_dispatch (cdata->connection);
+
+  /* don't call this again */
+  _dbus_loop_remove_timeout (bus_connection_get_loop (cdata->connection),
+                             cdata->timeout);
+  dbus_connection_unref (cdata->connection);
+  cdata->connection = NULL;
+  return TRUE;
+}
+
+static dbus_bool_t
+bus_dispatch_test_check_override (DBusConnection *connection,
+                                  const char *privilege)
+{
+  _dbus_verbose ("overriding privilege check %s #%d\n", privilege, cdata->check_counter);
+  cdata->check_counter++;
+  if (!cdata->timedout)
+    {
+      dbus_bool_t added;
+
+      /* Should be the first privilege check for the "Echo" method. */
+      _dbus_assert (cdata->check_counter == 1);
+      cdata->timeout = _dbus_timeout_new (1, bus_dispatch_test_check_timeout,
+                                          NULL, NULL);
+      _dbus_assert (cdata->timeout);
+      added = _dbus_loop_add_timeout (bus_connection_get_loop (connection),
+                                      cdata->timeout);
+      _dbus_assert (added);
+      cdata->connection = connection;
+      dbus_connection_ref (connection);
+      _dbus_connection_disable_dispatch (connection);
+      return BUS_RESULT_LATER;
+    }
+  else
+    {
+      /* Should only be checked one more time, and this time succeeds. */
+      _dbus_assert (cdata->check_counter == 2);
+      return BUS_RESULT_TRUE;
+    }
+}
+
+static dbus_bool_t
+bus_dispatch_test_check (const DBusString *test_data_dir)
+{
+  const char *filename = "valid-config-files/debug-check-some.conf";
+  BusContext *context;
+  DBusConnection *foo;
+  DBusError error;
+  dbus_bool_t result = TRUE;
+  BusTestCheckData data;
+
+  /* save the config name for the activation helper */
+  if (!setenv_TEST_LAUNCH_HELPER_CONFIG (test_data_dir, filename))
+    _dbus_assert_not_reached ("no memory setting TEST_LAUNCH_HELPER_CONFIG");
+
+  dbus_error_init (&error);
+
+  context = bus_context_new_test (test_data_dir, filename);
+  if (context == NULL)
+    return FALSE;
+
+  foo = dbus_connection_open_private (TEST_DEBUG_PIPE, &error);
+  if (foo == NULL)
+    _dbus_assert_not_reached ("could not alloc connection");
+
+  if (!bus_setup_debug_client (foo))
+    _dbus_assert_not_reached ("could not set up connection");
+
+  spin_connection_until_authenticated (context, foo);
+
+  if (!check_hello_message (context, foo))
+    _dbus_assert_not_reached ("hello message failed");
+
+  if (!check_double_hello_message (context, foo))
+    _dbus_assert_not_reached ("double hello message failed");
+
+  if (!check_add_match_all (context, foo))
+    _dbus_assert_not_reached ("AddMatch message failed");
+
+  /*
+   * Cause bus_check_send_privilege() to return BUS_RESULT_LATER in the
+   * first call, then BUS_RESULT_TRUE.
+   */
+  cdata = &data;
+  memset (cdata, 0, sizeof(*cdata));
+  bus_check_test_override = bus_dispatch_test_check_override;
+
+  result = check_existent_service_auto_start (context, foo);
+
+  _dbus_assert (cdata->check_counter == 2);
+  _dbus_assert (cdata->timedout);
+  _dbus_assert (cdata->timeout);
+  _dbus_assert (!cdata->connection);
+  _dbus_timeout_unref (cdata->timeout);
+
+  kill_client_connection_unchecked (foo);
+
+  bus_context_unref (context);
+
+  return result;
+}
+
 dbus_bool_t
 bus_dispatch_test (const DBusString *test_data_dir)
 {
+  _dbus_verbose ("<check> tests\n");
+  if (!bus_dispatch_test_check (test_data_dir))
+    return FALSE;
+
   /* run normal activation tests */
   _dbus_verbose ("Normal activation tests\n");
   if (!bus_dispatch_test_conf (test_data_dir,

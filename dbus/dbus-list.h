@@ -68,6 +68,9 @@ DBUS_PRIVATE_EXPORT
 void        _dbus_list_remove_link        (DBusList **list,
                                            DBusList  *link);
 DBUS_PRIVATE_EXPORT
+DBusList*   _dbus_list_find_first         (DBusList **list,
+                                           void      *data);
+DBUS_PRIVATE_EXPORT
 DBusList*   _dbus_list_find_last          (DBusList **list,
                                            void      *data);
 DBUS_PRIVATE_EXPORT
