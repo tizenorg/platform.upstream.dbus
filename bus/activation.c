@@ -1198,7 +1198,7 @@ bus_activation_send_pending_auto_activation_messages (BusActivation  *activation
           res = bus_dispatch_matches (transaction,
                                       entry->connection,
                                       addressed_recipient,
-                                      entry->activation_message, &error);
+                                      entry->activation_message, NULL, &error);
           if (res == BUS_RESULT_FALSE)
             {
               /* If permission is denied, we just want to return the error
@@ -2066,7 +2066,7 @@ bus_activation_activate_service (BusActivation  *activation,
                                entry->systemd_service);
               /* Wonderful, systemd is connected, let's just send the msg */
               res = bus_dispatch_matches (activation_transaction, NULL, bus_service_get_primary_owners_connection (service),
-                                            message, error);
+                                          message, NULL, error);
 
               if (res == BUS_RESULT_TRUE)
                 retval = TRUE;
