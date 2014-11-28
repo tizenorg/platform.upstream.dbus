@@ -114,6 +114,29 @@ bus_check_get_cynara (BusCheck *check)
   return check->cynara;
 }
 
+static void
+bus_check_enable_dispatch_callback (BusDeferredMessage *deferred_message,
+                                    BusResult result)
+{
+  _dbus_verbose("bus_check_enable_dispatch_callback called deferred_message=%p\n", deferred_message);
+  _dbus_connection_enable_dispatch(deferred_message->sender);
+}
+
+void
+bus_deferred_message_disable_sender (BusDeferredMessage *deferred_message)
+{
+  _dbus_assert(deferred_message != NULL);
+  _dbus_assert(deferred_message->sender != NULL);
+
+  _dbus_connection_disable_dispatch(deferred_message->sender);
+  deferred_message->response_callback = bus_check_enable_dispatch_callback;
+}
+
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
+dbus_bool_t (*bus_check_test_override) (DBusConnection *connection,
+                                        const char *privilege);
+#endif
+
 BusResult
 bus_check_privilege (BusCheck *check,
                      DBusMessage *message,
@@ -134,6 +157,11 @@ bus_check_privilege (BusCheck *check,
     {
       return BUS_RESULT_FALSE;
     }
+
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
+  if (bus_check_test_override)
+    return bus_check_test_override (connection, privilege);
+#endif
 
   /* ask policy checkers */
 #ifdef DBUS_ENABLE_CYNARA
@@ -202,6 +230,12 @@ bus_deferred_message_unref (BusDeferredMessage *deferred_message)
            dbus_connection_unref(deferred_message->proposed_recipient);
        dbus_free(deferred_message);
      }
+}
+
+BusDeferredMessageStatus
+bus_deferred_message_get_status (BusDeferredMessage *deferred_message)
+{
+  return deferred_message->status;
 }
 
 void

@@ -107,6 +107,16 @@ void              _dbus_connection_set_pending_fds_function       (DBusConnectio
                                                                    DBusPendingFdsChangeFunction callback,
                                                                    void *data);
 
+void              _dbus_connection_enable_dispatch                (DBusConnection *connection);
+void              _dbus_connection_disable_dispatch               (DBusConnection *connection);
+dbus_bool_t       _dbus_connection_putback_message                (DBusConnection *connection,
+                                                                   DBusMessage    *after_message,
+                                                                   DBusMessage    *message,
+                                                                   DBusError      *error);
+
+dbus_bool_t       _dbus_connection_remove_message                 (DBusConnection *connection,
+                                                                   DBusMessage    *message);
+
 /* if DBUS_ENABLE_STATS */
 void _dbus_connection_get_stats (DBusConnection *connection,
                                  dbus_uint32_t  *in_messages,
