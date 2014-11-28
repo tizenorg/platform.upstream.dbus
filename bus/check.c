@@ -49,6 +49,9 @@ typedef struct BusDeferredMessage
   DBusConnection *sender;
   DBusConnection *proposed_recipient;
   DBusConnection *addressed_recipient;
+  dbus_bool_t requested_reply;
+  int matched_rules;
+  const char *privilege;
   dbus_bool_t full_dispatch;
   BusDeferredMessageStatus status;
   BusResult response;
@@ -122,6 +125,89 @@ bus_check_enable_dispatch_callback (BusDeferredMessage *deferred_message,
   _dbus_connection_enable_dispatch(deferred_message->sender);
 }
 
+static void
+bus_check_queued_message_reply_callback (BusDeferredMessage *deferred_message,
+                                         BusResult result)
+{
+  int status;
+
+  _dbus_verbose("bus_check_queued_message_reply_callback called message=%p\n", deferred_message);
+
+  if (!bus_connection_is_active(deferred_message->proposed_recipient))
+    return;
+
+  status = deferred_message->status;
+
+  deferred_message->status = 0; /* mark message as not waiting for response */
+  deferred_message->response = result;
+
+  /*
+   * If send rule allows us to send message we still need to check receive rules.
+   */
+  if ((status & BUS_DEFERRED_MESSAGE_CHECK_SEND) && (result == BUS_RESULT_TRUE))
+    {
+      int toggles;
+      BusContext *context;
+      BusRegistry *registry;
+      BusClientPolicy *recipient_policy;
+      BusDeferredMessage *deferred_message_receive;
+
+      context = bus_connection_get_context(deferred_message->proposed_recipient);
+      registry = bus_context_get_registry(context);
+      recipient_policy = bus_connection_get_policy(deferred_message->proposed_recipient);
+
+      deferred_message->response = bus_client_policy_check_can_receive(recipient_policy, registry,
+          deferred_message->requested_reply, deferred_message->sender,
+          deferred_message->addressed_recipient, deferred_message->proposed_recipient, deferred_message->message,
+          &toggles, NULL, &deferred_message_receive);
+      if (deferred_message->response == BUS_RESULT_LATER)
+        {
+          /* replace deferred message associated with send check with the one associated with
+           * receive check */
+          if (!bus_deferred_message_replace(deferred_message, deferred_message_receive))
+            {
+              /* failed to replace deferred message (due to oom). Set it to rejected */
+              deferred_message->response = BUS_RESULT_FALSE;
+            }
+        }
+    }
+
+  bus_connection_dispatch_deferred(deferred_message->proposed_recipient);
+}
+
+static void
+queue_deferred_message_cancel_transaction_hook (void *data)
+{
+  BusDeferredMessage *deferred_message = (BusDeferredMessage *)data;
+  bus_connection_remove_deferred_message(deferred_message->proposed_recipient, deferred_message);
+}
+
+
+dbus_bool_t
+bus_deferred_message_queue_at_recipient (BusDeferredMessage *deferred_message,
+                                         BusTransaction *transaction,
+                                         dbus_bool_t full_dispatch,
+                                         dbus_bool_t prepend)
+{
+  _dbus_assert(deferred_message != NULL);
+  _dbus_assert(deferred_message->proposed_recipient != NULL);
+
+  if (!bus_connection_queue_deferred_message(deferred_message->proposed_recipient,
+         deferred_message, prepend))
+    return FALSE;
+
+  if (!bus_transaction_add_cancel_hook(transaction, queue_deferred_message_cancel_transaction_hook,
+      deferred_message, NULL))
+    {
+      bus_connection_remove_deferred_message(deferred_message->proposed_recipient, deferred_message);
+      return FALSE;
+    }
+  deferred_message->response_callback = bus_check_queued_message_reply_callback;
+  deferred_message->full_dispatch = full_dispatch;
+
+  return TRUE;
+}
+
 void
 bus_deferred_message_disable_sender (BusDeferredMessage *deferred_message)
 {
@@ -131,6 +217,20 @@ bus_deferred_message_disable_sender (BusDeferredMessage *deferred_message)
   _dbus_connection_disable_dispatch(deferred_message->sender);
   deferred_message->response_callback = bus_check_enable_dispatch_callback;
 }
+
+void
+bus_deferred_message_set_policy_check_info (BusDeferredMessage *deferred_message,
+                                            dbus_bool_t requested_reply,
+                                            int matched_rules,
+                                            const char *privilege)
+{
+  _dbus_assert(deferred_message != NULL);
+
+  deferred_message->requested_reply = requested_reply;
+  deferred_message->matched_rules = matched_rules;
+  deferred_message->privilege = privilege;
+}
+
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 dbus_bool_t (*bus_check_test_override) (DBusConnection *connection,
@@ -196,6 +296,9 @@ BusDeferredMessage *bus_deferred_message_new (DBusMessage *message,
   deferred_message->addressed_recipient = addressed_recipient != NULL ? dbus_connection_ref(addressed_recipient) : NULL;
   deferred_message->proposed_recipient = proposed_recipient != NULL ? dbus_connection_ref(proposed_recipient) : NULL;
   deferred_message->message = dbus_message_ref(message);
+  deferred_message->requested_reply = FALSE;
+  deferred_message->matched_rules = 0;
+  deferred_message->privilege = NULL;
   deferred_message->response = response;
   deferred_message->status = 0;
   deferred_message->full_dispatch = FALSE;
@@ -232,10 +335,217 @@ bus_deferred_message_unref (BusDeferredMessage *deferred_message)
      }
 }
 
+dbus_bool_t
+bus_deferred_message_check_message_limits (BusDeferredMessage *deferred_message, DBusError *error)
+{
+  BusContext *context = bus_connection_get_context(deferred_message->proposed_recipient);
+
+  return bus_context_check_recipient_message_limits(context, deferred_message->proposed_recipient,
+      deferred_message->sender, deferred_message->message, deferred_message->requested_reply,
+      error);
+}
+
+dbus_bool_t
+bus_deferred_message_expect_method_reply(BusDeferredMessage *deferred_message, BusTransaction *transaction, DBusError *error)
+{
+  int type = dbus_message_get_type(deferred_message->message);
+  if (type == DBUS_MESSAGE_TYPE_METHOD_CALL &&
+        deferred_message->sender &&
+        deferred_message->addressed_recipient &&
+        deferred_message->addressed_recipient == deferred_message->proposed_recipient && /* not eavesdropping */
+        !bus_connections_expect_reply (bus_connection_get_connections (deferred_message->sender),
+                                       transaction,
+                                       deferred_message->sender, deferred_message->addressed_recipient,
+                                       deferred_message->message, error))
+    {
+      _dbus_verbose ("Failed to record reply expectation or problem with the message expecting a reply\n");
+      return FALSE;
+    }
+  return TRUE;
+}
+
+void
+bus_deferred_message_create_error(BusDeferredMessage *deferred_message,
+    const char *error_message, DBusError *error)
+{
+  BusContext *context;
+  _dbus_assert (deferred_message->status == 0 && deferred_message->response == BUS_RESULT_FALSE);
+
+  if (deferred_message->sender == NULL)
+    return; /* error won't be sent to bus driver anyway */
+
+  context = bus_connection_get_context(deferred_message->sender);
+  bus_context_complain_about_message(context, DBUS_ERROR_ACCESS_DENIED, "Rejected message",
+      deferred_message->matched_rules, deferred_message->message, deferred_message->sender,
+      deferred_message->proposed_recipient, deferred_message->requested_reply, FALSE,
+      deferred_message->privilege, error);
+}
+
+BusResult
+bus_deferred_message_dispatch (BusDeferredMessage *deferred_message)
+{
+  BusContext *context = bus_connection_get_context (deferred_message->proposed_recipient);
+  BusTransaction *transaction = bus_transaction_new (context);
+  BusResult result = BUS_RESULT_TRUE;
+  DBusError error;
+
+  if (transaction == NULL)
+    {
+      return BUS_RESULT_FALSE;
+    }
+
+  dbus_error_init(&error);
+
+  if (!deferred_message->full_dispatch)
+    {
+      result = deferred_message->response;
+      switch (result)
+        {
+        case BUS_RESULT_TRUE:
+          if (!bus_context_check_recipient_message_limits(context, deferred_message->proposed_recipient,
+               deferred_message->sender, deferred_message->message, deferred_message->requested_reply, &error))
+              result = BUS_RESULT_FALSE;
+          break;
+        case BUS_RESULT_FALSE:
+          break;
+        case BUS_RESULT_LATER:
+          {
+            BusDeferredMessage *deferred_message2;
+            result = bus_context_check_security_policy (context, transaction,
+                                                        deferred_message->sender,
+                                                        deferred_message->addressed_recipient,
+                                                        deferred_message->proposed_recipient,
+                                                        deferred_message->message, NULL,
+                                                        &deferred_message2);
+
+            if (result == BUS_RESULT_LATER)
+              {
+                /* prepend at recipient */
+                if (!bus_deferred_message_queue_at_recipient(deferred_message2, transaction,
+                    FALSE, TRUE))
+                  result = BUS_RESULT_FALSE;
+              }
+          }
+        }
+
+      /* silently drop messages on access denial */
+      if (result == BUS_RESULT_TRUE)
+        {
+          if (!bus_transaction_send (transaction, deferred_message->proposed_recipient, deferred_message->message, TRUE))
+            result = BUS_RESULT_FALSE;
+        }
+
+      bus_transaction_execute_and_free(transaction);
+
+      goto out;
+    }
+
+  /* do not attempt to send message if sender has disconnected */
+  if (deferred_message->sender != NULL && !bus_connection_is_active(deferred_message->sender))
+    {
+      bus_transaction_cancel_and_free(transaction);
+      result = BUS_RESULT_FALSE;
+      goto out;
+    }
+
+  result = bus_dispatch_matches(transaction, deferred_message->sender,
+      deferred_message->addressed_recipient, deferred_message->message, deferred_message, &error);
+
+  if (result == BUS_RESULT_LATER)
+    {
+      /* Message deferring was already done in bus_dispatch_matches */
+      bus_transaction_cancel_and_free(transaction);
+      goto out;
+    }
+
+  /* this part is a copy & paste from bus_dispatch function. Probably can be moved to a function */
+  if (dbus_error_is_set (&error))
+    {
+      if (!dbus_connection_get_is_connected (deferred_message->sender))
+        {
+          /* If we disconnected it, we won't bother to send it any error
+           * messages.
+           */
+          _dbus_verbose ("Not sending error to connection we disconnected\n");
+        }
+      else if (dbus_error_has_name (&error, DBUS_ERROR_NO_MEMORY))
+        {
+          bus_connection_send_oom_error (deferred_message->sender, deferred_message->message);
+
+          /* cancel transaction due to OOM */
+          if (transaction != NULL)
+            {
+              bus_transaction_cancel_and_free (transaction);
+              transaction = NULL;
+            }
+        }
+      else
+        {
+          /* Try to send the real error, if no mem to do that, send
+           * the OOM error
+           */
+          _dbus_assert (transaction != NULL);
+          if (!bus_transaction_send_error_reply (transaction, deferred_message->sender,
+                                                 &error, deferred_message->message))
+            {
+              bus_connection_send_oom_error (deferred_message->sender, deferred_message->message);
+
+              /* cancel transaction due to OOM */
+              if (transaction != NULL)
+                {
+                  bus_transaction_cancel_and_free (transaction);
+                  transaction = NULL;
+                }
+            }
+        }
+    }
+
+  if (transaction != NULL)
+    {
+      bus_transaction_execute_and_free (transaction);
+    }
+
+out:
+  dbus_error_free(&error);
+
+  return result;
+}
+
+dbus_bool_t
+bus_deferred_message_replace (BusDeferredMessage *old_message, BusDeferredMessage *new_message)
+{
+  if (bus_connection_replace_deferred_message(old_message->proposed_recipient,
+        old_message, new_message))
+    {
+      new_message->response_callback = old_message->response_callback;
+      new_message->full_dispatch = old_message->full_dispatch;
+      return TRUE;
+    }
+  return FALSE;
+}
+
+dbus_bool_t
+bus_deferred_message_waits_for_check(BusDeferredMessage *deferred_message)
+{
+  return deferred_message->status != 0;
+}
+
+DBusConnection *
+bus_deferred_message_get_recipient(BusDeferredMessage *deferred_message)
+{
+  return deferred_message->proposed_recipient;
+}
+
 BusDeferredMessageStatus
 bus_deferred_message_get_status (BusDeferredMessage *deferred_message)
 {
   return deferred_message->status;
+}
+
+BusResult
+bus_deferred_message_get_response (BusDeferredMessage *deferred_message)
+{
+  return deferred_message->response;
 }
 
 void
@@ -247,3 +557,4 @@ bus_deferred_message_response_received (BusDeferredMessage *deferred_message,
       deferred_message->response_callback(deferred_message, result);
     }
 }
+
