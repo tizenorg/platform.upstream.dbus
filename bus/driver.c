@@ -129,7 +129,23 @@ bus_driver_send_service_owner_changed (const char     *service_name,
 
   _dbus_assert (dbus_message_has_signature (message, "sss"));
 
-  retval = bus_dispatch_matches (transaction, NULL, NULL, message, error);
+  switch (bus_dispatch_matches (transaction, NULL, NULL, message, error))
+    {
+    case BUS_RESULT_TRUE:
+      retval = TRUE;
+      break;
+    case BUS_RESULT_FALSE:
+      retval = FALSE;
+      break;
+    case BUS_RESULT_LATER:
+      /* There is an error in policy xml file. Checking messages from bus driver should never be
+       * delayed.
+       */
+      dbus_set_error(error, DBUS_ERROR_FAILED,
+          "Cannot delay sending message from bus driver. This denotes error in XML policy file.");
+      retval = FALSE;
+      break;
+    }
   dbus_message_unref (message);
 
   return retval;
