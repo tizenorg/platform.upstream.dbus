@@ -1196,6 +1196,9 @@ bus_client_policy_check_can_send (DBusConnection      *sender,
 
       result = bus_check_privilege(check, message, sender, addressed_recipient, receiver,
           privilege, BUS_DEFERRED_MESSAGE_CHECK_SEND, deferred_message);
+      if (result == BUS_RESULT_LATER && deferred_message != NULL)
+        bus_deferred_message_set_policy_check_info(*deferred_message, requested_reply,
+            *toggles, privilege);
     }
   else
     privilege = NULL;
@@ -1218,6 +1221,7 @@ bus_client_policy_check_can_receive (BusClientPolicy     *policy,
                                      DBusConnection      *proposed_recipient,
                                      DBusMessage         *message,
                                      dbus_int32_t        *toggles,
+                                     const char         **privilege_param,
                                      BusDeferredMessage **deferred_message)
 {
   DBusList *link;
@@ -1429,7 +1433,15 @@ bus_client_policy_check_can_receive (BusClientPolicy     *policy,
 
       result = bus_check_privilege(check, message, sender, addressed_recipient, proposed_recipient,
                  privilege, BUS_DEFERRED_MESSAGE_CHECK_RECEIVE, deferred_message);
+      if (result == BUS_RESULT_LATER && deferred_message != NULL)
+        bus_deferred_message_set_policy_check_info(*deferred_message, requested_reply,
+                    *toggles, privilege);
     }
+  else
+      privilege = NULL;
+
+  if (privilege_param != NULL)
+     *privilege_param = privilege;
 
   return result;
 }
