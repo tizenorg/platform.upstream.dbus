@@ -67,7 +67,8 @@ typedef enum
 {
   DBUS_HANDLER_RESULT_HANDLED,         /**< Message has had its effect - no need to run more handlers. */ 
   DBUS_HANDLER_RESULT_NOT_YET_HANDLED, /**< Message has not had any effect - see if other handlers want it. */
-  DBUS_HANDLER_RESULT_NEED_MEMORY      /**< Need more memory in order to return #DBUS_HANDLER_RESULT_HANDLED or #DBUS_HANDLER_RESULT_NOT_YET_HANDLED. Please try again later with more memory. */
+  DBUS_HANDLER_RESULT_NEED_MEMORY,     /**< Need more memory in order to return #DBUS_HANDLER_RESULT_HANDLED or #DBUS_HANDLER_RESULT_NOT_YET_HANDLED. Please try again later with more memory. */
+  DBUS_HANDLER_RESULT_LATER            /**< Message dispatch deferred due to pending policy check */
 } DBusHandlerResult;
 
 /* Bus names */

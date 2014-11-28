@@ -459,6 +459,35 @@ _dbus_list_remove_last (DBusList **list,
 }
 
 /**
+ * Finds a value in the list. Returns the first link
+ * with value equal to the given data pointer.
+ * This is a linear-time operation.
+ * Returns #NULL if no value found that matches.
+ *
+ * @param list address of the list head.
+ * @param data the value to find.
+ * @returns the link if found
+ */
+DBusList*
+_dbus_list_find_first (DBusList **list,
+                       void      *data)
+{
+  DBusList *link;
+
+  link = _dbus_list_get_first_link (list);
+
+  while (link != NULL)
+    {
+      if (link->data == data)
+        return link;
+
+      link = _dbus_list_get_next_link (list, link);
+    }
+
+  return NULL;
+}
+
+/**
  * Finds a value in the list. Returns the last link
  * with value equal to the given data pointer.
  * This is a linear-time operation.

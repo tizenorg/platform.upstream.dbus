@@ -55,6 +55,7 @@ BusResult   bus_check_privilege   (BusCheck *check,
                                    BusDeferredMessageStatus check_type,
                                    BusDeferredMessage **deferred_message);
 
+
 BusDeferredMessage *bus_deferred_message_new                (DBusMessage *message,
                                                              DBusConnection *sender,
                                                              DBusConnection *addressed_recipient,
@@ -65,4 +66,13 @@ BusDeferredMessage *bus_deferred_message_ref                (BusDeferredMessage 
 void                bus_deferred_message_unref              (BusDeferredMessage *deferred_message);
 void                bus_deferred_message_response_received  (BusDeferredMessage *deferred_message,
                                                              BusResult result);
+void                bus_deferred_message_disable_sender     (BusDeferredMessage *deferred_message);
+
+BusDeferredMessageStatus  bus_deferred_message_get_status   (BusDeferredMessage *deferred_message);
+
+#ifdef DBUS_ENABLE_EMBEDDED_TESTS
+extern dbus_bool_t (*bus_check_test_override) (DBusConnection *connection,
+                                               const char *privilege);
+#endif
+
 #endif /* BUS_CHECK_H */
