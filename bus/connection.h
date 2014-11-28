@@ -83,6 +83,22 @@ dbus_bool_t bus_connection_preallocate_oom_error (DBusConnection *connection);
 void        bus_connection_send_oom_error        (DBusConnection *connection,
                                                   DBusMessage    *in_reply_to);
 
+dbus_bool_t         bus_connection_has_deferred_messages    (DBusConnection *connection);
+dbus_bool_t         bus_connection_queue_deferred_message   (DBusConnection *connection,
+                                                             BusDeferredMessage *message,
+                                                             dbus_bool_t prepend);
+BusDeferredMessage *bus_connection_pop_deferred_message     (DBusConnection *connection);
+dbus_bool_t         bus_connection_putback_deferred_message (DBusConnection *connection,
+                                                             BusDeferredMessage *message);
+void                bus_connection_remove_deferred_message  (DBusConnection *connection,
+                                                             BusDeferredMessage *message);
+dbus_bool_t         bus_connection_replace_deferred_message (DBusConnection *connection,
+                                                             BusDeferredMessage *oldMessage,
+                                                             BusDeferredMessage *newMessage);
+void                bus_connection_dispatch_deferred        (DBusConnection *connection);
+void                bus_connection_clear_deferred_messages  (DBusConnection *connection);
+
+
 /* called by signals.c */
 dbus_bool_t bus_connection_add_match_rule      (DBusConnection *connection,
                                                 BusMatchRule   *rule);
@@ -135,7 +151,8 @@ BusTransaction* bus_transaction_new              (BusContext                   *
 BusContext*     bus_transaction_get_context      (BusTransaction               *transaction);
 dbus_bool_t     bus_transaction_send             (BusTransaction               *transaction,
                                                   DBusConnection               *connection,
-                                                  DBusMessage                  *message);
+                                                  DBusMessage                  *message,
+                                                  dbus_bool_t                   deferred_dispatch);
 dbus_bool_t     bus_transaction_capture          (BusTransaction               *transaction,
                                                   DBusConnection               *connection,
                                                   DBusMessage                  *message);

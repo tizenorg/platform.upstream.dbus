@@ -29,10 +29,11 @@
 
 dbus_bool_t bus_dispatch_add_connection    (DBusConnection *connection);
 void        bus_dispatch_remove_connection (DBusConnection *connection);
-BusResult   bus_dispatch_matches           (BusTransaction *transaction,
-                                            DBusConnection *sender,
-                                            DBusConnection *recipient,
-                                            DBusMessage    *message,
-                                            DBusError      *error);
+BusResult   bus_dispatch_matches           (BusTransaction     *transaction,
+                                            DBusConnection     *sender,
+                                            DBusConnection     *recipient,
+                                            DBusMessage        *message,
+                                            BusDeferredMessage *dispatched_deferred_message,
+                                            DBusError           *error);
 
 #endif /* BUS_DISPATCH_H */

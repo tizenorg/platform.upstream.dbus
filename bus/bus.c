@@ -1788,17 +1788,9 @@ bus_context_check_security_policy (BusContext          *context,
   }
 
   /* See if limits on size have been exceeded */
-  if (proposed_recipient &&
-      ((dbus_connection_get_outgoing_size (proposed_recipient) > context->limits.max_outgoing_bytes) ||
-       (dbus_connection_get_outgoing_unix_fds (proposed_recipient) > context->limits.max_outgoing_unix_fds)))
-    {
-      complain_about_message (context, DBUS_ERROR_LIMITS_EXCEEDED,
-          "Rejected: destination has a full message queue",
-          0, message, sender, proposed_recipient, requested_reply, TRUE, NULL,
-          error);
-      _dbus_verbose ("security policy disallowing message due to full message queue\n");
+  if (!bus_context_check_recipient_message_limits(context, proposed_recipient, sender, message,
+      requested_reply, error))
       return BUS_RESULT_FALSE;
-    }
 
   /* Record that we will allow a reply here in the future (don't
    * bother if the recipient is the bus or this is an eavesdropping
@@ -1852,4 +1844,43 @@ bus_context_check_all_watches (BusContext *context)
       DBusServer *server = link->data;
       _dbus_server_toggle_all_watches (server, enabled);
     }
+}
+
+void
+bus_context_complain_about_message (BusContext     *context,
+                                    const char     *error_name,
+                                    const char     *complaint,
+                                    int             matched_rules,
+                                    DBusMessage    *message,
+                                    DBusConnection *sender,
+                                    DBusConnection *proposed_recipient,
+                                    dbus_bool_t     requested_reply,
+                                    dbus_bool_t     log,
+                                    const char     *privilege,
+                                    DBusError      *error)
+{
+  complain_about_message(context, error_name, complaint, matched_rules, message, sender,
+      proposed_recipient, requested_reply, log, privilege, error);
+}
+
+dbus_bool_t   bus_context_check_recipient_message_limits (BusContext *context,
+                                                          DBusConnection *recipient,
+                                                          DBusConnection *sender,
+                                                          DBusMessage *message,
+                                                          dbus_bool_t requested_reply,
+                                                          DBusError *error)
+
+{
+  if (recipient &&
+       ((dbus_connection_get_outgoing_size (recipient) > context->limits.max_outgoing_bytes) ||
+        (dbus_connection_get_outgoing_unix_fds (recipient) > context->limits.max_outgoing_unix_fds)))
+     {
+       complain_about_message (context, DBUS_ERROR_LIMITS_EXCEEDED,
+           "Rejected: destination has a full message queue",
+           0, message, sender, recipient, requested_reply, TRUE, NULL,
+           error);
+       _dbus_verbose ("security policy disallowing message due to full message queue\n");
+       return FALSE;
+     }
+  return TRUE;
 }

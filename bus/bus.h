@@ -161,4 +161,23 @@ BusResult         bus_context_check_security_policy              (BusContext    
                                                                   DBusError           *error,
                                                                   BusDeferredMessage **deferred_message);
 
+dbus_bool_t       bus_context_check_recipient_message_limits     (BusContext *context,
+                                                                  DBusConnection *recipient,
+                                                                  DBusConnection *sender,
+                                                                  DBusMessage *message,
+                                                                  dbus_bool_t requested_reply,
+                                                                  DBusError *error);
+void              bus_context_complain_about_message             (BusContext     *context,
+                                                                  const char     *error_name,
+                                                                  const char     *complaint,
+                                                                  int             matched_rules,
+                                                                  DBusMessage    *message,
+                                                                  DBusConnection *sender,
+                                                                  DBusConnection *proposed_recipient,
+                                                                  dbus_bool_t     requested_reply,
+                                                                  dbus_bool_t     log,
+                                                                  const char     *privilege,
+                                                                  DBusError      *error);
+
+
 #endif /* BUS_BUS_H */

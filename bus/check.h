@@ -64,11 +64,36 @@ BusDeferredMessage *bus_deferred_message_new                (DBusMessage *messag
 
 BusDeferredMessage *bus_deferred_message_ref                (BusDeferredMessage *deferred_message);
 void                bus_deferred_message_unref              (BusDeferredMessage *deferred_message);
+BusResult           bus_deferred_message_dispatch           (BusDeferredMessage *deferred_message);
+dbus_bool_t         bus_deferred_message_waits_for_check    (BusDeferredMessage *deferred_message);
+DBusConnection     *bus_deferred_message_get_recipient      (BusDeferredMessage *deferred_message);
 void                bus_deferred_message_response_received  (BusDeferredMessage *deferred_message,
                                                              BusResult result);
+dbus_bool_t         bus_deferred_message_queue_at_recipient (BusDeferredMessage *deferred_message,
+                                                             BusTransaction *transaction,
+                                                             dbus_bool_t full_dispatch,
+                                                             dbus_bool_t prepend);
+dbus_bool_t         bus_deferred_message_replace            (BusDeferredMessage *old_message,
+                                                             BusDeferredMessage *new_message);
 void                bus_deferred_message_disable_sender     (BusDeferredMessage *deferred_message);
+BusResult           bus_deferred_message_get_response       (BusDeferredMessage *deferred_message);
 
 BusDeferredMessageStatus  bus_deferred_message_get_status   (BusDeferredMessage *deferred_message);
+
+
+dbus_bool_t         bus_deferred_message_expect_method_reply (BusDeferredMessage *deferred_message,
+                                                              BusTransaction *transaction,
+                                                              DBusError *error);
+void                bus_deferred_message_create_error        (BusDeferredMessage *deferred_message,
+                                                              const char *error_message,
+                                                              DBusError *error);
+void                bus_deferred_message_set_policy_check_info (BusDeferredMessage *deferred_message,
+                                                                dbus_bool_t requested_reply,
+                                                                int matched_rules,
+                                                                const char *privilege);
+dbus_bool_t         bus_deferred_message_check_message_limits (BusDeferredMessage *deferred_message,
+                                                               DBusError *error);
+
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 extern dbus_bool_t (*bus_check_test_override) (DBusConnection *connection,

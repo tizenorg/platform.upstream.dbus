@@ -261,7 +261,7 @@ bus_driver_send_service_owner_changed (const char     *service_name,
   if (!bus_transaction_capture (transaction, NULL, message))
     goto oom;
 
-  switch (bus_dispatch_matches (transaction, NULL, NULL, message, error))
+  switch (bus_dispatch_matches (transaction, NULL, NULL, message, NULL, error))
     {
     case BUS_RESULT_TRUE:
       retval = TRUE;
