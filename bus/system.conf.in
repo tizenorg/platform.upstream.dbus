@@ -45,26 +45,33 @@
     <!-- All users can connect to system bus -->
     <allow user="*"/>
 
-    <!-- Holes must be punched in service configuration files for
-         name ownership and sending method calls -->
-    <deny own="*"/>
-    <deny send_type="method_call"/>
+    <!-- By default clients require platform privilege to communicate
+         with D-Bus services and to claim name ownership -->
+    <check own="*"                  privilege="http://tizen.org/privilege/platform" />
+    <check send_type="method_call"  privilege="http://tizen.org/privilege/platform" />
+    <check send_type="signal"       privilege="http://tizen.org/privilege/platform" />
+    <check receive_type="signal"    privilege="http://tizen.org/privilege/platform" />
 
-    <!-- Signals and reply messages (method returns, errors) are allowed
+    <!-- Reply messages (method returns, errors) are allowed
          by default -->
-    <allow send_type="signal"/>
     <allow send_requested_reply="true" send_type="method_return"/>
     <allow send_requested_reply="true" send_type="error"/>
 
-    <!-- All messages may be received by default -->
+    <!-- All messages but signals may be received by default -->
     <allow receive_type="method_call"/>
     <allow receive_type="method_return"/>
     <allow receive_type="error"/>
-    <allow receive_type="signal"/>
 
-    <!-- Allow anyone to talk to the message bus -->
+    <!-- If there is a need specific bus services could be protected by Cynara as well.
+         However, this can lead to deadlock during the boot process when such check is made and
+         Cynara is not yet activated (systemd calls protected method synchronously,
+         dbus daemon tries to consult Cynara, Cynara waits for systemd activation).
+         Therefore it is advised to allow root processes to use bus services.
+         Currently anyone is allowed to talk to the message bus -->
     <allow send_destination="org.freedesktop.DBus"/>
-    <!-- But disallow some specific bus services -->
+    <allow receive_sender="org.freedesktop.DBus"/>
+
+    <!-- Disallow some specific bus services -->
     <deny send_destination="org.freedesktop.DBus"
           send_interface="org.freedesktop.DBus"
           send_member="UpdateActivationEnvironment"/>
