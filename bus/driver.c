@@ -473,7 +473,7 @@ bus_driver_handle_hello (DBusConnection *connection,
       return BUS_RESULT_FALSE;
     }
 
-  retval = FALSE;
+  retval = BUS_RESULT_FALSE;
 
   registry = bus_connection_get_registry (connection);
 
@@ -943,7 +943,7 @@ bus_driver_handle_service_exists (DBusConnection *connection,
   return retval;
 }
 
-static dbus_bool_t
+static BusResult
 bus_driver_handle_activate_service (DBusConnection *connection,
                                     BusTransaction *transaction,
                                     DBusMessage    *message,
@@ -2396,7 +2396,7 @@ static const MessageHandler dbus_message_handlers[] = {
   { NULL, NULL, NULL, NULL }
 };
 
-static dbus_bool_t bus_driver_handle_introspect (DBusConnection *,
+static BusResult bus_driver_handle_introspect (DBusConnection *,
     BusTransaction *, DBusMessage *, DBusError *);
 
 static const MessageHandler introspectable_message_handlers[] = {
@@ -2667,10 +2667,10 @@ bus_driver_handle_message (DBusConnection *connection,
                            attacker ? attacker : "(unauthenticated)",
                            bus_connection_get_loginfo (connection));
           /* ignore it */
-          return TRUE;
+          return BUS_RESULT_TRUE;
         }
 
-      return dbus_activation_systemd_failure(bus_context_get_activation(context), message);
+      return dbus_activation_systemd_failure(bus_context_get_activation(context), message) == TRUE ? BUS_RESULT_TRUE : BUS_RESULT_FALSE;
     }
 
   if (dbus_message_get_type (message) != DBUS_MESSAGE_TYPE_METHOD_CALL)
