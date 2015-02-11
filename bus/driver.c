@@ -34,6 +34,7 @@
 #include "utils.h"
 
 #include <dbus/dbus-asv-util.h>
+#include <dbus/dbus-connection-internal.h>
 #include <dbus/dbus-string.h>
 #include <dbus/dbus-internals.h>
 #include <dbus/dbus-message.h>
@@ -1567,6 +1568,7 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
   DBusMessageIter reply_iter;
   DBusMessageIter array_iter;
   unsigned long ulong_val;
+  char *s;
   const char *service;
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
@@ -1599,6 +1601,23 @@ bus_driver_handle_get_connection_credentials (DBusConnection *connection,
     {
       if (!_dbus_asv_add_uint32 (&array_iter, "UnixUserID", ulong_val))
         goto oom;
+    }
+
+  if (_dbus_connection_get_linux_security_label (conn, &s))
+    {
+      if (s == NULL)
+        goto oom;
+
+      /* use the GVariant bytestring convention for strings of unknown
+       * encoding: include the \0 in the payload, for zero-copy reading */
+      if (!_dbus_asv_add_byte_array (&array_iter, "LinuxSecurityLabel",
+                                     s, strlen (s) + 1))
+        {
+          dbus_free (s);
+          goto oom;
+        }
+
+      dbus_free (s);
     }
 
   if (!_dbus_asv_close (&reply_iter, &array_iter))
