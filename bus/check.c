@@ -58,6 +58,8 @@ typedef struct BusDeferredMessage
   BusCheckResponseFunc response_callback;
 } BusDeferredMessage;
 
+static dbus_int32_t deferred_message_data_slot = -1;
+
 BusCheck *
 bus_check_new (BusContext *context, DBusError *error)
 {
@@ -70,11 +72,19 @@ bus_check_new (BusContext *context, DBusError *error)
       return NULL;
     }
 
+  if (!dbus_message_allocate_data_slot(&deferred_message_data_slot))
+    {
+      dbus_free(check);
+      BUS_SET_OOM(error);
+      return NULL;
+    }
+
   check->refcount = 1;
   check->context = context;
   check->cynara = bus_cynara_new(check, error);
   if (dbus_error_is_set(error))
     {
+      dbus_message_free_data_slot(&deferred_message_data_slot);
       dbus_free(check);
       return NULL;
     }
@@ -101,6 +111,7 @@ bus_check_unref (BusCheck *check)
   if (check->refcount == 0)
     {
       bus_cynara_unref(check->cynara);
+      dbus_message_free_data_slot(&deferred_message_data_slot);
       dbus_free(check);
     }
 }
@@ -122,6 +133,8 @@ bus_check_enable_dispatch_callback (BusDeferredMessage *deferred_message,
                                     BusResult result)
 {
   _dbus_verbose("bus_check_enable_dispatch_callback called deferred_message=%p\n", deferred_message);
+
+  deferred_message->response = result;
   _dbus_connection_enable_dispatch(deferred_message->sender);
 }
 
@@ -208,11 +221,25 @@ bus_deferred_message_queue_at_recipient (BusDeferredMessage *deferred_message,
   return TRUE;
 }
 
+static void
+deferred_message_free_function(void *data)
+{
+  BusDeferredMessage *deferred_message = (BusDeferredMessage *)data;
+  bus_deferred_message_unref(deferred_message);
+}
+
 void
 bus_deferred_message_disable_sender (BusDeferredMessage *deferred_message)
 {
   _dbus_assert(deferred_message != NULL);
   _dbus_assert(deferred_message->sender != NULL);
+
+  if (dbus_message_get_data(deferred_message->message, deferred_message_data_slot) == NULL)
+    {
+      if (dbus_message_set_data(deferred_message->message, deferred_message_data_slot, deferred_message,
+          deferred_message_free_function))
+        bus_deferred_message_ref(deferred_message);
+    }
 
   _dbus_connection_disable_dispatch(deferred_message->sender);
   deferred_message->response_callback = bus_check_enable_dispatch_callback;
@@ -247,6 +274,7 @@ bus_check_privilege (BusCheck *check,
                      BusDeferredMessageStatus check_type,
                      BusDeferredMessage **deferred_message)
 {
+  BusDeferredMessage *previous_deferred_message;
   BusResult result = BUS_RESULT_FALSE;
   BusCynara *cynara;
   DBusConnection *connection;
@@ -263,16 +291,47 @@ bus_check_privilege (BusCheck *check,
     return bus_check_test_override (connection, privilege);
 #endif
 
-  /* ask policy checkers */
-#ifdef DBUS_ENABLE_CYNARA
-  cynara = bus_check_get_cynara(check);
-  result = bus_cynara_check_privilege(cynara, message, sender, addressed_recipient,
-      proposed_recipient, privilege, check_type, deferred_message);
-#endif
-
-  if (result == BUS_RESULT_LATER && deferred_message != NULL)
+  previous_deferred_message = dbus_message_get_data(message, deferred_message_data_slot);
+  /* check if message blocked at sender's queue is being processed */
+  if (previous_deferred_message != NULL)
     {
-      (*deferred_message)->status |= check_type;
+      if ((check_type & BUS_DEFERRED_MESSAGE_CHECK_SEND) &&
+          !(previous_deferred_message->status & BUS_DEFERRED_MESSAGE_CHECK_SEND))
+        {
+          /**
+           * Message has been deferred due to receive or own rule which means that sending this message
+           * is allowed - it must have been checked previously.
+           */
+          result = BUS_RESULT_TRUE;
+        }
+      else
+        {
+          result = previous_deferred_message->response;
+          if (result == BUS_RESULT_LATER)
+            {
+              /* result is still not known - reuse deferred message object */
+              if (deferred_message != NULL)
+                *deferred_message = previous_deferred_message;
+            }
+          else
+            {
+              /* result is available - we can remove deferred message from the processed message */
+              dbus_message_set_data(message, deferred_message_data_slot, NULL, NULL);
+            }
+        }
+    }
+  else
+    {
+      /* ask policy checkers */
+#ifdef DBUS_ENABLE_CYNARA
+      cynara = bus_check_get_cynara(check);
+      result = bus_cynara_check_privilege(cynara, message, sender, addressed_recipient,
+          proposed_recipient, privilege, check_type, deferred_message);
+#endif
+      if (result == BUS_RESULT_LATER && deferred_message != NULL)
+        {
+          (*deferred_message)->status |= check_type;
+        }
     }
   return result;
 }
