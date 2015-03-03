@@ -35,6 +35,7 @@
 #include <cynara-client-async.h>
 #endif
 
+#define USE_CYNARA_CACHE 1
 
 #ifdef DBUS_ENABLE_CYNARA
 typedef struct BusCynara
@@ -166,8 +167,12 @@ bus_cynara_check_privilege (BusCynara *cynara,
 
   snprintf(user, sizeof(user), "%lu", uid);
 
-
+#if USE_CYNARA_CACHE
   result = cynara_async_check_cache(cynara->cynara, label, session_id, user, privilege);
+#else
+  result = CYNARA_API_CACHE_MISS;
+#endif
+
   switch (result)
   {
   case CYNARA_API_ACCESS_ALLOWED:
