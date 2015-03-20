@@ -82,7 +82,7 @@ make DESTDIR=%{buildroot} -C dbus \
      install-nodist_dbusarchincludeHEADERS
 
 make DESTDIR=%{buildroot} install-pkgconfigDATA
-
+rm %{buildroot}/%{_libdir}/libdbus-1.la
 
 
 %post -p /sbin/ldconfig
@@ -113,7 +113,6 @@ make DESTDIR=%{buildroot} install-pkgconfigDATA
 %manifest %{name}.manifest
 %defattr(-,root,root)
 %{_includedir}/*
-%{_libdir}/libdbus-1.la
 %{_libdir}/libdbus-1.so
 %{_libdir}/dbus-1.0/include
 %{_libdir}/pkgconfig/dbus-1.pc
