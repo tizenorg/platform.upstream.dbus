@@ -5,7 +5,7 @@
 if [[ -z "$DBUS_SESSION_BUS_ADDRESS" ]]; then
    systemd_pid=$(pgrep -U $UID systemd | head -1)
    if [[ -n "$systemd_pid" ]]; then
-      val=$(sed  '/\<DBUS_SESSION_BUS_ADDRESS=/!d ; s/.*\<DBUS_SESSION_BUS_ADDRESS=\([^[:cntrl:]]*\).*/\1/' /proc/${systemd_pid}/environ)
+      val=$(tr '\0' '\n' < /proc/${systemd_pid}/environ | sed  '/^DBUS_SESSION_BUS_ADDRESS=/!d ; s/[^=]*=//')
       [[ -n "$val" ]] && export DBUS_SESSION_BUS_ADDRESS=$val
    fi
 fi
