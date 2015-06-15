@@ -1759,6 +1759,65 @@ bus_driver_handle_get_id (DBusConnection *connection,
   return BUS_RESULT_FALSE;
 }
 
+static BusResult
+bus_driver_handle_get_connection_smack_context (DBusConnection *connection,
+                                                BusTransaction *transaction,
+                                                DBusMessage    *message,
+                                                DBusError      *error)
+{
+  DBusConnection *conn;
+  DBusMessage *reply = NULL;
+  char *label = NULL;
+  const char *service;
+
+  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
+
+  conn = bus_driver_get_conn_helper (connection, message, "credentials",
+                                     &service, error);
+  if (conn == NULL)
+    goto err;
+
+  reply = dbus_message_new_method_return (message);
+  if (reply == NULL)
+    goto oom;
+
+  if (!_dbus_connection_get_linux_security_label (conn, &label))
+   {
+      dbus_set_error (error, DBUS_ERROR_FAILED,
+                      "Failed to get smack label of connection",
+                      conn);
+      goto err;
+   }
+
+  if (label == NULL)
+    goto oom;
+
+  if (!dbus_message_append_args (reply,
+                                 DBUS_TYPE_STRING, &label,
+                                 DBUS_TYPE_INVALID))
+    goto oom;
+
+  if (!bus_transaction_send_from_driver (transaction, connection, reply))
+    goto oom;
+
+  dbus_message_unref (reply);
+  dbus_free(label);
+
+  return BUS_RESULT_TRUE;
+
+oom:
+  BUS_SET_OOM (error);
+
+err:
+  if (reply != NULL)
+    dbus_message_unref (reply);
+
+  dbus_free(label);
+
+  return BUS_RESULT_FALSE;
+}
+
+
 typedef struct
 {
   const char *name;
@@ -1849,6 +1908,10 @@ static const MessageHandler dbus_message_handlers[] = {
     bus_driver_handle_get_id },
   { "GetConnectionCredentials", "s", "a{sv}",
     bus_driver_handle_get_connection_credentials },
+  { "GetConnectionSmackContext", /* deprecated - you should use GetConnectionCredentials instead */
+    DBUS_TYPE_STRING_AS_STRING,
+    DBUS_TYPE_STRING_AS_STRING,
+    bus_driver_handle_get_connection_smack_context },
   { NULL, NULL, NULL, NULL }
 };
 
