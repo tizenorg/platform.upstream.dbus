@@ -27,12 +27,32 @@
   <standard_session_servicedirs />
 
   <policy context="default">
-    <!-- Allow everything to be sent -->
-    <allow send_destination="*" eavesdrop="true"/>
-    <!-- Allow everything to be received -->
-    <allow eavesdrop="true"/>
-    <!-- Allow anyone to own anything -->
-    <allow own="*"/>
+    <!-- By default clients require internal/dbus privilege to communicate
+         with D-Bus services and to claim name ownership. This is internal privilege that
+         is only accessible to trusted system services -->
+    <check own="*"                  privilege="http://tizen.org/privilege/internal/dbus" />
+    <check send_type="method_call"  privilege="http://tizen.org/privilege/internal/dbus" />
+    <check send_type="signal"       privilege="http://tizen.org/privilege/internal/dbus" />
+    <check receive_type="signal"    privilege="http://tizen.org/privilege/internal/dbus" />
+
+    <!-- Reply messages (method returns, errors) are allowed
+         by default -->
+    <allow send_requested_reply="true" send_type="method_return"/>
+    <allow send_requested_reply="true" send_type="error"/>
+
+    <!-- All messages but signals may be received by default -->
+    <allow receive_type="method_call"/>
+    <allow receive_type="method_return"/>
+    <allow receive_type="error"/>
+
+    <!-- Allow anyone to talk to the message bus -->
+    <allow send_destination="org.freedesktop.DBus"/>
+    <allow receive_sender="org.freedesktop.DBus"/>
+
+    <!-- But disallow some specific bus services -->
+    <deny send_destination="org.freedesktop.DBus"
+          send_interface="org.freedesktop.DBus"
+          send_member="UpdateActivationEnvironment"/>
   </policy>
 
   <!-- Include legacy configuration location -->
