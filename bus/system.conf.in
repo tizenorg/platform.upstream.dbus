@@ -50,20 +50,17 @@
     <deny own="*"/>
     <deny send_type="method_call"/>
 
-    <!-- By default clients require internal/dbus privilege to send and receive signaks.
-         This is internal privilege that is only accessible to trusted system services -->
-    <check send_type="signal"       privilege="http://tizen.org/privilege/internal/dbus" />
-    <check receive_type="signal"    privilege="http://tizen.org/privilege/internal/dbus" />
-
-    <!-- Reply messages (method returns, errors) are allowed
+    <!-- Signals and reply messages (method returns, errors) are allowed
          by default -->
+    <allow send_type="signal"/>
     <allow send_requested_reply="true" send_type="method_return"/>
     <allow send_requested_reply="true" send_type="error"/>
 
-    <!-- All messages but signals may be received by default -->
+    <!-- All messages may be received by default -->
     <allow receive_type="method_call"/>
     <allow receive_type="method_return"/>
     <allow receive_type="error"/>
+    <allow receive_type="signal"/>
 
     <!-- Allow anyone to talk to the message bus -->
     <allow send_destination="org.freedesktop.DBus"
@@ -71,16 +68,7 @@
     <allow send_destination="org.freedesktop.DBus"
            send_interface="org.freedesktop.DBus.Introspectable"/>
 
-    <!-- If there is a need specific bus services could be protected by Cynara as well.
-         However, this can lead to deadlock during the boot process when such check is made and
-         Cynara is not yet activated (systemd calls protected method synchronously,
-         dbus daemon tries to consult Cynara, Cynara waits for systemd activation).
-         Therefore it is advised to allow root processes to use bus services.
-         Currently anyone is allowed to talk to the message bus -->
-    <allow send_destination="org.freedesktop.DBus"/>
-    <allow receive_sender="org.freedesktop.DBus"/>
-
-    <!-- Disallow some specific bus services -->
+    <!-- But disallow some specific bus services -->
     <deny send_destination="org.freedesktop.DBus"
           send_interface="org.freedesktop.DBus"
           send_member="UpdateActivationEnvironment"/>
