@@ -21,8 +21,10 @@
     <allow send_destination="*" eavesdrop="true"/>
     <!-- Allow everything to be received -->
     <allow eavesdrop="true"/>
-    <!-- Allow anyone to own anything -->
-    <allow own="*"/>
+    <!-- Require internal/dbus privilege to claim name ownership and send signals.
+         This is internal privilege that is only accessible to trusted system services -->
+    <check own="*"            privilege="http://tizen.org/privilege/internal/dbus" />
+    <check send_type="signal" privilege="http://tizen.org/privilege/internal/dbus" />
   </policy>
 
   <!-- Config files are placed here that among other things, 

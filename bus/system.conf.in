@@ -50,9 +50,11 @@
     <deny own="*"/>
     <deny send_type="method_call"/>
 
-    <!-- Signals and reply messages (method returns, errors) are allowed
-         by default -->
-    <allow send_type="signal"/>
+    <!-- Require internal/dbus privilege to send signals.
+         This is internal privilege that is only accessible to trusted system services -->
+    <check send_type="signal"       privilege="http://tizen.org/privilege/internal/dbus" />
+
+    <!-- Reply messages (method returns, errors) are allowed -->
     <allow send_requested_reply="true" send_type="method_return"/>
     <allow send_requested_reply="true" send_type="error"/>
 
