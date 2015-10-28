@@ -22,7 +22,7 @@ BuildRequires:  pkgconfig(libsystemd-login)
 %endif
 BuildRequires:  pkgconfig(cynara-client-async)
 BuildRequires:  pkgconfig(cynara-session)
-Version:        1.8.2
+Version:        1.8.16
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
