@@ -2,6 +2,7 @@
 /* dbus-transport.c DBusTransport object (internal to D-Bus implementation)
  *
  * Copyright (C) 2002, 2003  Red Hat Inc.
+ * Copyright (C) 2013  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  * 
@@ -32,6 +33,9 @@
 #include "dbus-credentials.h"
 #include "dbus-mainloop.h"
 #include "dbus-message.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
+#include "dbus-transport-kdbus.h"
+#endif
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 #include "dbus-server-debug-pipe.h"
 #endif
@@ -107,7 +111,7 @@ _dbus_transport_init_base (DBusTransport             *transport,
   DBusMessageLoader *loader;
   DBusAuth *auth;
   DBusCounter *counter;
-  char *address_copy;
+  char *address_copy = NULL;
   DBusCredentials *creds;
   
   loader = _dbus_message_loader_new ();
@@ -117,10 +121,28 @@ _dbus_transport_init_base (DBusTransport             *transport,
   if (server_guid)
     auth = _dbus_auth_server_new (server_guid);
   else
-    auth = _dbus_auth_client_new ();
+  {
+	  _dbus_assert (address != NULL);
+	  if (!_dbus_string_copy_data (address, &address_copy))
+        {
+          _dbus_message_loader_unref (loader);
+          return FALSE;
+        }
+#ifdef ENABLE_KDBUS_TRANSPORT
+      if(address_copy == strstr(address_copy, DBUS_ADDRESS_KDBUS "path=")) //FIXME -> path doesn't have to be first key in address
+      	  auth = _dbus_auth_client_new_kdbus();
+	  else
+#endif
+		  auth = _dbus_auth_client_new ();
+  }
+
   if (auth == NULL)
     {
       _dbus_message_loader_unref (loader);
+      
+      if (address_copy != NULL)
+        dbus_free(address_copy);
+      
       return FALSE;
     }
 
@@ -129,6 +151,10 @@ _dbus_transport_init_base (DBusTransport             *transport,
     {
       _dbus_auth_unref (auth);
       _dbus_message_loader_unref (loader);
+      
+      if (address_copy != NULL)
+        dbus_free(address_copy);
+      
       return FALSE;
     }  
 
@@ -138,6 +164,10 @@ _dbus_transport_init_base (DBusTransport             *transport,
       _dbus_counter_unref (counter);
       _dbus_auth_unref (auth);
       _dbus_message_loader_unref (loader);
+      
+      if (address_copy != NULL)
+        dbus_free(address_copy);
+      
       return FALSE;
     }
   
@@ -145,19 +175,6 @@ _dbus_transport_init_base (DBusTransport             *transport,
     {
       _dbus_assert (address == NULL);
       address_copy = NULL;
-    }
-  else
-    {
-      _dbus_assert (address != NULL);
-
-      if (!_dbus_string_copy_data (address, &address_copy))
-        {
-          _dbus_credentials_unref (creds);
-          _dbus_counter_unref (counter);
-          _dbus_auth_unref (auth);
-          _dbus_message_loader_unref (loader);
-          return FALSE;
-        }
     }
   
   transport->refcount = 1;
@@ -347,6 +364,9 @@ static const struct {
                                     DBusTransport   **transport_p,
                                     DBusError        *error);
 } open_funcs[] = {
+#ifdef ENABLE_KDBUS_TRANSPORT
+  { _dbus_transport_open_kdbus },
+#endif
   { _dbus_transport_open_socket },
   { _dbus_transport_open_platform_specific },
   { _dbus_transport_open_autolaunch }
