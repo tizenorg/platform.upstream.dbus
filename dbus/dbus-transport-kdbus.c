@@ -47,8 +47,20 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <linux/memfd.h>
 #include <fcntl.h>
+
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 17, 0)
+#  if defined(__arm__) || defined(__aarch64__)
+#    define __NR_memfd_create 385
+#  elif defined(__i386__)
+#    define __NR_memfd_create 279
+#  else
+#    error "Architecture not supported"
+#  endif
+#else
+#  include <linux/memfd.h>
+#endif
 
 int debug = -1;
 
@@ -65,6 +77,14 @@ int debug = -1;
 #define F_SEAL_SHRINK   0x0002  /* prevent file from shrinking */
 #define F_SEAL_GROW     0x0004  /* prevent file from growing */
 #define F_SEAL_WRITE    0x0008  /* prevent writes */
+#endif
+
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC             0x0001U
+#endif
+
+#ifndef MFD_ALLOW_SEALING
+#define MFD_ALLOW_SEALING       0x0002U
 #endif
 
 /* ALIGN8 and KDBUS_FOREACH taken from systemd */
