@@ -587,8 +587,20 @@ void
 _dbus_connection_queue_synthesized_message_link (DBusConnection *connection,
 						 DBusList *link)
 {
+  DBusMessage *msg, *rmsg;
+
   HAVE_LOCK_CHECK (connection);
-  
+
+  msg = (DBusMessage *)link->data;
+
+  rmsg = msg;
+  _dbus_transport_assure_protocol_version (connection->transport, &rmsg);
+
+  if (rmsg != msg) {
+    _dbus_list_free_link(link);
+    link = _dbus_list_alloc_link (rmsg);
+  }
+
   _dbus_list_append_link (&connection->incoming_messages, link);
 
   connection->n_incoming += 1;
@@ -2053,6 +2065,28 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
 {
   dbus_uint32_t serial;
 
+  /* Finish preparing the message */
+  if (dbus_message_get_serial (message) == 0)
+    {
+      serial = _dbus_connection_get_next_client_serial (connection);
+      dbus_message_set_serial (message, serial);
+      if (client_serial)
+        *client_serial = serial;
+    }
+  else
+    {
+      if (client_serial)
+        *client_serial = dbus_message_get_serial (message);
+    }
+
+  _dbus_verbose ("Message %p serial is %u\n",
+                 message, dbus_message_get_serial (message));
+
+  dbus_message_lock (message);
+
+  /* This converts message if neccessary */
+  _dbus_transport_assure_protocol_version (connection->transport, &message);
+
   preallocated->queue_link->data = message;
   _dbus_list_prepend_link (&connection->outgoing_messages,
                            preallocated->queue_link);
@@ -2087,24 +2121,6 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
                  "null",
                  connection,
                  connection->n_outgoing);
-
-  if (dbus_message_get_serial (message) == 0)
-    {
-      serial = _dbus_connection_get_next_client_serial (connection);
-      dbus_message_set_serial (message, serial);
-      if (client_serial)
-        *client_serial = serial;
-    }
-  else
-    {
-      if (client_serial)
-        *client_serial = dbus_message_get_serial (message);
-    }
-
-  _dbus_verbose ("Message %p serial is %u\n",
-                 message, dbus_message_get_serial (message));
-  
-  dbus_message_lock (message);
 
   /* Now we need to run an iteration to hopefully just write the messages
    * out immediately, and otherwise get them queued up
@@ -2235,52 +2251,6 @@ _dbus_memory_pause_based_on_timeout (int timeout_milliseconds)
     _dbus_sleep_milliseconds (timeout_milliseconds / 3);
   else
     _dbus_sleep_milliseconds (1000);
-}
-
-static DBusMessage *
-generate_local_error_message (dbus_uint32_t serial, 
-                              char *error_name, 
-                              char *error_msg)
-{
-  DBusMessage *message;
-  message = dbus_message_new (DBUS_MESSAGE_TYPE_ERROR);
-  if (!message)
-    goto out;
-
-  if (!dbus_message_set_error_name (message, error_name))
-    {
-      dbus_message_unref (message);
-      message = NULL;
-      goto out; 
-    }
-
-  dbus_message_set_no_reply (message, TRUE); 
-
-  if (!dbus_message_set_reply_serial (message,
-                                      serial))
-    {
-      dbus_message_unref (message);
-      message = NULL;
-      goto out;
-    }
-
-  if (error_msg != NULL)
-    {
-      DBusMessageIter iter;
-
-      dbus_message_iter_init_append (message, &iter);
-      if (!dbus_message_iter_append_basic (&iter,
-                                           DBUS_TYPE_STRING,
-                                           &error_msg))
-        {
-          dbus_message_unref (message);
-          message = NULL;
-	  goto out;
-        }
-    }
-
- out:
-  return message;
 }
 
 /*
@@ -2525,9 +2495,9 @@ _dbus_connection_block_pending_call (DBusPendingCall *pending)
     {
       DBusMessage *error_msg;
 
-      error_msg = generate_local_error_message (client_serial,
-                                                DBUS_ERROR_DISCONNECTED, 
-                                                "Connection was disconnected before a reply was received"); 
+      error_msg = _dbus_generate_local_error_message (client_serial,
+                                                      DBUS_ERROR_DISCONNECTED,
+                                                      "Connection was disconnected before a reply was received");
 
       /* on OOM error_msg is set to NULL */
       complete_pending_call_and_unlock (connection, pending, error_msg);
@@ -3036,6 +3006,12 @@ dbus_connection_get_is_authenticated (DBusConnection *connection)
   CONNECTION_UNLOCK (connection);
   
   return res;
+}
+
+dbus_bool_t
+_dbus_connection_is_kdbus (DBusConnection *connection)
+{
+  return _dbus_transport_is_kdbus (connection->transport);
 }
 
 /**
@@ -5277,6 +5253,16 @@ dbus_connection_get_socket(DBusConnection              *connection,
   return retval;
 }
 
+/**
+ *
+ * Getter for number of messages in incoming queue.
+ * Useful for sending reply to self (see kdbus_do_iteration)
+ */
+int
+_dbus_connection_get_n_incoming (DBusConnection *connection)
+{
+  return connection->n_incoming;
+}
 
 /**
  * Gets the UNIX user ID of the connection if known.  Returns #TRUE if
