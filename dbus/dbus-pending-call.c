@@ -367,6 +367,9 @@ _dbus_pending_call_set_timeout_error_unlocked (DBusPendingCall *pending,
   if (reply == NULL)
     return FALSE;
 
+  /* FIXME - lock may now fail */
+  dbus_message_lock (reply);
+
   reply_link = _dbus_list_alloc_link (reply);
   if (reply_link == NULL)
     {
