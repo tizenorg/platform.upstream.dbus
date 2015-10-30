@@ -2,6 +2,7 @@
 /* dbus-transport.c DBusTransport object (internal to D-Bus implementation)
  *
  * Copyright (C) 2002, 2003  Red Hat Inc.
+ * Copyright (C) 2013  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  * 
@@ -32,6 +33,9 @@
 #include "dbus-credentials.h"
 #include "dbus-mainloop.h"
 #include "dbus-message.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
+#include "dbus-transport-kdbus.h"
+#endif
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 #include "dbus-server-debug-pipe.h"
 #endif
@@ -85,6 +89,58 @@ live_messages_notify (DBusCounter *counter,
   _dbus_connection_unlock (transport->connection);
 }
 
+static dbus_bool_t
+_dbus_transport_default_get_unix_user (DBusTransport *transport,
+                                       unsigned long *uid)
+{
+  DBusCredentials *auth_identity;
+
+  *uid = _DBUS_INT32_MAX; /* better than some root or system user in
+                           * case of bugs in the caller. Caller should
+                           * never use this value on purpose, however.
+                           */
+
+  if (!transport->authenticated)
+    return FALSE;
+
+  auth_identity = _dbus_auth_get_identity (transport->auth);
+
+  if (_dbus_credentials_include (auth_identity,
+                                 DBUS_CREDENTIAL_UNIX_USER_ID))
+    {
+      *uid = _dbus_credentials_get_unix_uid (auth_identity);
+      return TRUE;
+    }
+  else
+    return FALSE;
+}
+
+static dbus_bool_t
+_dbus_transport_default_get_unix_process_id (DBusTransport *transport,
+				                             unsigned long *pid)
+{
+  DBusCredentials *auth_identity;
+
+  *pid = DBUS_PID_UNSET; /* Caller should never use this value on purpose,
+			  * but we set it to a safe number, INT_MAX,
+			  * just to root out possible bugs in bad callers.
+			  */
+
+  if (!transport->authenticated)
+    return FALSE;
+
+  auth_identity = _dbus_auth_get_identity (transport->auth);
+
+  if (_dbus_credentials_include (auth_identity,
+                                 DBUS_CREDENTIAL_UNIX_PROCESS_ID))
+    {
+      *pid = _dbus_credentials_get_pid (auth_identity);
+      return TRUE;
+    }
+  else
+    return FALSE;
+}
+
 /**
  * Initializes the base class members of DBusTransport.  Chained up to
  * by subclasses in their constructor.  The server GUID is the
@@ -96,13 +152,15 @@ live_messages_notify (DBusCounter *counter,
  * @param vtable the subclass vtable.
  * @param server_guid non-#NULL if this transport is on the server side of a connection
  * @param address the address of the transport
+ * @param with_auth TRUE if authentication should be used
  * @returns #TRUE on success.
  */
-dbus_bool_t
-_dbus_transport_init_base (DBusTransport             *transport,
-                           const DBusTransportVTable *vtable,
-                           const DBusString          *server_guid,
-                           const DBusString          *address)
+static dbus_bool_t
+_dbus_transport_init_base_with_auth (DBusTransport             *transport,
+                                     const DBusTransportVTable *vtable,
+                                     const DBusString          *server_guid,
+                                     const DBusString          *address,
+                                     dbus_bool_t                with_auth)
 {
   DBusMessageLoader *loader;
   DBusAuth *auth;
@@ -117,7 +175,13 @@ _dbus_transport_init_base (DBusTransport             *transport,
   if (server_guid)
     auth = _dbus_auth_server_new (server_guid);
   else
-    auth = _dbus_auth_client_new ();
+  {
+      if (with_auth)
+        auth = _dbus_auth_client_new ();
+      else
+        auth = _dbus_auth_client_new_authenticated ();
+  }
+
   if (auth == NULL)
     {
       _dbus_message_loader_unref (loader);
@@ -203,7 +267,66 @@ _dbus_transport_init_base (DBusTransport             *transport,
   if (transport->address)
     _dbus_verbose ("Initialized transport on address %s\n", transport->address);
 
+  transport->get_unix_user_function = _dbus_transport_default_get_unix_user;
+  transport->get_unix_process_id_function = _dbus_transport_default_get_unix_process_id;
+  transport->assure_protocol_function = _dbus_message_assure_dbus1;
+
   return TRUE;
+}
+
+dbus_bool_t
+_dbus_transport_assure_protocol_version (DBusTransport *transport,
+                                         DBusMessage  **message)
+{
+  return transport->assure_protocol_function (message);
+}
+
+/**
+ * Initializes the base class members of DBusTransport.  Chained up to
+ * by subclasses in their constructor.  The server GUID is the
+ * globally unique ID for the server creating this connection
+ * and will be #NULL for the client side of a connection. The GUID
+ * is in hex format.
+ *
+ * @param transport the transport being created.
+ * @param vtable the subclass vtable.
+ * @param server_guid non-#NULL if this transport is on the server side of a connection
+ * @param address the address of the transport
+ * @returns #TRUE on success.
+ */
+dbus_bool_t
+_dbus_transport_init_base (DBusTransport             *transport,
+                           const DBusTransportVTable *vtable,
+                           const DBusString          *server_guid,
+                           const DBusString          *address)
+{
+  return _dbus_transport_init_base_with_auth (transport, vtable, server_guid, address, TRUE);
+}
+
+/**
+ * Initializes the base class members of DBusTransport.  Chained up to
+ * by subclasses in their constructor.  The server GUID is the
+ * globally unique ID for the server creating this connection
+ * and will be #NULL for the client side of a connection. The GUID
+ * is in hex format. Differs from _dbus_transport_init_base in that
+ * it sets auth as authenticated. This way auth negotiation is skipped.
+ *
+ * @param transport the transport being created.
+ * @param vtable the subclass vtable.
+ * @param server_guid non-#NULL if this transport is on the server side of a connection
+ * @param address the address of the transport
+ * @returns #TRUE on success.
+ */
+dbus_bool_t
+_dbus_transport_init_base_authenticated (DBusTransport             *transport,
+                                         const DBusTransportVTable *vtable,
+                                         const DBusString          *server_guid,
+                                         const DBusString          *address)
+{
+  dbus_bool_t result = _dbus_transport_init_base_with_auth (transport, vtable, server_guid, address, FALSE);
+  if (result)
+    transport->authenticated = TRUE;
+  return result;
 }
 
 /**
@@ -347,6 +470,9 @@ static const struct {
                                     DBusTransport   **transport_p,
                                     DBusError        *error);
 } open_funcs[] = {
+#ifdef ENABLE_KDBUS_TRANSPORT
+  { _dbus_transport_open_kdbus },
+#endif
   { _dbus_transport_open_socket },
   { _dbus_transport_open_platform_specific },
   { _dbus_transport_open_autolaunch }
@@ -1300,6 +1426,47 @@ _dbus_transport_get_max_received_unix_fds (DBusTransport  *transport)
 }
 
 /**
+ * Sets a function used to get UNIX user ID of the connection.
+ * See dbus_connection_get_unix_user().
+ *
+ * @param transport the transport
+ * @param function the getter function
+ */
+void
+_dbus_transport_set_get_unix_user_function (DBusTransport                    *transport,
+                                            DBusTransportGetUnixUserFunction  function)
+{
+  transport->get_unix_user_function = function;
+}
+
+/**
+ * Sets a function used to get process ID of the connection.
+ * See dbus_connection_get_unix_process_id().
+ *
+ * @param transport the transport
+ * @param function the getter function
+ */
+void
+_dbus_transport_set_get_unix_process_id_function (DBusTransport                    *transport,
+                                                  DBusTransportGetUnixPIDFunction   function)
+{
+  transport->get_unix_process_id_function = function;
+}
+
+/**
+ * Sets a function used to assure that messages have correct protocol version
+ *
+ * @param transport the transport
+ * @param function the getter function
+ */
+void
+_dbus_transport_set_assure_protocol_function (DBusTransport                      *transport,
+                                              DBusTransportAssureProtocolFunction function)
+{
+  transport->assure_protocol_function = function;
+}
+
+/**
  * See dbus_connection_get_unix_user().
  *
  * @param transport the transport
@@ -1310,26 +1477,9 @@ dbus_bool_t
 _dbus_transport_get_unix_user (DBusTransport *transport,
                                unsigned long *uid)
 {
-  DBusCredentials *auth_identity;
-
-  *uid = _DBUS_INT32_MAX; /* better than some root or system user in
-                           * case of bugs in the caller. Caller should
-                           * never use this value on purpose, however.
-                           */
-  
-  if (!transport->authenticated)
+  if (transport->get_unix_user_function == NULL)
     return FALSE;
-  
-  auth_identity = _dbus_auth_get_identity (transport->auth);
-
-  if (_dbus_credentials_include (auth_identity,
-                                 DBUS_CREDENTIAL_UNIX_USER_ID))
-    {
-      *uid = _dbus_credentials_get_unix_uid (auth_identity);
-      return TRUE;
-    }
-  else
-    return FALSE;
+  return (transport->get_unix_user_function) (transport, uid);
 }
 
 /**
@@ -1343,26 +1493,9 @@ dbus_bool_t
 _dbus_transport_get_unix_process_id (DBusTransport *transport,
 				     unsigned long *pid)
 {
-  DBusCredentials *auth_identity;
-
-  *pid = DBUS_PID_UNSET; /* Caller should never use this value on purpose,
-			  * but we set it to a safe number, INT_MAX,
-			  * just to root out possible bugs in bad callers.
-			  */
-  
-  if (!transport->authenticated)
+  if (transport->get_unix_process_id_function == NULL)
     return FALSE;
-  
-  auth_identity = _dbus_auth_get_identity (transport->auth);
-
-  if (_dbus_credentials_include (auth_identity,
-                                 DBUS_CREDENTIAL_UNIX_PROCESS_ID))
-    {
-      *pid = _dbus_credentials_get_pid (auth_identity);
-      return TRUE;
-    }
-  else
-    return FALSE;
+  return (transport->get_unix_process_id_function) (transport, pid);
 }
 
 /**
