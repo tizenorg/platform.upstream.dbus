@@ -110,6 +110,7 @@ dbus_bool_t       _dbus_connection_putback_message                (DBusConnectio
 
 dbus_bool_t       _dbus_connection_remove_message                 (DBusConnection *connection,
                                                                    DBusMessage    *message);
+int               _dbus_connection_get_n_incoming               (DBusConnection *connection);
 
 /* if DBUS_ENABLE_STATS */
 void _dbus_connection_get_stats (DBusConnection *connection,
