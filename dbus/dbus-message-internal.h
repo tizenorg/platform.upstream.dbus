@@ -96,10 +96,19 @@ long               _dbus_message_loader_get_max_message_size  (DBusMessageLoader
 void               _dbus_message_loader_set_max_message_unix_fds(DBusMessageLoader  *loader,
                                                                  long                n);
 long               _dbus_message_loader_get_max_message_unix_fds(DBusMessageLoader  *loader);
+void               _dbus_message_loader_set_unique_sender_id (DBusMessageLoader *loader,
+                                                              uint64_t           id);
+uint64_t           _dbus_message_loader_get_unique_sender_id (DBusMessageLoader *loader);
 
 typedef struct DBusInitialFDs DBusInitialFDs;
 DBusInitialFDs *_dbus_check_fdleaks_enter (void);
 void            _dbus_check_fdleaks_leave (DBusInitialFDs *fds);
+
+DBusMessage *      _dbus_message_remarshal(DBusMessage *message, dbus_bool_t gvariant);
+
+DBusMessage *      _dbus_generate_local_error_message           (dbus_uint32_t serial,
+                                                                 char *error_name,
+                                                                 char *error_msg);
 
 DBUS_END_DECLS
 
