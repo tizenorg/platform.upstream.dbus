@@ -1540,7 +1540,12 @@ if ! test -z "$with_system_default_bus"; then
     ## any socket), so variable was not splited into two.
     DBUS_SYSTEM_BUS_DEFAULT_ADDRESS=$with_system_default_bus
 else
-    DBUS_SYSTEM_BUS_DEFAULT_ADDRESS="unix:path=$DBUS_SYSTEM_SOCKET"
+    kdbus_address_path=""
+    if test x$enable_kdbus_transport = xyes; then
+	kdbus_address_path="kernel:path=/sys/fs/kdbus/0-system/bus;"
+    fi
+
+    DBUS_SYSTEM_BUS_DEFAULT_ADDRESS="${kdbus_address_path}unix:path=$DBUS_SYSTEM_SOCKET"
 fi
 AC_SUBST(DBUS_SYSTEM_BUS_DEFAULT_ADDRESS)
 AC_DEFINE_UNQUOTED(DBUS_SYSTEM_BUS_DEFAULT_ADDRESS, "$DBUS_SYSTEM_BUS_DEFAULT_ADDRESS",[The default D-Bus address of the system bus])
