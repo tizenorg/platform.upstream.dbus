@@ -4387,7 +4387,7 @@ static DBusDispatchStatus
 _dbus_connection_get_dispatch_status_unlocked (DBusConnection *connection)
 {
   HAVE_LOCK_CHECK (connection);
-  if (connection->dispatch_disabled && dbus_connection_get_is_connected(connection))
+  if (connection->dispatch_disabled && _dbus_connection_get_is_connected_unlocked(connection))
     return DBUS_DISPATCH_COMPLETE;
   else if (connection->n_incoming > 0)
     return DBUS_DISPATCH_DATA_REMAINS;
