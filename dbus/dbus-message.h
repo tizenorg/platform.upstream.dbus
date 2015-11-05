@@ -54,27 +54,55 @@ struct DBusMessageIter
   void *dummy1;         /**< Don't use this */ /* message */
   dbus_uint32_t dummy3; /**< Don't use this */ /* changed_stamp, iter_type, sig_refcount */
 
-                                               /* padding before union */
-                                               /* below is union */
-                                               /* reader on the left, writer on the right */
-  struct {
-    dbus_uint32_t dummy4; /**< Don't use this */ /* bitfields */         /* bitfields */
-                                                 /* padding before pointer */
-    void *dummy5;         /**< Don't use this */ /* type_str */          /* type_str */
-    int dummy6;           /**< Don't use this */ /* type_pos */          /* type_pos */
-                                                 /* padding before pointer */
-    void *dummy7;         /**< Don't use this */ /* value_str */         /* value_str */
-    int dummy8;           /**< Don't use this */ /* value_pos */         /* value_pos */
-    int dummy9;           /**< Don't use this */ /* variable_index */    /* padding */
-    size_t dummy10;       /**< Don't use this */ /* value_start */       /* value_start */
-    size_t dummy11;       /**< Don't use this */ /* value_end */         /* u.array.start_pos */
-                                                                         /* u.array.len_pos */
-    int dummy12;          /**< Don't use this */ /* n_offsets */    /* u.array.element_type_pos*/
-    void *dummy13;        /**< Don't use this */ /* klass */        /* u.array.offsets_size */
-    struct {
-      int dummy14;          /**< Don't use this */ /* u.array.start_pos */
-    } dummy_u;
-  } dummy_u;
+                                             /* padding before union */
+  union {
+    struct
+    {
+      dbus_uint32_t dummy1;     /**< Don't use this */
+      void *dummy2;             /**< Don't use this */
+      int dummy3;               /**< Don't use this */
+      void *dummy4;             /**< Don't use this */
+      int dummy5;               /**< Don't use this */
+      int dummy6;               /**< Don't use this */
+      size_t dummy7;            /**< Don't use this */
+      size_t dummy8;            /**< Don't use this */
+      int dummy9;               /**< Don't use this */
+
+      void *dummy10;            /**< Don't use this */
+      union
+      {
+        struct {
+          int dummy11;          /**< Don't use this */
+        };
+      } u;
+    } s1;
+
+    struct
+    {
+      dbus_uint32_t dummy1;     /**< Don't use this */
+
+      void *dummy2;             /**< Don't use this */
+      int dummy3;               /**< Don't use this */
+      void *dummy4;             /**< Don't use this */
+      int dummy5;               /**< Don't use this */
+      size_t dummy6;            /**< Don't use this */
+      void *dummy7;             /**< Don't use this */
+      int dummy8;               /**< Don't use this */
+      char dummy9;              /**< Don't use this */
+
+      union
+      {
+        struct {
+          int dummy10;           /**< Don't use this */
+          int dummy11;           /**< Don't use this */
+          int dummy12;           /**< Don't use this */
+        };
+        struct {
+          size_t dummy13;        /**< Don't use this */
+        };
+      } u;
+    } s2;
+  } u;
 };
 
 DBUS_EXPORT
