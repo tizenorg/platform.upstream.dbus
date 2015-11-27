@@ -52,13 +52,20 @@ typedef struct DBusMessageIter DBusMessageIter;
 struct DBusMessageIter
 {                                              /* layout on a standard 64-bit system */
   void *dummy1;         /**< Don't use this */ /* message */
-  dbus_uint32_t dummy3; /**< Don't use this */ /* changed_stamp, iter_type, sig_refcount */
+  dbus_uint32_t dummy3a : 21; /**< Don't use this */
+  dbus_uint32_t dummy3b : 3; /**< Don't use this */
+  dbus_uint32_t dummy3c : 8; /**< Don't use this */
 
                                              /* padding before union */
   union {
     struct
     {
-      dbus_uint32_t dummy1;     /**< Don't use this */
+      dbus_uint32_t dummy1a : 8;     /**< Don't use this */
+      dbus_uint32_t dummy1b : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1c : 3;     /**< Don't use this */
+      dbus_uint32_t dummy1d : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1e : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1f : 1;     /**< Don't use this */
       void *dummy2;             /**< Don't use this */
       int dummy3;               /**< Don't use this */
       void *dummy4;             /**< Don't use this */
@@ -79,7 +86,13 @@ struct DBusMessageIter
 
     struct
     {
-      dbus_uint32_t dummy1;     /**< Don't use this */
+      dbus_uint32_t dummy1a : 8;     /**< Don't use this */
+      dbus_uint32_t dummy1b : 8;     /**< Don't use this */
+      dbus_uint32_t dummy1c : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1d : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1e : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1f : 1;     /**< Don't use this */
+      dbus_uint32_t dummy1g : 1;     /**< Don't use this */
 
       void *dummy2;             /**< Don't use this */
       int dummy3;               /**< Don't use this */
