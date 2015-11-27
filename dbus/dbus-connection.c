@@ -5361,6 +5361,7 @@ dbus_connection_get_unix_user (DBusConnection *connection,
 
   CONNECTION_LOCK (connection);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if (_dbus_connection_is_kdbus (connection))
     {
       const char *unique_name = dbus_bus_get_unique_name (connection);
@@ -5374,6 +5375,7 @@ dbus_connection_get_unix_user (DBusConnection *connection,
         }
     }
   else
+#endif
     {
       if (!_dbus_transport_try_to_authenticate (connection->transport))
         result = FALSE;
@@ -5412,6 +5414,7 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
 
   CONNECTION_LOCK (connection);
 
+#ifdef ENABLE_KDBUS_TRANSPORT
   if (_dbus_connection_is_kdbus (connection))
     {
       const char *unique_name = dbus_bus_get_unique_name (connection);
@@ -5425,6 +5428,7 @@ dbus_connection_get_unix_process_id (DBusConnection *connection,
         }
     }
   else
+#endif
     {
       if (!_dbus_transport_try_to_authenticate (connection->transport))
         result = FALSE;

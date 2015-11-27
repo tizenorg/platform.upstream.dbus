@@ -113,15 +113,19 @@ DBUS_SHARED_arch_sources = 			\
 	sd-daemon.h
 
 DBUS_SHARED_arch_sources += \
+	dbus-marshal-gvariant.c \
+	dbus-marshal-gvariant.h \
+	dbus-protocol-gvariant.h
+
+if ENABLE_KDBUS_TRANSPORT
+DBUS_SHARED_arch_sources += \
     dbus-transport-kdbus.c  \
     dbus-transport-kdbus.h  \
     kdbus-common.c          \
     kdbus-common.h          \
     dbus-signals.c          \
-    dbus-signals.h          \
-	dbus-marshal-gvariant.c \
-	dbus-marshal-gvariant.h \
-	dbus-protocol-gvariant.h
+    dbus-signals.h
+endif
 
 DBUS_UTIL_arch_sources = 			\
 	dbus-sysdeps-util-unix.c		\

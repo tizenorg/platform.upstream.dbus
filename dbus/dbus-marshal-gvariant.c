@@ -191,9 +191,7 @@ append_field_uint32 (DBusString *str,
 static void
 _dbus_header_toggle_gvariant (DBusHeader *header, dbus_bool_t gvariant)
 {
-#ifdef ENABLE_KDBUS_TRANSPORT
   header->protocol_version = gvariant ? DBUS_PROTOCOL_VERSION_GVARIANT : DBUS_MAJOR_PROTOCOL_VERSION;
-#endif
 }
 
 static const char *

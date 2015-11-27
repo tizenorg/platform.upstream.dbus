@@ -33,7 +33,9 @@
 #include "dbus-credentials.h"
 #include "dbus-mainloop.h"
 #include "dbus-message.h"
+#ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-transport-kdbus.h"
+#endif
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
 #include "dbus-server-debug-pipe.h"
 #endif
