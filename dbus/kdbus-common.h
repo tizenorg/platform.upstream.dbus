@@ -180,11 +180,17 @@ struct kdbus_item * _kdbus_item_add_bloom_mask     (struct kdbus_item *item,
                                                     dbus_uint64_t     *bloom,
                                                     dbus_uint64_t      bloom_size);
 
-int         request_kdbus_name                     (DBusTransport* transport, const char *name, const __u64 flags);
-int         release_kdbus_name                     (DBusTransport* transport, const char *name);
+int         _kdbus_request_name                    (kdbus_t *kdbus,
+                                                    const char *name,
+                                                    const __u64 flags);
+int         _kdbus_release_name                    (kdbus_t *kdbus,
+                                                    const char *name);
 
-dbus_bool_t kdbus_remove_match          (DBusTransport *transport, DBusList *rules, const char *sender,
-                                             MatchRule *rule_to_remove, DBusError *error);
+dbus_bool_t _kdbus_remove_match                    (kdbus_t *kdbus,
+                                                    DBusList *rules,
+                                                    const char *sender,
+                                                    MatchRule *rule_to_remove,
+                                                    DBusError *error);
 
 /** temporary accessors - to delete soon */
 int _kdbus_fd (kdbus_t *kdbus);

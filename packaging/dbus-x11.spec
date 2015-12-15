@@ -37,6 +37,11 @@ Source6:        dbus-user.socket
 Source1001: 	dbus-x11.manifest
 BuildRequires:  libcap-ng-devel
 BuildRequires:  pkgconfig(libsmack)
+# Enable support for libdbuspolicy (only for kdbus transport)
+%if %{with kdbus}
+BuildRequires:  pkgconfig(libdbuspolicy1)
+BuildRequires:  pkgconfig(cynara-client)
+%endif
 # COMMON1-END
 # COMMON1-END
 
@@ -78,6 +83,7 @@ export V=1
 %endif
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
+    --enable-libdbuspolicy                      \
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
     --with-systemdsystemunitdir=%{_unitdir}				\
