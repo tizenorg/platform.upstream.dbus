@@ -159,6 +159,7 @@ AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[
 AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
 AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
 AC_ARG_ENABLE(kdbus-transport, AS_HELP_STRING([--enable-kdbus-transport],[build with kdbus transport support]),enable_kdbus_transport=$enableval,enable_kdbus_transport=no)
+AC_ARG_ENABLE(libdbuspolicy,[AS_HELP_STRING([--enable-libdbuspolicy],[enable libdbuspolicy for kdbus transport [default=no]])],,[enable_libdbuspolicy=no])
 
 AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
 AC_ARG_WITH(session-socket-dir, AS_HELP_STRING([--with-session-socket-dir=[dirname]],[Where to put sockets for the per-login-session message bus]))
@@ -1244,6 +1245,16 @@ if test x$enable_kdbus_transport = xyes; then
     AC_DEFINE(ENABLE_KDBUS_TRANSPORT,1,[Enable kdbus transport support])
 fi
 AM_CONDITIONAL([ENABLE_KDBUS_TRANSPORT], [test x$enable_kdbus_transport = xyes])
+
+AC_MSG_CHECKING([whether to enable libdbuspolicy for kdbus transport])
+AM_CONDITIONAL(LIBDBUSPOLICY, [test "x$enable_libdbuspolicy" = "xyes"])
+AS_IF([test "x$enable_libdbuspolicy" = "xyes"], [
+  PKG_CHECK_MODULES(LIBDBUSPOLICY1, libdbuspolicy1 >= 1)
+  AC_SUBST(LIBDBUSPOLICY1_CFLAGS)
+  AC_SUBST(LIBDBUSPOLICY1_LIBS)
+  AC_DEFINE(LIBDBUSPOLICY, 1, [Whether to enable libdbuspolicy for kdbus transport])
+  AC_MSG_RESULT([yes])
+], [ AC_MSG_RESULT([no]) ])
 
 # Determine maximum number of Unix fds which may be passed
 AS_CASE([$host_os],

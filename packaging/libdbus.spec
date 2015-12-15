@@ -14,7 +14,10 @@ BuildRequires:  expat-devel
 BuildRequires:  libtool
 BuildRequires:  pkg-config
 BuildRequires:  pkgconfig(libsmack)
-
+# Enable support for libdbuspolicy (only for kdbus transport)
+%if %{with kdbus}
+BuildRequires:  pkgconfig(libdbuspolicy1)
+%endif
 
 
 %package -n dbus-devel
@@ -72,6 +75,7 @@ export V=1
     --with-systemdsystemunitdir=%{_unitdir}				\
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
+    --enable-libdbuspolicy                              \
 %endif
     --enable-smack
 

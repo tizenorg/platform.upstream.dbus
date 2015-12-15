@@ -670,19 +670,15 @@ _kdbus_compute_msg_items_size (kdbus_t       *kdbus,
  * @returns a DBus result code on success, -errno on error
  */
 int
-request_kdbus_name(DBusTransport  *transport,
-                   const char     *name,
-                   const __u64     flags)
+_kdbus_request_name (kdbus_t     *kdbus,
+                     const char  *name,
+                     const __u64  flags)
 {
   struct kdbus_cmd *cmd_name;
-  int fd;
   size_t len = strlen(name) + 1;
 
   __u64 size = sizeof(*cmd_name) + KDBUS_ITEM_SIZE(len);
   __u64 flags_kdbus = 0;
-
-  if(!_dbus_transport_get_socket_fd (transport, &fd))
-      return FALSE;
 
   cmd_name = alloca(size);
   cmd_name->size = size;
@@ -699,7 +695,7 @@ request_kdbus_name(DBusTransport  *transport,
 
   _dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
 
-  if (ioctl(fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name) < 0)
+  if (ioctl(kdbus->fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name) < 0)
     {
       _dbus_verbose ("error acquiring name '%s': %m, %d\n", name, errno);
       if(errno == EEXIST)
@@ -732,24 +728,20 @@ request_kdbus_name(DBusTransport  *transport,
  * @returns a DBus result code on success, -errno on error
  */
 int
-release_kdbus_name(DBusTransport  *transport,
-                   const char     *name)
+_kdbus_release_name (kdbus_t    *kdbus,
+                     const char *name)
 {
   struct kdbus_cmd *cmd_name;
-  int fd;
 
   size_t len = strlen(name)+1;
   __u64 size = sizeof(*cmd_name) + KDBUS_ITEM_SIZE(len);
-
-  if(!_dbus_transport_get_socket_fd (transport, &fd))
-      return FALSE;
 
   cmd_name = alloca(size);
   cmd_name->size = size;
   cmd_name->flags = 0;
   make_item_name(name, &(cmd_name->items[0]));
 
-  if (ioctl(fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
+  if (ioctl(kdbus->fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
     {
       if((errno == ESRCH))
         return DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
@@ -884,7 +876,7 @@ prepare_connection_info_cmd (dbus_uint64_t  id,
 /**
  * Gets connection info for the given unique id.
  *
- * @param transport transport
+ * @param kdbus kdbus object
  * @param id unique id to query for
  * @param get_sec_label #TRUE if sec_label field in pInfo should be filled
  * @param pInfo nameInfo structure address to store info about the name
@@ -907,7 +899,7 @@ _kdbus_connection_info_by_id (kdbus_t         *kdbus,
 /**
  * Gets connection info for the given name
  *
- * @param transport transport
+ * @param kdbus kdbus object
  * @param name name to query for
  * @param get_sec_label #TRUE if sec_label field in pInfo should be filled
  * @param pInfo nameInfo structure address to store info about the name
@@ -942,32 +934,28 @@ _kdbus_connection_info_by_name (kdbus_t         *kdbus,
  * Opposing to dbus, in kdbus removes all match rules with given
  * cookie, which in this implementation is equal to uniqe id.
  *
- * @param transport transport
+ * @param kdbus kdbus object
  * @param id connection id for which rules are to be removed
  * @param cookie cookie of the rules to be removed
  */
 static dbus_bool_t
-remove_match_kdbus (DBusTransport *transport,
-                    __u64          cookie)
+remove_match_kdbus (kdbus_t *kdbus,
+                    __u64    cookie)
 {
   struct kdbus_cmd_match cmd;
-  int fd;
-
-  if(!_dbus_transport_get_socket_fd(transport, &fd))
-    return FALSE;
 
   cmd.cookie = cookie;
   cmd.size = sizeof(struct kdbus_cmd_match);
   cmd.flags = 0;
 
-  if(ioctl(fd, KDBUS_CMD_MATCH_REMOVE, &cmd))
+  if(ioctl (kdbus->fd, KDBUS_CMD_MATCH_REMOVE, &cmd))
     {
-      _dbus_verbose("Failed removing match rule %llu, error: %d, %m\n", cookie, errno);
+      _dbus_verbose ("Failed removing match rule %llu, error: %d, %m\n", cookie, errno);
       return FALSE;
     }
   else
     {
-      _dbus_verbose("Match rule %llu removed correctly.\n", cookie);
+      _dbus_verbose ("Match rule %llu removed correctly.\n", cookie);
       return TRUE;
     }
 }
@@ -976,11 +964,11 @@ remove_match_kdbus (DBusTransport *transport,
  *  Removes match rule in kdbus on behalf of sender of the message
  */
 dbus_bool_t
-kdbus_remove_match (DBusTransport *transport,
-                    DBusList      *rules,
-                    const char    *sender,
-                    MatchRule     *rule_to_remove,
-                    DBusError     *error)
+_kdbus_remove_match (kdbus_t    *kdbus,
+                     DBusList   *rules,
+                     const char *sender,
+                     MatchRule  *rule_to_remove,
+                     DBusError  *error)
 {
   __u64 cookie = 0;
   DBusList *link = NULL;
@@ -1016,7 +1004,7 @@ kdbus_remove_match (DBusTransport *transport,
       return FALSE;
     }
 
-  if(!remove_match_kdbus (transport, cookie))
+  if(!remove_match_kdbus (kdbus, cookie))
     {
       dbus_set_error (error, _dbus_error_from_errno (errno), "Could not remove match rule");
       return FALSE;
