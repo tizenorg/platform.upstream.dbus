@@ -1599,4 +1599,17 @@ dbus_bus_remove_match (DBusConnection *connection,
   dbus_message_unref (msg);
 }
 
+DBusBusType
+_dbus_bus_get_address_type (const char *address)
+{
+  int i = 0;
+  for (; i < N_BUS_TYPES; i++)
+    {
+      if (bus_connection_addresses[i] != NULL)
+        if (strcmp (bus_connection_addresses[i], address) == 0)
+          return i;
+    }
+  return N_BUS_TYPES;
+}
+
 /** @} */

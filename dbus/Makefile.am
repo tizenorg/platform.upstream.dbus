@@ -308,6 +308,10 @@ libdbus_1_la_LDFLAGS = \
 	-no-undefined \
 	$(NULL)
 
+if LIBDBUSPOLICY
+libdbus_1_la_CPPFLAGS += $(LIBDBUSPOLICY1_FLAGS)
+endif
+
 libdbus_internal_la_CPPFLAGS = \
 	$(AM_CPPFLAGS) \
 	-DDBUS_STATIC_BUILD \
@@ -323,6 +327,10 @@ noinst_LTLIBRARIES += libdbus-init-win.la
 libdbus_init_win_la_SOURCES = dbus-init-win.cpp
 libdbus_1_la_LIBADD += libdbus-init-win.la
 libdbus_internal_la_LIBADD += libdbus-init-win.la
+endif
+
+if LIBDBUSPOLICY
+libdbus_1_la_LIBADD += $(LIBDBUSPOLICY1_LIBS)
 endif
 
 noinst_PROGRAMS =
