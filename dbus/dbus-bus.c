@@ -1599,4 +1599,23 @@ dbus_bus_remove_match (DBusConnection *connection,
   dbus_message_unref (msg);
 }
 
+DBusBusType
+_dbus_bus_get_address_type (const char *address)
+{
+  int i = 0;
+  for (; i < N_BUS_TYPES; i++)
+    {
+      if (bus_connection_addresses[i] != NULL)
+        {
+          DBusString registered_address;
+          _dbus_string_init_const (&registered_address,
+                                   bus_connection_addresses[i]);
+
+          if (_dbus_string_find (&registered_address, 0, address, NULL))
+            return i;
+        }
+    }
+  return N_BUS_TYPES;
+}
+
 /** @} */

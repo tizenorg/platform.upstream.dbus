@@ -1,6 +1,7 @@
 %define dbus_user_uid           81
 
 %bcond_with kdbus
+%bcond_with dbuspolicy
 
 Name:           dbus
 Url:            http://dbus.freedesktop.org/
@@ -36,6 +37,13 @@ Source7:        dbus.sh
 Source1001:     dbus.manifest
 BuildRequires:  libcap-ng-devel
 BuildRequires:  pkgconfig(libsmack)
+# Enable support for libdbuspolicy (only for kdbus transport)
+%if %{with kdbus}
+%if %{with dbuspolicy}
+BuildRequires:  pkgconfig(libdbuspolicy1)
+BuildRequires:  pkgconfig(cynara-client)
+%endif
+%endif
 # COMMON1-END
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 Provides:       dbus-1
@@ -94,6 +102,9 @@ export V=1
 %endif
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
+%if %{with dbuspolicy}
+    --enable-libdbuspolicy                      \
+%endif
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
     --with-systemdsystemunitdir=%{_unitdir}				\

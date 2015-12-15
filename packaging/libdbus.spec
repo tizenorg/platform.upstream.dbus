@@ -1,4 +1,5 @@
 %bcond_with kdbus
+%bcond_with dbuspolicy
 
 Name:           libdbus
 Url:            http://dbus.freedesktop.org/
@@ -14,7 +15,13 @@ BuildRequires:  expat-devel
 BuildRequires:  libtool
 BuildRequires:  pkg-config
 BuildRequires:  pkgconfig(libsmack)
-
+# Enable support for libdbuspolicy (only for kdbus transport)
+%if %{with kdbus}
+%if %{with dbuspolicy}
+BuildRequires:  pkgconfig(libdbuspolicy1)
+BuildRequires:  pkgconfig(cynara-client)
+%endif
+%endif
 
 
 %package -n dbus-devel
@@ -72,6 +79,9 @@ export V=1
     --with-systemdsystemunitdir=%{_unitdir}				\
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
+%if %{with dbuspolicy}
+    --enable-libdbuspolicy                              \
+%endif
 %endif
     --enable-smack
 
