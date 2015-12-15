@@ -164,13 +164,10 @@ struct DBusTransportKdbus
   char* activator;                      /**< well known name for activator */
   Matchmaker *matchmaker;            /**< for match rules management */
   dbus_uint32_t client_serial;           /**< serial number for messages synthesized by library*/
+#ifdef LIBDBUSPOLICY
+  void *policy;
+#endif
 };
-
-static kdbus_t *
-get_kdbus (DBusTransport *transport)
-{
-  return ((DBusTransportKdbus*)transport)->kdbus;
-}
 
 /**
  * Creates unique name string frong unique id.
@@ -832,11 +829,47 @@ debug_str (const char *msg, const DBusString *str)
   debug_c_str (msg, _dbus_string_get_const_data (str), _dbus_string_get_length (str));
 }
 
+static dbus_bool_t
+can_send (DBusTransportKdbus *transport,
+          DBusMessage        *message)
+{
+  dbus_bool_t result = TRUE;
+
+#ifdef LIBDBUSPOLICY
+  {
+    int ret = 1;
+    if (NULL != transport->policy)
+      {
+        dbus_uint32_t reply_serial = dbus_message_get_reply_serial (message);
+
+        /* If reply_serial is non-zero, then it is a reply - just send it.
+         * Otherwise - check the policy.
+         */
+        if (0 == reply_serial)
+          ret = dbuspolicy1_check_out (transport->policy,
+                                       dbus_message_get_destination (message),
+                                       dbus_message_get_sender (message),
+                                       dbus_message_get_path (message),
+                                       dbus_message_get_interface (message),
+                                       dbus_message_get_member (message),
+                                       dbus_message_get_type (message),
+                                       dbus_message_get_error_name (message),
+                                       reply_serial,
+                                       !dbus_message_get_no_reply (message));
+      }
+    result = (1 == ret);
+  }
+#endif
+
+  return result;
+}
+
 static int
 kdbus_write_msg_internal (DBusTransportKdbus  *transport,
                           DBusMessage         *message,
                           const char          *destination,
-                          dbus_bool_t          check_sync_reply)
+                          dbus_bool_t          check_sync_reply,
+                          dbus_bool_t          check_privileges)
 {
   struct kdbus_msg *msg = NULL;
   struct kdbus_msg *msg_reply = NULL;
@@ -999,6 +1032,19 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
       bus_message_setup_bloom (message, filter, bloom);
     }
 
+  if (check_privileges && !can_send (transport, message))
+    {
+      int ret = reply_with_error ( DBUS_ERROR_ACCESS_DENIED,
+                                   NULL,
+                                   "Cannot send message - message rejected "
+                                   "due to security policies",
+                                   message,
+                                   transport->base.connection);
+      if (-1 == ret)
+        ret_size = -1;
+      goto out;
+    }
+
   if (send_message (transport,
                     msg,
                     check_sync_reply,
@@ -1018,7 +1064,7 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
         ret_size = -1;
     }
 
-  if (check_sync_reply)
+  if (-1 != ret_size && check_sync_reply)
     kdbus_close_message (transport, msg_reply);
 
   out:
@@ -1048,7 +1094,7 @@ kdbus_write_msg (DBusTransportKdbus  *transport,
                  DBusMessage         *message,
                  const char          *destination)
 {
-  return kdbus_write_msg_internal (transport, message, destination, FALSE);
+  return kdbus_write_msg_internal (transport, message, destination, FALSE, TRUE);
 }
 
 static dbus_uint64_t
@@ -1118,6 +1164,18 @@ get_pool_size (void)
   return receive_pool_size;
 }
 
+static dbus_uint64_t
+get_attach_flags_recv (DBusTransportKdbus *transport)
+{
+  dbus_uint64_t attach_flags_recv = 0;
+
+#ifdef LIBDBUSPOLICY
+  attach_flags_recv = KDBUS_ATTACH_CREDS | KDBUS_ATTACH_NAMES | KDBUS_ATTACH_SECLABEL;
+#endif
+
+  return attach_flags_recv;
+}
+
 /**
  * Performs kdbus hello - registration on the kdbus bus
  * needed to send and receive messages on the bus,
@@ -1132,8 +1190,8 @@ get_pool_size (void)
  */
 static dbus_bool_t
 bus_register_kdbus (DBusTransportKdbus *transport,
-                   dbus_uint32_t       registration_flags,
-                   DBusError          *error)
+                    dbus_uint32_t       registration_flags,
+                    DBusError          *error)
 {
   int ret;
   dbus_uint64_t flags;
@@ -1145,7 +1203,7 @@ bus_register_kdbus (DBusTransportKdbus *transport,
   ret = _kdbus_hello (transport->kdbus,
                       flags,
                       _KDBUS_ATTACH_ANY,
-                      0,
+                      get_attach_flags_recv (transport),
                       get_pool_size (),
                       transport->activator,
                       "libdbus-kdbus");
@@ -1168,10 +1226,24 @@ bus_register_kdbus (DBusTransportKdbus *transport,
 }
 
 static dbus_bool_t
-request_DBus_name (DBusTransport *transport,
-                   DBusMessage   *msg,
-                   int           *result,
-                   DBusError     *error)
+can_own (DBusTransportKdbus *transport,
+         const char         *name)
+{
+  dbus_bool_t result = TRUE;
+
+#ifdef LIBDBUSPOLICY
+  if (NULL != transport->policy)
+    result = (dbuspolicy1_can_own (transport->policy, name) == 1);
+#endif
+
+  return result;
+}
+
+static dbus_bool_t
+request_DBus_name (DBusTransportKdbus *transport,
+                   DBusMessage        *msg,
+                   int                *result,
+                   DBusError          *error)
 {
   DBusString service_name_real;
   const DBusString *service_name = &service_name_real;
@@ -1216,12 +1288,22 @@ request_DBus_name (DBusTransport *transport,
      return FALSE;
    }
 
-  *result = request_kdbus_name (transport, name, flags);
+  if (!can_own (transport, name))
+    {
+      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
+                      "Connection \"%s\" is not allowed to own the "
+                      "service \"%s\" due to security policies",
+                      transport->my_DBus_unique_name,
+                      name);
+      return FALSE;
+    }
+
+  *result = _kdbus_request_name (transport->kdbus, name, flags);
   if (*result == -EPERM)
    {
      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
          "Kdbus don't allow %s to own the service \"%s\"",
-         ((DBusTransportKdbus*)transport)->my_DBus_unique_name, _dbus_string_get_const_data (service_name));
+         transport->my_DBus_unique_name, _dbus_string_get_const_data (service_name));
      return FALSE;
    }
   else if (*result < 0)
@@ -1234,10 +1316,10 @@ request_DBus_name (DBusTransport *transport,
 }
 
 static dbus_bool_t
-release_DBus_name (DBusTransport *transport,
-                   DBusMessage   *msg,
-                   int           *result,
-                   DBusError     *error)
+release_DBus_name (DBusTransportKdbus *transport,
+                   DBusMessage        *msg,
+                   int                *result,
+                   DBusError          *error)
 {
   const char *name;
   DBusString service_name;
@@ -1284,7 +1366,7 @@ release_DBus_name (DBusTransport *transport,
       return FALSE;
     }
 
-    *result = release_kdbus_name (transport, name);
+    *result = _kdbus_release_name (transport->kdbus, name);
     if (*result < 0)
       {
         dbus_set_error (error, DBUS_ERROR_FAILED , "Name \"%s\" could not be released, %d, %m", name, errno);
@@ -1619,7 +1701,7 @@ capture_org_freedesktop_DBus_RequestName (DBusTransportKdbus *transport,
 {
   int result;
 
-  if (!request_DBus_name (&transport->base, message, &result, error))
+  if (!request_DBus_name (transport, message, &result, error))
     return -1;
 
   return reply_1_data (message, DBUS_TYPE_UINT32, &result,
@@ -1633,7 +1715,7 @@ capture_org_freedesktop_DBus_ReleaseName (DBusTransportKdbus *transport,
 {
   int result;
 
-  if (!release_DBus_name (&transport->base, message, &result, error))
+  if (!release_DBus_name (transport, message, &result, error))
     return -1;
 
   return reply_1_data (message, DBUS_TYPE_UINT32, &result,
@@ -1705,7 +1787,7 @@ capture_org_freedesktop_DBus_RemoveMatch (DBusTransportKdbus *transport,
   if (rule == NULL)
     goto failed_remove;
 
-  if (!kdbus_remove_match (&transport->base, matchmaker_get_rules_list (transport->matchmaker, rule),
+  if (!_kdbus_remove_match (transport->kdbus, matchmaker_get_rules_list (transport->matchmaker, rule),
         transport->my_DBus_unique_name, rule, error))
     goto failed_remove;
 
@@ -1723,18 +1805,18 @@ failed_remove:
 }
 
 static int
-get_connection_info_by_name (DBusMessage     *message,
-                             DBusError       *error,
-                             struct nameInfo *info,
-                             DBusTransport   *transport,
-                             const char      *name,
-                             dbus_bool_t      getLabel)
+get_connection_info_by_name (DBusMessage        *message,
+                             DBusError          *error,
+                             struct nameInfo    *info,
+                             DBusTransportKdbus *transport,
+                             const char         *name,
+                             dbus_bool_t         getLabel)
 {
   int ret;
   if (!dbus_validate_bus_name (name, error))
     return -1;
 
-  if ((ret = _kdbus_connection_info_by_name (get_kdbus (transport), name, getLabel, info)) != 0)
+  if ((ret = _kdbus_connection_info_by_name (transport->kdbus, name, getLabel, info)) != 0)
     {
       if (ESRCH == ret || ENXIO == ret)
           dbus_set_error (error, DBUS_ERROR_NAME_HAS_NO_OWNER,
@@ -1761,11 +1843,11 @@ get_connection_info_by_name (DBusMessage     *message,
  * Note: if getLabel argument is set to TRUE, the caller must free info.sec_label.
  */
 static int
-get_connection_info_from_message_argument (DBusMessage     *message,
-                                           DBusError       *error,
-                                           struct nameInfo *info,
-                                           DBusTransport   *transport,
-                                           dbus_bool_t      getLabel)
+get_connection_info_from_message_argument (DBusMessage        *message,
+                                           DBusError          *error,
+                                           struct nameInfo    *info,
+                                           DBusTransportKdbus *transport,
+                                           dbus_bool_t         getLabel)
 {
   const char *arg;
 
@@ -1788,7 +1870,7 @@ capture_org_freedesktop_DBus_GetConnectionCredentials (DBusTransportKdbus *trans
   DBusMessageIter array_iter;
   struct nameInfo info;
 
-  if (get_connection_info_from_message_argument (message, error, &info, &transport->base, TRUE) != 0)
+  if (get_connection_info_from_message_argument (message, error, &info, transport, TRUE) != 0)
     return -1;
 
   reply = _dbus_asv_new_method_return (message, &reply_iter, &array_iter);
@@ -1848,7 +1930,7 @@ capture_org_freedesktop_DBus_GetConnectionSELinuxSecurityContext (DBusTransportK
 {
   struct nameInfo info;
 
-  if (get_connection_info_from_message_argument (message, error, &info, &transport->base, TRUE) != 0)
+  if (get_connection_info_from_message_argument (message, error, &info, transport, TRUE) != 0)
     return -1;
 
   if (info.sec_label != NULL)
@@ -1877,7 +1959,7 @@ capture_org_freedesktop_DBus_GetConnectionUnixProcessID (DBusTransportKdbus *tra
   struct nameInfo info;
   dbus_uint32_t processId;
 
-  if (get_connection_info_from_message_argument (message, error, &info, &transport->base, FALSE) != 0 ||
+  if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0 ||
       info.processId > _DBUS_UINT32_MAX)
     return -1;
 
@@ -1894,7 +1976,7 @@ capture_org_freedesktop_DBus_GetConnectionUnixUser (DBusTransportKdbus *transpor
   struct nameInfo info;
   dbus_uint32_t userId;
 
-  if (get_connection_info_from_message_argument (message, error, &info, &transport->base, FALSE) != 0 ||
+  if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0 ||
       info.userId > _DBUS_UINT32_MAX)
     return -1;
 
@@ -1940,7 +2022,7 @@ capture_org_freedesktop_DBus_GetNameOwner (DBusTransportKdbus *transport,
     }
   else
     {
-      if (get_connection_info_by_name (message, error, &info, &transport->base, arg, FALSE) != 0)
+      if (get_connection_info_by_name (message, error, &info, transport, arg, FALSE) != 0)
         return -1;
 
       unique_name = create_unique_name_from_unique_id (info.uniqueId);
@@ -2089,7 +2171,7 @@ capture_org_freedesktop_DBus_ListQueuedOwners (DBusTransportKdbus *transport,
 {
   struct nameInfo info;
 
-  if (get_connection_info_from_message_argument (message, error, &info, &transport->base, FALSE) != 0)
+  if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0)
     return -1;
 
   return reply_listNames (transport, message, error, KDBUS_LIST_QUEUED);
@@ -2103,7 +2185,7 @@ capture_org_freedesktop_DBus_NameHasOwner (DBusTransportKdbus *transport,
   struct nameInfo info;
   dbus_bool_t result = TRUE;
 
-  if (get_connection_info_from_message_argument (message, error, &info, &transport->base, FALSE) != 0)
+  if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0)
     {
       if (dbus_error_is_set (error) && dbus_error_has_name (error, DBUS_ERROR_NAME_HAS_NO_OWNER))
         {
@@ -2173,7 +2255,7 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
     ret = get_connection_info_by_name (message,
                                        error,
                                        &info,
-                                       &transport->base,
+                                       transport,
                                        name,
                                        FALSE);
 
@@ -2203,7 +2285,7 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
 
       dbus_message_lock (sub_message);
 
-      if (kdbus_write_msg_internal (transport, sub_message, name, FALSE) == -1)
+      if (kdbus_write_msg_internal (transport, sub_message, name, FALSE, FALSE) == -1)
           return -1;
       else
         {
@@ -2291,8 +2373,8 @@ static struct CaptureHandlers capture_handlers[] =
  */
 static int
 capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
-                             const char         *destination,
-                             DBusMessage        *message)
+                              const char         *destination,
+                              DBusMessage        *message)
 {
   int ret = 1;
   if (!strcmp (destination, DBUS_SERVICE_DBUS))
@@ -2330,8 +2412,11 @@ capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
 
           if (ret != 0 && dbus_error_is_set (&error))
             {
-              ret = reply_with_error ((char*)error.name, NULL, error.message, message,
-                  transport->base.connection);
+              ret = reply_with_error ((char*)error.name,
+                                      NULL,
+                                      error.message,
+                                      message,
+                                      transport->base.connection);
               dbus_error_free (&error);
             }
         }
@@ -2433,7 +2518,7 @@ get_next_client_serial (DBusTransportKdbus *transport)
  * @return the length of the kdbus message's payload.
  */
 static int
-kdbus_message_size (const struct kdbus_msg* msg)
+kdbus_message_size (const struct kdbus_msg *msg)
 {
   const struct kdbus_item *item;
   int ret_size = 0;
@@ -2462,9 +2547,9 @@ kdbus_message_size (const struct kdbus_msg* msg)
 }
 
 static int
-generate_NameSignal (const char *signal,
-                    const char *name,
-                    DBusTransportKdbus *transport)
+generate_NameSignal (const char         *signal,
+                     const char         *name,
+                     DBusTransportKdbus *transport)
 {
   DBusMessage *message;
 
@@ -2627,6 +2712,181 @@ _handle_padding (const struct kdbus_msg *msg,
 #endif
 }
 
+#ifdef LIBDBUSPOLICY
+static dbus_bool_t
+load_dbus_header (DBusTransportKdbus *transport,
+                  DBusHeader         *header,
+                  const char         *message_data,
+                  dbus_uint32_t       message_len)
+{
+  DBusValidity validity = DBUS_VALID;
+  DBusString message;
+  dbus_uint32_t fields_array_len_unsigned;
+  dbus_uint32_t body_len_unsigned;
+  int i;
+
+  if (0 == message_len)
+    return FALSE;
+
+  _dbus_string_init_const_len (&message, message_data, message_len);
+  _dbus_gvariant_raw_get_lengths (&message,
+                                  &fields_array_len_unsigned,
+                                  &body_len_unsigned,
+                                  &validity);
+
+  _dbus_string_init_const_len (&header->data,
+                               message_data,
+                               fields_array_len_unsigned + FIRST_GVARIANT_FIELD_OFFSET);
+
+  header->padding = 0;
+  header->byte_order = message_data[0];
+  header->protocol_version = DBUS_PROTOCOL_VERSION_GVARIANT;
+  for (i = 0; i <= DBUS_HEADER_FIELD_LAST; i++)
+    header->fields[i].value_pos = _DBUS_HEADER_FIELD_VALUE_NONEXISTENT;
+
+  return _dbus_header_load_gvariant (header, &validity);
+}
+#endif
+
+static dbus_bool_t
+can_receive (DBusTransportKdbus     *transport,
+             const struct kdbus_msg *msg,
+             const char             *message_data,
+             dbus_uint32_t           message_len)
+{
+  dbus_bool_t result = TRUE;
+
+#ifdef LIBDBUSPOLICY
+  if (transport->policy)
+  {
+    DBusHeader header;
+    dbus_bool_t got_header = FALSE;
+    dbus_bool_t got_creds = FALSE;
+    dbus_bool_t got_seclabel = FALSE;
+
+    if (KDBUS_PAYLOAD_DBUS == msg->payload_type)
+      {
+        const struct kdbus_item *item;
+        uid_t sender_euid = -1;
+        gid_t sender_egid = -1;
+        const char *seclabel = NULL;
+        DBusString names;
+
+        _dbus_string_init (&names);
+
+        KDBUS_ITEM_FOREACH(item, msg, items)
+          switch (item->type)
+            {
+              case KDBUS_ITEM_CREDS:
+                sender_euid = (uid_t) item->creds.euid;
+                sender_egid = (gid_t) item->creds.egid;
+                got_creds = (sender_euid != (uid_t)-1) && (sender_egid != (gid_t)-1);
+                break;
+              case KDBUS_ITEM_SECLABEL:
+                seclabel = item->str;
+                got_seclabel = (seclabel != NULL);
+                break;
+              case KDBUS_ITEM_OWNED_NAME:
+                {
+                  DBusString name;
+                  _dbus_string_init_const (&name, item->name.name);
+                  if (_dbus_validate_bus_name (&name, 0, _dbus_string_get_length (&name)))
+                    {
+                      if (_dbus_string_get_length (&names) != 0)
+                        _dbus_string_append_byte (&names, ' ');
+
+                      _dbus_string_copy (&name,
+                                         0,
+                                         &names,
+                                         _dbus_string_get_length (&names));
+                    }
+                }
+                break;
+              default:
+                break; /* ignore all other items */
+            }
+
+        if (NULL != message_data && message_len > 0)
+          {
+            if (!load_dbus_header (transport, &header, message_data, message_len))
+              return FALSE;
+            got_header = TRUE;
+          }
+
+        if (got_header && got_creds && got_seclabel)
+          {
+            const char *destination = NULL;
+            const char *path = NULL;
+            const char *interface = NULL;
+            const char *member = NULL;
+            const char *error_name = NULL;
+            dbus_uint64_t reply_cookie = 0;
+            dbus_bool_t requested_reply = FALSE;
+            int ret;
+
+            _dbus_header_get_field_basic (&header,
+                                          DBUS_HEADER_FIELD_DESTINATION,
+                                          DBUS_TYPE_STRING,
+                                          &destination);
+
+            _dbus_header_get_field_basic (&header,
+                                          DBUS_HEADER_FIELD_PATH,
+                                          DBUS_TYPE_STRING,
+                                          &path);
+
+            _dbus_header_get_field_basic (&header,
+                                          DBUS_HEADER_FIELD_INTERFACE,
+                                          DBUS_TYPE_STRING,
+                                          &interface);
+
+            _dbus_header_get_field_basic (&header,
+                                          DBUS_HEADER_FIELD_MEMBER,
+                                          DBUS_TYPE_STRING,
+                                          &member);
+
+            _dbus_header_get_field_basic (&header,
+                                          DBUS_HEADER_FIELD_ERROR_NAME,
+                                          DBUS_TYPE_STRING,
+                                          &error_name);
+
+            _dbus_header_get_field_basic (&header,
+                                          DBUS_HEADER_FIELD_REPLY_SERIAL,
+                                          DBUS_TYPE_UINT64,
+                                          &reply_cookie);
+
+            requested_reply = !(_dbus_header_get_flag (&header,
+                                                       DBUS_HEADER_FLAG_NO_REPLY_EXPECTED));
+
+            ret = dbuspolicy1_check_in (transport->policy,
+                                        destination,
+                                        _dbus_string_get_length (&names) > 0 ?
+                                          _dbus_string_get_const_data (&names) :
+                                          NULL,
+                                        seclabel,
+                                        sender_euid,
+                                        sender_egid,
+                                        path,
+                                        interface,
+                                        member,
+                                        _dbus_header_get_message_type (&header),
+                                        error_name,
+                                        reply_cookie,
+                                        requested_reply);
+            result = (1 == ret);
+          }
+        else
+          {
+            result = FALSE;
+          }
+
+        _dbus_string_free (&names);
+      }
+  }
+#endif
+
+  return result;
+}
+
 static int
 kdbus_decode_dbus_message (const struct kdbus_msg *msg,
                            char                   *data,
@@ -2636,6 +2896,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
 {
   const struct kdbus_item *item;
   int ret_size = 0;
+  char *buffer = data;
 
   *n_fds = 0;
 
@@ -2809,6 +3070,9 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
 
   _handle_padding (msg, item);
 
+  if (!can_receive (kdbus_transport, msg, buffer, ret_size))
+    return 0;   /* ignore message if not allowed */
+
   return ret_size;
 }
 
@@ -2948,7 +3212,8 @@ kdbus_decode_msg (const struct kdbus_msg *msg,
                   char                   *data,
                   DBusTransportKdbus     *kdbus_transport,
                   int                    *fds,
-                  int                    *n_fds)
+                  int                    *n_fds,
+                  DBusError              *error)
 {
   int ret_size = 0;
 
@@ -3000,6 +3265,9 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
   int start;
   dbus_uint64_t flags = 0;
   int ret;
+  DBusError error;
+
+  dbus_error_init (&error);
 
   start = _dbus_string_get_length (buffer);
 
@@ -3011,7 +3279,6 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
   if (0 != ret)
     {
       _dbus_verbose ("kdbus error receiving message: %d (%s)\n", ret, _dbus_strerror (ret));
-      _dbus_string_set_length (buffer, start);
       return -1;
     }
 
@@ -3033,7 +3300,7 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
     }
   data = _dbus_string_get_data_len (buffer, start, buf_size);
 
-  ret_size = kdbus_decode_msg (msg, data, kdbus_transport, fds, n_fds);
+  ret_size = kdbus_decode_msg (msg, data, kdbus_transport, fds, n_fds, &error);
 
   if (ret_size == -1) /* error */
     _dbus_string_set_length (buffer, start);
@@ -3060,16 +3327,15 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
  * Copy-paste from socket transport. Only renames done.
  */
 static void
-free_watches (DBusTransport *transport)
+free_watches (DBusTransportKdbus *kdbus_transport)
 {
-  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
-
+  DBusConnection *connection = kdbus_transport->base.connection;
   _dbus_verbose ("start\n");
 
   if (kdbus_transport->read_watch)
     {
-      if (transport->connection)
-        _dbus_connection_remove_watch_unlocked (transport->connection,
+      if (connection)
+        _dbus_connection_remove_watch_unlocked (connection,
                                                 kdbus_transport->read_watch);
       _dbus_watch_invalidate (kdbus_transport->read_watch);
       _dbus_watch_unref (kdbus_transport->read_watch);
@@ -3078,8 +3344,8 @@ free_watches (DBusTransport *transport)
 
   if (kdbus_transport->write_watch)
     {
-      if (transport->connection)
-        _dbus_connection_remove_watch_unlocked (transport->connection,
+      if (connection)
+        _dbus_connection_remove_watch_unlocked (connection,
                                                 kdbus_transport->write_watch);
       _dbus_watch_invalidate (kdbus_transport->write_watch);
       _dbus_watch_unref (kdbus_transport->write_watch);
@@ -3087,6 +3353,15 @@ free_watches (DBusTransport *transport)
     }
 
   _dbus_verbose ("end\n");
+}
+
+static void
+free_policies (DBusTransportKdbus *transport)
+{
+#ifdef LIBDBUSPOLICY
+  if (NULL != transport->policy)
+    dbuspolicy1_free (transport->policy);
+#endif
 }
 
 /**
@@ -3099,7 +3374,7 @@ transport_finalize (DBusTransport *transport)
   DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus *)transport;
   _dbus_verbose ("\n");
 
-  free_watches (transport);
+  free_watches (kdbus_transport);
 
   _dbus_transport_finalize_base (transport);
 
@@ -3109,6 +3384,8 @@ transport_finalize (DBusTransport *transport)
   free_matchmaker (kdbus_transport->matchmaker);
 
   dbus_free (kdbus_transport->activator);
+
+  free_policies ( kdbus_transport );
 
   _kdbus_free (kdbus_transport->kdbus);
 
@@ -3120,10 +3397,10 @@ transport_finalize (DBusTransport *transport)
  * socket_transport replaced by kdbus_transport.
  */
 static void
-check_write_watch (DBusTransport *transport)
+check_write_watch (DBusTransportKdbus *kdbus_transport)
 {
-  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
   dbus_bool_t needed;
+  DBusTransport *transport = &kdbus_transport->base;
 
   if (transport->connection == NULL)
     return;
@@ -3155,12 +3432,12 @@ check_write_watch (DBusTransport *transport)
  * socket_transport replaced by kdbus_transport.
  */
 static void
-check_read_watch (DBusTransport *transport)
+check_read_watch (DBusTransportKdbus *kdbus_transport)
 {
-  DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
   dbus_bool_t need_read_watch;
+  DBusTransport *transport = &kdbus_transport->base;
 
-  _dbus_verbose ("fd = %d\n",_kdbus_fd (kdbus_transport->kdbus));
+  _dbus_verbose ("fd = %d\n", _kdbus_fd (kdbus_transport->kdbus));
 
   if (transport->connection == NULL)
     return;
@@ -3280,10 +3557,7 @@ do_writing (DBusTransport *transport)
           else
             {
               _dbus_verbose ("Error writing to remote app: %s\n", _dbus_strerror_from_errno ());
-//              do_io_error (transport);
-              /*TODO the comment above may cause side effects, but must be removed here
-               to not disconnect the connection. If side-effects appears, reporting errors for upper functions
-               must be rearranged.*/
+              do_io_error (transport);
               goto out;
             }
         }
@@ -3336,7 +3610,7 @@ do_reading (DBusTransport *transport)
 
   /* See if we've exceeded max messages and need to disable reading */
  if (kdbus_transport->activator == NULL)
-  check_read_watch (transport);
+  check_read_watch (kdbus_transport);
 
   if (total > kdbus_transport->max_bytes_read_per_iteration)
     {
@@ -3410,7 +3684,7 @@ do_reading (DBusTransport *transport)
        */
       goto again;
     }
-  /* 0 == bytes_read is for kernel messages */
+  /* 0 == bytes_read is for kernel and ignored messages */
 
  out:
   if (oom)
@@ -3445,8 +3719,8 @@ unix_error_with_read_to_come (DBusTransport *itransport,
  */
 static dbus_bool_t
 kdbus_handle_watch (DBusTransport *transport,
-                   DBusWatch     *watch,
-                   unsigned int   flags)
+                    DBusWatch     *watch,
+                    unsigned int   flags)
 {
   DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
@@ -3490,7 +3764,7 @@ kdbus_handle_watch (DBusTransport *transport,
         }
 
       /* See if we still need the write watch */
-      check_write_watch (transport);
+      check_write_watch (kdbus_transport);
     }
 
   return TRUE;
@@ -3507,7 +3781,7 @@ kdbus_disconnect (DBusTransport *transport)
 
   _dbus_verbose ("\n");
 
-  free_watches (transport);
+  free_watches (kdbus_transport);
 
   _kdbus_close (kdbus_transport->kdbus);
 }
@@ -3543,8 +3817,8 @@ kdbus_connection_set (DBusTransport *transport)
       return FALSE;
     }
 
-  check_read_watch (transport);
-  check_write_watch (transport);
+  check_read_watch (kdbus_transport);
+  check_write_watch (kdbus_transport);
 
   return TRUE;
 }
@@ -3692,7 +3966,7 @@ kdbus_do_iteration (DBusTransport *transport,
    * relies on the fact that running an iteration will notice that
    * messages are pending.
    */
-   check_write_watch (transport);
+   check_write_watch (kdbus_transport);
 
    _dbus_verbose (" ... leaving do_iteration()\n");
 }
@@ -3704,7 +3978,7 @@ static void
 kdbus_live_messages_changed (DBusTransport *transport)
 {
   /* See if we should look for incoming messages again */
-  check_read_watch (transport);
+  check_read_watch ((DBusTransportKdbus *)transport);
 }
 
 /**
@@ -3749,15 +4023,15 @@ _extract_name_info_processId (struct nameInfo *nameInfo)
 }
 
 static dbus_bool_t
-_dbus_transport_kdbus_get_connection_info_ulong_field (DBusTransport              *transport,
+_dbus_transport_kdbus_get_connection_info_ulong_field (DBusTransportKdbus         *transport,
                                                        ConnectionInfoExtractField  function,
                                                        unsigned long              *val)
 {
   struct nameInfo conn_info;
   int ret;
 
-  ret = _kdbus_connection_info_by_id (get_kdbus (transport),
-                                      _kdbus_id (get_kdbus (transport)),
+  ret = _kdbus_connection_info_by_id (transport->kdbus,
+                                      _kdbus_id (transport->kdbus),
                                       FALSE,
                                       &conn_info);
   if (ret != 0)
@@ -3771,7 +4045,7 @@ static dbus_bool_t
 _dbus_transport_kdbus_get_unix_user (DBusTransport *transport,
                                      unsigned long *uid)
 {
-  return _dbus_transport_kdbus_get_connection_info_ulong_field (transport,
+  return _dbus_transport_kdbus_get_connection_info_ulong_field ((DBusTransportKdbus *)transport,
                                                                 _extract_name_info_userId,
                                                                 uid);
 }
@@ -3780,7 +4054,7 @@ static dbus_bool_t
 _dbus_transport_kdbus_get_unix_process_id (DBusTransport *transport,
                                            unsigned long *pid)
 {
-  return _dbus_transport_kdbus_get_connection_info_ulong_field (transport,
+  return _dbus_transport_kdbus_get_connection_info_ulong_field ((DBusTransportKdbus *)transport,
                                                                 _extract_name_info_processId,
                                                                 pid);
 }
@@ -3795,7 +4069,7 @@ _dbus_transport_kdbus_get_unix_process_id (DBusTransport *transport,
  * @param address the transport's address
  * @returns the new transport, or #NULL if no memory.
  */
-static DBusTransport*
+static DBusTransportKdbus *
 new_kdbus_transport (kdbus_t          *kdbus,
                      const DBusString *address,
                      const char       *activator)
@@ -3850,14 +4124,12 @@ new_kdbus_transport (kdbus_t          *kdbus,
             goto failed_4;
         }
     }
-  else
-    kdbus_transport->activator = NULL;
 
   kdbus_transport->matchmaker = matchmaker_new ();
 
   kdbus_transport->client_serial = 1;
 
-  return (DBusTransport*) kdbus_transport;
+  return kdbus_transport;
 
  failed_4:
   _dbus_watch_invalidate (kdbus_transport->read_watch);
@@ -3868,6 +4140,23 @@ new_kdbus_transport (kdbus_t          *kdbus,
  failed_2:
   dbus_free (kdbus_transport);
   return NULL;
+}
+
+static dbus_bool_t
+initialize_policies (DBusTransportKdbus *transport, DBusBusType bus_type)
+{
+  dbus_bool_t result = TRUE;
+
+#ifdef LIBDBUSPOLICY
+  if (DBUS_BUS_SYSTEM == bus_type || DBUS_BUS_SESSION == bus_type)
+    {
+      transport->policy = dbuspolicy1_init (bus_type);
+      if (NULL == transport->policy)
+        result = FALSE;
+    }
+#endif
+
+  return result;
 }
 
 /**
@@ -3883,7 +4172,7 @@ _dbus_transport_new_for_kdbus (const char *path,
                                DBusError  *error)
 {
   int ret;
-  DBusTransport *transport;
+  DBusTransportKdbus *transport;
   DBusString address;
   kdbus_t *kdbus;
 
@@ -3937,9 +4226,20 @@ _dbus_transport_new_for_kdbus (const char *path,
       goto failed_1;
     }
 
+  if (!initialize_policies (transport,
+                            _dbus_bus_get_address_type (_dbus_string_get_data (&address))))
+    {
+      dbus_set_error (error,
+                      DBUS_ERROR_FAILED,
+                      "Can't load dbus policy for kdbus transport");
+      _kdbus_close (kdbus);
+      transport_finalize ((DBusTransport*)transport);
+      transport = NULL;
+    }
+
   _dbus_string_free (&address);
 
-  return transport;
+  return (DBusTransport*)transport;
 
 failed_1:
   _kdbus_close (kdbus);

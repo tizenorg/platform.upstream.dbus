@@ -186,6 +186,7 @@ AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[
 AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
 AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
 AC_ARG_ENABLE(kdbus-transport, AS_HELP_STRING([--enable-kdbus-transport],[build with kdbus transport support]),enable_kdbus_transport=$enableval,enable_kdbus_transport=no)
+AC_ARG_ENABLE(libdbuspolicy,[AS_HELP_STRING([--enable-libdbuspolicy],[enable libdbuspolicy for kdbus transport [default=no]])],,[enable_libdbuspolicy=no])
 
 AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
 AC_ARG_WITH(session-socket-dir, AS_HELP_STRING([--with-session-socket-dir=[dirname]],[Where to put sockets for the per-login-session message bus]))
@@ -2028,6 +2029,7 @@ echo "
         Building XML docs:        ${enable_xml_docs}
         Building launchd support: ${have_launchd}
         Building kdbus support:   ${enable_kdbus_transport}
+          with libdbuspolicy:     ${enable_libdbuspolicy}
         Init scripts style:       ${with_init_scripts}
         Abstract socket names:    ${ac_cv_have_abstract_sockets}
         System bus socket:        ${DBUS_SYSTEM_SOCKET}

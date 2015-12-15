@@ -316,11 +316,21 @@ libdbus_1_la_LDFLAGS = \
 	-no-undefined \
 	$(NULL)
 
+if LIBDBUSPOLICY
+libdbus_1_la_CPPFLAGS += $(LIBDBUSPOLICY1_FLAGS)
+libdbus_1_la_LIBADD += $(LIBDBUSPOLICY1_LIBS)
+endif
+
 libdbus_internal_la_CPPFLAGS = \
 	$(AM_CPPFLAGS) \
 	-DDBUS_STATIC_BUILD \
 	$(NULL)
 libdbus_internal_la_LIBADD=$(LIBDBUS_LIBS) libdbus-1.la $(SYSTEMD_LIBS) $(LIBSMACK_LIBS)
+
+if LIBDBUSPOLICY
+libdbus_internal_la_CPPFLAGS += $(LIBDBUSPOLICY1_FLAGS)
+libdbus_internal_la_LIBADD += $(LIBDBUSPOLICY1_LIBS)
+endif
 
 if DBUS_WIN
 # This must be a separate convenience library, otherwise libtool notices
