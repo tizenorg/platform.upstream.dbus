@@ -1,5 +1,4 @@
 %bcond_with x
-%bcond_with kdbus
 
 Name:           dbus-x11
 %define _name   dbus
@@ -75,9 +74,6 @@ export V=1
     --enable-doxygen-docs						\
 %if %{with_systemd}
     --enable-systemd							\
-%endif
-%if %{with kdbus}
-    --enable-kdbus-transport                                            \
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
     --with-systemdsystemunitdir=%{_unitdir}				\

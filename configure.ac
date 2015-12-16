@@ -185,7 +185,6 @@ AC_ARG_ENABLE(kqueue, AS_HELP_STRING([--enable-kqueue],[build with kqueue suppor
 AC_ARG_ENABLE(console-owner-file, AS_HELP_STRING([--enable-console-owner-file],[enable console owner file]),enable_console_owner_file=$enableval,enable_console_owner_file=auto)
 AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd auto-launch support]),enable_launchd=$enableval,enable_launchd=auto)
 AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
-AC_ARG_ENABLE(kdbus-transport, AS_HELP_STRING([--enable-kdbus-transport],[build with kdbus transport support]),enable_kdbus_transport=$enableval,enable_kdbus_transport=no)
 
 AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
 AC_ARG_WITH(session-socket-dir, AS_HELP_STRING([--with-session-socket-dir=[dirname]],[Where to put sockets for the per-login-session message bus]))
@@ -1307,7 +1306,7 @@ AS_IF([test "x$enable_libdbuspolicy" = "xyes"], [
 ], [ AC_MSG_RESULT([no]) ])
 
 #### Set up final flags
-LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs $SYSTEMD_LIBS $KDBUS_LIBS"
+LIBDBUS_LIBS="$THREAD_LIBS $NETWORK_libs $SYSTEMD_LIBS"
 AC_SUBST([LIBDBUS_LIBS])
 
 ### X11 detection
@@ -1628,20 +1627,7 @@ AC_DEFINE_UNQUOTED(DBUS_SYSTEM_SOCKET,"$DBUS_SYSTEM_SOCKET",[The name of the soc
 ## and also to connect to. If this ever changes, it'll need to be split into
 ## two variables, one for the listening address and one for the connecting
 ## address.
-#AC_SUBST(DBUS_SYSTEM_BUS_DEFAULT_ADDRESS)
-if ! test -z "$with_system_default_bus"; then
-    ## Now system bus can work on kdbus too. It is diffrent situation than
-    ## described above (daemon working with kdbus doesn't need to listen on
-    ## any socket), so variable was not splited into two.
-    DBUS_SYSTEM_BUS_DEFAULT_ADDRESS=$with_system_default_bus
-else
-    kdbus_address_path=""
-    if test x$enable_kdbus_transport = xyes; then
-	kdbus_address_path="kernel:path=/sys/fs/kdbus/0-system/bus;"
-    fi
-
-    DBUS_SYSTEM_BUS_DEFAULT_ADDRESS="${kdbus_address_path}unix:path=$DBUS_SYSTEM_SOCKET"
-fi
+DBUS_SYSTEM_BUS_DEFAULT_ADDRESS="unix:path=$DBUS_SYSTEM_SOCKET"
 AC_SUBST(DBUS_SYSTEM_BUS_DEFAULT_ADDRESS)
 AC_DEFINE_UNQUOTED(DBUS_SYSTEM_BUS_DEFAULT_ADDRESS, "$DBUS_SYSTEM_BUS_DEFAULT_ADDRESS",[The default D-Bus address of the system bus])
 
@@ -2027,7 +2013,6 @@ echo "
         Building Ducktype docs:   ${enable_ducktype_docs}
         Building XML docs:        ${enable_xml_docs}
         Building launchd support: ${have_launchd}
-        Building kdbus support:   ${enable_kdbus_transport}
         Init scripts style:       ${with_init_scripts}
         Abstract socket names:    ${ac_cv_have_abstract_sockets}
         System bus socket:        ${DBUS_SYSTEM_SOCKET}

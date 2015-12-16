@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2002, 2003, 2004, 2005  Red Hat Inc.
  * Copyright (C) 2002, 2003  CodeFactory AB
- * Copyright (C) 2015  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  *
@@ -39,16 +38,12 @@
 #include "dbus-sysdeps.h"
 #include "dbus-sysdeps-unix.h"
 #endif
-#include "dbus-marshal-gvariant.h"
-#include "dbus-protocol-gvariant.h"
 
 #include <string.h>
 
 #define _DBUS_TYPE_IS_STRINGLIKE(type) \
   (type == DBUS_TYPE_STRING || type == DBUS_TYPE_SIGNATURE || \
    type == DBUS_TYPE_OBJECT_PATH)
-
-unsigned char _dbus_default_protocol_version = DBUS_PROTOCOL_VERSION_GVARIANT;
 
 static void dbus_message_finalize (DBusMessage *message);
 
@@ -123,8 +118,6 @@ enum {
 /** typedef for internals of message iterator */
 typedef struct DBusMessageRealIter DBusMessageRealIter;
 
-#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
-
 /**
  * @brief Internals of DBusMessageIter
  *
@@ -143,80 +136,19 @@ struct DBusMessageRealIter
   } u; /**< the type writer or reader that does all the work */
 };
 
-static dbus_bool_t
-_dbus_header_is_gvariant (const DBusHeader *header)
-{
-  return (header->protocol_version == DBUS_PROTOCOL_VERSION_GVARIANT);
-}
-
-static dbus_bool_t
-_dbus_message_is_gvariant (const DBusMessage *message)
-{
-  return _dbus_header_is_gvariant (&message->header);
-}
-
 static void
-_dbus_message_toggle_gvariant (DBusMessage *message, dbus_bool_t gvariant)
-{
-  message->header.protocol_version = gvariant ? DBUS_PROTOCOL_VERSION_GVARIANT : DBUS_MAJOR_PROTOCOL_VERSION;
-}
-
-static void
-get_const_signature (DBusMessage       *message,
+get_const_signature (DBusHeader        *header,
                      const DBusString **type_str_p,
                      int               *type_pos_p)
 {
-  dbus_bool_t got_signature = FALSE;
-  if (_dbus_message_is_gvariant (message) && message->locked)
+  if (_dbus_header_get_field_raw (header,
+                                  DBUS_HEADER_FIELD_SIGNATURE,
+                                  type_str_p,
+                                  type_pos_p))
     {
-      /* only locked GVariant messages have signatures in the body */
-      /*
-       * in case of received GVariant message, there may be no signature field in a header,
-       * but in the body. However, it is not nul-terminated.
-       * So, we need to allocate space and put it into message.
-       * It could also happen before, so check message->signature for already existing.
-       * FIXME: That may kinda break oom-safety.
-       *        For now - if oom, then return empty signature.
-       */
-      if (message->signature == NULL)
-        {
-          int type_str_len;
-          got_signature = _dbus_message_gvariant_get_signature (message,
-                                                                type_str_p,
-                                                                type_pos_p,
-                                                                &type_str_len);
-          if (got_signature)
-            {
-              message->signature = dbus_new (DBusString, 1);
-              got_signature = got_signature &&
-                             _dbus_string_init_preallocated (message->signature, type_str_len + 1);
-
-              got_signature = got_signature &&
-                              _dbus_string_copy_len (*type_str_p, *type_pos_p, type_str_len,
-                                                     message->signature, 0);
-              got_signature = got_signature &&
-                              _dbus_string_append_byte (message->signature, 0);
-            }
-        }
-      else
-        got_signature = TRUE;
-
-      if (got_signature)
-        {
-          *type_str_p = message->signature;
-          *type_pos_p = 0;
-        }
+      *type_pos_p += 1; /* skip the signature length which is 1 byte */
     }
-  else if (_dbus_header_get_field_raw (&message->header,
-                                       DBUS_HEADER_FIELD_SIGNATURE,
-                                       type_str_p,
-                                       type_pos_p))
-    {
-      if (!_dbus_message_is_gvariant (message))
-        *type_pos_p += 1; /* skip the signature length which is 1 byte */
-      got_signature = TRUE;
-    }
-  if (!got_signature)
+  else
     {
       *type_str_p = &_dbus_empty_signature_str;
       *type_pos_p = 0;
@@ -242,7 +174,7 @@ _dbus_message_byteswap (DBusMessage *message)
 
   _dbus_verbose ("Swapping message into compiler byte order\n");
   
-  get_const_signature (message, &type_str, &type_pos);
+  get_const_signature (&message->header, &type_str, &type_pos);
   
   _dbus_marshal_byteswap (type_str, type_pos,
                           byte_order,
@@ -453,11 +385,8 @@ dbus_message_lock (DBusMessage  *message)
 {
   if (!message->locked)
     {
-      if (!_dbus_message_is_gvariant (message))
-        _dbus_header_update_lengths (&message->header,
-                                     _dbus_string_get_length (&message->body));
-      else
-        _dbus_message_finalize_gvariant (message, TRUE);
+      _dbus_header_update_lengths (&message->header,
+                                   _dbus_string_get_length (&message->body));
 
       /* must have a signature if you have a body */
       _dbus_assert (_dbus_string_get_length (&message->body) == 0 ||
@@ -736,18 +665,6 @@ dbus_message_cache_or_finalize (DBusMessage *message)
 #ifdef HAVE_UNIX_FD_PASSING
   close_unix_fds(message->unix_fds, &message->n_unix_fds);
 #endif
-
-  if (NULL != message->signature)
-  {
-    _dbus_string_free (message->signature);
-    message->signature = NULL;
-  }
-
-  if (NULL != message->unique_sender)
-  {
-    _dbus_string_free (message->unique_sender);
-    message->unique_sender = NULL;
-  }
 
   was_cached = FALSE;
 
@@ -1226,25 +1143,13 @@ dbus_bool_t
 dbus_message_set_reply_serial (DBusMessage   *message,
                                dbus_uint32_t  reply_serial)
 {
-  int type = DBUS_TYPE_UINT32;
-
   _dbus_return_val_if_fail (message != NULL, FALSE);
   _dbus_return_val_if_fail (!message->locked, FALSE);
   _dbus_return_val_if_fail (reply_serial != 0, FALSE); /* 0 is invalid */
 
-  if (_dbus_message_is_gvariant (message))
-    {
-      dbus_uint64_t reply_serial_uint64 = reply_serial;
-      type = DBUS_TYPE_UINT64;
-      return _dbus_header_set_field_basic (&message->header,
-                                           DBUS_HEADER_FIELD_REPLY_SERIAL,
-                                           type,
-                                           &reply_serial_uint64);
-    }
-
   return _dbus_header_set_field_basic (&message->header,
                                        DBUS_HEADER_FIELD_REPLY_SERIAL,
-                                       type,
+                                       DBUS_TYPE_UINT32,
                                        &reply_serial);
 }
 
@@ -1258,28 +1163,14 @@ dbus_uint32_t
 dbus_message_get_reply_serial  (DBusMessage *message)
 {
   dbus_uint32_t v_UINT32;
-  dbus_uint64_t v_UINT64;
-  int type = DBUS_TYPE_UINT32;
-  void *value = &v_UINT32;
 
   _dbus_return_val_if_fail (message != NULL, 0);
 
-  if (_dbus_message_is_gvariant (message))
-    {
-      type = DBUS_TYPE_UINT64;
-      value = &v_UINT64;
-    }
-
   if (_dbus_header_get_field_basic (&message->header,
                                     DBUS_HEADER_FIELD_REPLY_SERIAL,
-                                    type,
-                                    value))
-    {
-      if (_dbus_message_is_gvariant (message))
-        return v_UINT64;
-      else
-        return v_UINT32;
-    }
+                                    DBUS_TYPE_UINT32,
+                                    &v_UINT32))
+    return v_UINT32;
   else
     return 0;
 }
@@ -1310,7 +1201,7 @@ dbus_message_finalize (DBusMessage *message)
 }
 
 static DBusMessage*
-dbus_message_new_empty_header (dbus_bool_t gvariant)
+dbus_message_new_empty_header (void)
 {
   DBusMessage *message;
   dbus_bool_t from_cache;
@@ -1355,8 +1246,6 @@ dbus_message_new_empty_header (dbus_bool_t gvariant)
   message->unix_fd_counter_delta = 0;
 #endif
 
-  _dbus_message_toggle_gvariant (message, gvariant);  /* this works only if kdbus is enabled */
-
   if (!from_cache)
     _dbus_data_slot_list_init (&message->slot_list);
 
@@ -1381,56 +1270,7 @@ dbus_message_new_empty_header (dbus_bool_t gvariant)
         }
     }
 
-  message->signature = NULL;
-  message->unique_sender = NULL;
-
   return message;
-}
-
-static DBusMessage*
-_dbus_message_create_protocol_version (int         message_type,
-                            const char  *destination,
-                            const char  *path,
-                            const char  *interface,
-                            const char  *member,
-                            const char  *error_name,
-			    dbus_bool_t gvariant)
-{
-  DBusMessage *message;
-
-  _dbus_assert (message_type != DBUS_MESSAGE_TYPE_INVALID);
-
-  message = dbus_message_new_empty_header (gvariant);
-  if (message == NULL)
-    return NULL;
-
-  if (!(_dbus_message_is_gvariant(message) ? _dbus_header_gvariant_create : _dbus_header_create) (&message->header,
-                            DBUS_COMPILER_BYTE_ORDER,
-                            message_type,
-                            destination, path, interface, member, error_name))
-    {
-      dbus_message_unref (message);
-      return NULL;
-    }
-
-  return message;
-}
-
-static DBusMessage*
-_dbus_message_create (int         message_type,
-                            const char  *destination,
-                            const char  *path,
-                            const char  *interface,
-                            const char  *member,
-                            const char  *error_name)
-{
-	return _dbus_message_create_protocol_version(message_type,
-					     destination,
-					     path,
-					     interface,
-					     member,
-                                             error_name,
-					     _dbus_default_protocol_version == DBUS_PROTOCOL_VERSION_GVARIANT);
 }
 
 /**
@@ -1441,15 +1281,31 @@ _dbus_message_create (int         message_type,
  * Usually you want to use dbus_message_new_method_call(),
  * dbus_message_new_method_return(), dbus_message_new_signal(),
  * or dbus_message_new_error() instead.
- *
+ * 
  * @param message_type type of message
  * @returns new message or #NULL if no memory
  */
 DBusMessage*
 dbus_message_new (int message_type)
 {
-  return _dbus_message_create(message_type,
-                                   NULL, NULL, NULL, NULL, NULL);
+  DBusMessage *message;
+
+  _dbus_return_val_if_fail (message_type != DBUS_MESSAGE_TYPE_INVALID, NULL);
+
+  message = dbus_message_new_empty_header ();
+  if (message == NULL)
+    return NULL;
+
+  if (!_dbus_header_create (&message->header,
+                            DBUS_COMPILER_BYTE_ORDER,
+                            message_type,
+                            NULL, NULL, NULL, NULL, NULL))
+    {
+      dbus_message_unref (message);
+      return NULL;
+    }
+
+  return message;
 }
 
 /**
@@ -1479,6 +1335,8 @@ dbus_message_new_method_call (const char *destination,
                               const char *iface,
                               const char *method)
 {
+  DBusMessage *message;
+
   _dbus_return_val_if_fail (path != NULL, NULL);
   _dbus_return_val_if_fail (method != NULL, NULL);
   _dbus_return_val_if_fail (destination == NULL ||
@@ -1488,8 +1346,20 @@ dbus_message_new_method_call (const char *destination,
                             _dbus_check_is_valid_interface (iface), NULL);
   _dbus_return_val_if_fail (_dbus_check_is_valid_member (method), NULL);
 
-  return _dbus_message_create(DBUS_MESSAGE_TYPE_METHOD_CALL,
-                                   destination, path, iface, method, NULL);
+  message = dbus_message_new_empty_header ();
+  if (message == NULL)
+    return NULL;
+
+  if (!_dbus_header_create (&message->header,
+                            DBUS_COMPILER_BYTE_ORDER,
+                            DBUS_MESSAGE_TYPE_METHOD_CALL,
+                            destination, path, iface, method, NULL))
+    {
+      dbus_message_unref (message);
+      return NULL;
+    }
+
+  return message;
 }
 
 /**
@@ -1511,10 +1381,18 @@ dbus_message_new_method_return (DBusMessage *method_call)
 
   /* sender is allowed to be null here in peer-to-peer case */
 
-  message = _dbus_message_create (DBUS_MESSAGE_TYPE_METHOD_RETURN,
-                                       sender, NULL, NULL, NULL, NULL);
+  message = dbus_message_new_empty_header ();
   if (message == NULL)
     return NULL;
+
+  if (!_dbus_header_create (&message->header,
+                            DBUS_COMPILER_BYTE_ORDER,
+                            DBUS_MESSAGE_TYPE_METHOD_RETURN,
+                            sender, NULL, NULL, NULL, NULL))
+    {
+      dbus_message_unref (message);
+      return NULL;
+    }
 
   dbus_message_set_no_reply (message, TRUE);
 
@@ -1556,10 +1434,18 @@ dbus_message_new_signal (const char *path,
   _dbus_return_val_if_fail (_dbus_check_is_valid_interface (iface), NULL);
   _dbus_return_val_if_fail (_dbus_check_is_valid_member (name), NULL);
 
-  message = _dbus_message_create (DBUS_MESSAGE_TYPE_SIGNAL,
-                                  NULL, path, iface, name, NULL);
+  message = dbus_message_new_empty_header ();
   if (message == NULL)
     return NULL;
+
+  if (!_dbus_header_create (&message->header,
+                            DBUS_COMPILER_BYTE_ORDER,
+                            DBUS_MESSAGE_TYPE_SIGNAL,
+                            NULL, path, iface, name, NULL))
+    {
+      dbus_message_unref (message);
+      return NULL;
+    }
 
   dbus_message_set_no_reply (message, TRUE);
 
@@ -1599,10 +1485,18 @@ dbus_message_new_error (DBusMessage *reply_to,
    * when the message bus is dealing with an unregistered
    * connection.
    */
-  message = _dbus_message_create (DBUS_MESSAGE_TYPE_ERROR,
-                                  sender, NULL, NULL, NULL, error_name);
+  message = dbus_message_new_empty_header ();
   if (message == NULL)
     return NULL;
+
+  if (!_dbus_header_create (&message->header,
+                            DBUS_COMPILER_BYTE_ORDER,
+                            DBUS_MESSAGE_TYPE_ERROR,
+                            sender, NULL, NULL, NULL, error_name))
+    {
+      dbus_message_unref (message);
+      return NULL;
+    }
 
   dbus_message_set_no_reply (message, TRUE);
 
@@ -1706,7 +1600,6 @@ dbus_message_copy (const DBusMessage *message)
 #ifndef DBUS_DISABLE_CHECKS
   retval->generation = message->generation;
 #endif
-  _dbus_message_toggle_gvariant (retval, _dbus_message_is_gvariant (message));
 
   if (!_dbus_header_copy (&message->header, &retval->header))
     {
@@ -2175,24 +2068,19 @@ dbus_message_iter_init (DBusMessage     *message,
   const DBusString *type_str;
   int type_pos;
 
-  BUILD_BUG_ON (sizeof(DBusMessageIter) != sizeof(DBusMessageRealIter));
-
   _dbus_return_val_if_fail (message != NULL, FALSE);
   _dbus_return_val_if_fail (iter != NULL, FALSE);
 
-  get_const_signature (message, &type_str, &type_pos);
+  get_const_signature (&message->header, &type_str, &type_pos);
 
   _dbus_message_iter_init_common (message, real,
                                   DBUS_MESSAGE_ITER_TYPE_READER);
 
   _dbus_type_reader_init (&real->u.reader,
-                                   _dbus_header_get_byte_order (&message->header),
-                                   type_str, type_pos,
-                                   &message->body,
-                                   0);
-
-  if (_dbus_message_is_gvariant (message))
-    _dbus_type_reader_gvariant_init (&real->u.reader, message);
+                          _dbus_header_get_byte_order (&message->header),
+                          type_str, type_pos,
+                          &message->body,
+                          0);
 
   return _dbus_type_reader_get_current_type (&real->u.reader) != DBUS_TYPE_INVALID;
 }
@@ -2581,12 +2469,10 @@ dbus_message_iter_init_append (DBusMessage     *message,
    * when a value is actually appended. That means that init() never fails
    * due to OOM.
    */
-  _dbus_type_writer_gvariant_init_types_delayed (
-                              &real->u.writer,
-                              _dbus_header_get_byte_order (&message->header),
-                              &message->body,
-                              _dbus_string_get_length (&message->body),
-                              _dbus_message_is_gvariant (message));
+  _dbus_type_writer_init_types_delayed (&real->u.writer,
+                                        _dbus_header_get_byte_order (&message->header),
+                                        &message->body,
+                                        _dbus_string_get_length (&message->body));
 }
 
 /**
@@ -2625,21 +2511,11 @@ _dbus_message_iter_open_signature (DBusMessageRealIter *real)
   if (current_sig)
     {
       int current_len;
-      int additional_size_for_len = 0;
 
-      if (!real->u.writer.gvariant)
-      {
-        current_len = _dbus_string_get_byte (current_sig, current_sig_pos);
-        current_sig_pos += 1; /* move on to sig data */
-        additional_size_for_len = 4;
-      }
-      else
-      {
-        /* GVariant has no length field, simply string */
-        current_len = strlen (_dbus_string_get_const_data (current_sig) + current_sig_pos);
-      }
+      current_len = _dbus_string_get_byte (current_sig, current_sig_pos);
+      current_sig_pos += 1; /* move on to sig data */
 
-      if (!_dbus_string_init_preallocated (str, current_len + additional_size_for_len))
+      if (!_dbus_string_init_preallocated (str, current_len + 4))
         {
           dbus_free (str);
           return FALSE;
@@ -3673,9 +3549,6 @@ dbus_message_get_sender (DBusMessage *message)
 
   _dbus_return_val_if_fail (message != NULL, NULL);
 
-  if (NULL != message->unique_sender)
-    return _dbus_string_get_const_data (message->unique_sender);
-
   v = NULL; /* in case field doesn't exist */
   _dbus_header_get_field_basic (&message->header,
                                 DBUS_HEADER_FIELD_SENDER,
@@ -3710,7 +3583,7 @@ dbus_message_get_signature (DBusMessage *message)
 
   _dbus_return_val_if_fail (message != NULL, NULL);
 
-  get_const_signature (message, &type_str, &type_pos);
+  get_const_signature (&message->header, &type_str, &type_pos);
 
   return _dbus_string_get_const_data_len (type_str, type_pos, 0);
 }
@@ -4314,33 +4187,18 @@ load_message (DBusMessageLoader *loader,
   /* 2. VALIDATE BODY */
   if (mode != DBUS_VALIDATION_MODE_WE_TRUST_THIS_DATA_ABSOLUTELY)
     {
-      if (_dbus_message_is_gvariant (message))
-        {
-          validity = _dbus_validate_gvariant_body_with_reason (type_str,
-                                                               type_pos,
-                                                               byte_order,
-                                                               NULL,
-                                                               &loader->data,
-                                                               header_len,
-                                                               body_len);
-        }
-      else
-        {
-
-          get_const_signature (message, &type_str, &type_pos);
-
-          /* Because the bytes_remaining arg is NULL, this validates that the
-           * body is the right length
-           */
-
-          validity = _dbus_validate_body_with_reason (type_str,
-                                                      type_pos,
-                                                      byte_order,
-                                                      NULL,
-                                                      &loader->data,
-                                                      header_len,
-                                                      body_len);
-        }
+      get_const_signature (&message->header, &type_str, &type_pos);
+      
+      /* Because the bytes_remaining arg is NULL, this validates that the
+       * body is the right length
+       */
+      validity = _dbus_validate_body_with_reason (type_str,
+                                                  type_pos,
+                                                  byte_order,
+                                                  NULL,
+                                                  &loader->data,
+                                                  header_len,
+                                                  body_len);
       if (validity != DBUS_VALID)
         {
           _dbus_verbose ("Failed to validate message body code %d\n", validity);
@@ -4462,31 +4320,6 @@ load_message (DBusMessageLoader *loader,
   return FALSE;
 }
 
-static dbus_bool_t
-set_unique_sender (DBusMessage *message, uint64_t unique_sender_id)
-{
-  if (NULL == message->unique_sender)
-    {
-      message->unique_sender = dbus_new (DBusString, 1);
-      if (NULL == message->unique_sender)
-        return FALSE;
-
-      if (!_dbus_string_init (message->unique_sender))
-        return FALSE;
-    }
-
-  _dbus_string_set_length (message->unique_sender, 0);
-
-  if (!_dbus_string_append_printf (message->unique_sender, ":1.%llu", (unsigned long long)unique_sender_id))
-    {
-      _dbus_string_free (message->unique_sender);
-      message->unique_sender = NULL;
-      return FALSE;
-    }
-
-  return TRUE;
-}
-
 /**
  * Converts buffered data into messages, if we have enough data.  If
  * we don't have enough data, does nothing.
@@ -4509,7 +4342,6 @@ _dbus_message_loader_queue_messages (DBusMessageLoader *loader)
     {
       DBusValidity validity;
       int byte_order, fields_array_len, header_len, body_len;
-      dbus_bool_t is_gvariant;
 
       if (_dbus_header_have_message_untrusted (loader->max_message_size,
                                                &validity,
@@ -4518,14 +4350,13 @@ _dbus_message_loader_queue_messages (DBusMessageLoader *loader)
                                                &header_len,
                                                &body_len,
                                                &loader->data, 0,
-                                               _dbus_string_get_length (&loader->data),
-                                               &is_gvariant))
+                                               _dbus_string_get_length (&loader->data)))
         {
           DBusMessage *message;
 
           _dbus_assert (validity == DBUS_VALID);
 
-          message = dbus_message_new_empty_header (is_gvariant);
+          message = dbus_message_new_empty_header ();
           if (message == NULL)
             return FALSE;
 
@@ -4538,12 +4369,6 @@ _dbus_message_loader_queue_messages (DBusMessageLoader *loader)
                * corrupted then return TRUE for not OOM
                */
               return loader->corrupted;
-            }
-
-          if (_dbus_message_is_gvariant (message))
-            {
-              set_unique_sender (message, _dbus_message_loader_get_unique_sender_id (loader));
-              message->locked = TRUE;
             }
 
           _dbus_assert (loader->messages != NULL);
@@ -4748,19 +4573,6 @@ _dbus_message_loader_set_pending_fds_function (DBusMessageLoader *loader,
   loader->unix_fds_change = callback;
   loader->unix_fds_change_data = data;
 #endif
-}
-
-void
-_dbus_message_loader_set_unique_sender_id (DBusMessageLoader *loader,
-                                           uint64_t           id)
-{
-  loader->unique_sender_id = id;
-}
-
-uint64_t
-_dbus_message_loader_get_unique_sender_id (DBusMessageLoader *loader)
-{
-  return loader->unique_sender_id;
 }
 
 static DBusDataSlotAllocator slot_allocator =
@@ -5072,7 +4884,6 @@ dbus_message_demarshal_bytes_needed(const char *buf,
   int byte_order, fields_array_len, header_len, body_len;
   DBusValidity validity = DBUS_VALID;
   int have_message;
-  dbus_bool_t is_gvariant;
 
   if (!buf || len < DBUS_MINIMUM_HEADER_SIZE)
     return 0;
@@ -5089,8 +4900,7 @@ dbus_message_demarshal_bytes_needed(const char *buf,
                                           &header_len,
                                           &body_len,
                                           &str, 0,
-                                          len,
-                                          &is_gvariant);
+                                          len);
   _dbus_string_free (&str);
 
   if (validity == DBUS_VALID)
@@ -5103,272 +4913,6 @@ dbus_message_demarshal_bytes_needed(const char *buf,
     {
       return -1; /* broken! */
     }
-}
-
-/**
- * Sets a flag indicating that the caller of the method is prepared
- * to wait for interactive authorization to take place (for instance
- * via Polkit) before the actual method is processed.
- *
- * The flag is #FALSE by default; that is, by default the other end is
- * expected to make any authorization decisions non-interactively
- * and promptly. It may use the error
- * #DBUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED to signal that
- * authorization failed, but could have succeeded if this flag had
- * been used.
- *
- * For messages whose type is not #DBUS_MESSAGE_TYPE_METHOD_CALL,
- * this flag is meaningless and should not be set.
- *
- * On the protocol level this toggles
- * #DBUS_HEADER_FLAG_ALLOW_INTERACTIVE_AUTHORIZATION.
- *
- * @param message the message
- * @param allow #TRUE if interactive authorization is acceptable
- */
-void
-dbus_message_set_allow_interactive_authorization (DBusMessage *message,
-                                                  dbus_bool_t  allow)
-{
-  _dbus_return_if_fail (message != NULL);
-  _dbus_return_if_fail (!message->locked);
-
-  _dbus_header_toggle_flag (&message->header,
-                            DBUS_HEADER_FLAG_ALLOW_INTERACTIVE_AUTHORIZATION,
-                            allow);
-}
-
-/**
- * Returns whether the flag controlled by
- * dbus_message_set_allow_interactive_authorization() has been set.
- *
- * @param message the message
- */
-dbus_bool_t
-dbus_message_get_allow_interactive_authorization (DBusMessage *message)
-{
-  _dbus_return_val_if_fail (message != NULL, FALSE);
-
-  return _dbus_header_get_flag (&message->header,
-                                DBUS_HEADER_FLAG_ALLOW_INTERACTIVE_AUTHORIZATION);
-}
-
-static dbus_bool_t
-_dbus_message_copy_recursive(DBusMessageIter *iter, DBusMessageIter *dest)
-{
-  dbus_bool_t res = TRUE;
-  int current_type;
-
-  while ((current_type = dbus_message_iter_get_arg_type (iter)) != DBUS_TYPE_INVALID) {
-    if (dbus_type_is_basic(current_type)) {
-      DBusBasicValue value;
-      dbus_message_iter_get_basic (iter, &value);
-      dbus_message_iter_append_basic (dest, current_type, &value);
-    }
-    else {
-      DBusMessageIter sub;
-      DBusMessageIter dest_sub;
-      char *sig = NULL;
-
-      dbus_message_iter_recurse (iter, &sub);
-      if (DBUS_TYPE_VARIANT == current_type)
-        sig = dbus_message_iter_get_signature (&sub);
-      else if (DBUS_TYPE_ARRAY == current_type)
-        sig = dbus_message_iter_get_signature (&sub);
-
-      res = res && dbus_message_iter_open_container (dest, current_type, sig, &dest_sub);
-      dbus_free(sig);
-      res = res && _dbus_message_copy_recursive (&sub, &dest_sub);
-      res = res && dbus_message_iter_close_container (dest, &dest_sub);
-
-      if (!res) {
-        return FALSE;
-      }
-   }
-
-   dbus_message_iter_next (iter);
-  }
-
-  return TRUE;
-}
-
-DBusMessage *
-_dbus_message_remarshal (DBusMessage *message, dbus_bool_t gvariant)
-{
-  DBusMessage *ret;
-  DBusMessageIter iter, ret_iter;
-  int i;
-  dbus_uint32_t serial;
-  const char *sender;
-
-  _dbus_assert (message->locked);
-
-  ret = _dbus_message_create_protocol_version (dbus_message_get_type(message),
-					       dbus_message_get_destination(message),
-					       dbus_message_get_path(message),
-					       dbus_message_get_interface(message),
-					       dbus_message_get_member(message),
-					       dbus_message_get_error_name(message),
-					       gvariant);
-
-  dbus_message_iter_init (message, &iter);
-  dbus_message_iter_init_append (ret, &ret_iter);
-  if (!_dbus_message_copy_recursive(&iter, &ret_iter))
-    return NULL;
-
-#ifdef HAVE_UNIX_FD_PASSING
-  ret->unix_fds = dbus_new(int, message->n_unix_fds);
-  if (ret->unix_fds == NULL && message->n_unix_fds > 0)
-    goto err;
-
-  ret->n_unix_fds_allocated = message->n_unix_fds;
-
-  for (i = 0; i < message->n_unix_fds; ++i) {
-    ret->unix_fds[i] = _dbus_dup(message->unix_fds[i], NULL);
-
-    if (ret->unix_fds[i] < 0)
-      goto err;
-  }
-
-  ret->n_unix_fds = message->n_unix_fds;
-#endif
-
-  /* Remarshal data in header:
-     byte order (already set)
-     type (already set)
-     flags - only those we understand
-     version (already set)
-     body length
-     serial
-     fields array (length)
-     fields:
-         path (already set)
-         interface (already set)
-         member (already set)
-         error name (already set)
-         reply serial
-         destination (already set)
-         sender
-         signature (set during copy, but an action needed for conversion to GVariant)
-         unix fds
-   */
-
-  /* FLAGS */
-  _dbus_header_toggle_flag (&ret->header, DBUS_HEADER_FLAG_NO_REPLY_EXPECTED,
-      _dbus_header_get_flag (&message->header, DBUS_HEADER_FLAG_NO_REPLY_EXPECTED));
-
-  _dbus_header_toggle_flag (&ret->header, DBUS_HEADER_FLAG_NO_AUTO_START,
-      _dbus_header_get_flag (&message->header, DBUS_HEADER_FLAG_NO_AUTO_START));
-
-  /* SERIAL / COOKIE */
-  serial = dbus_message_get_serial (message);
-
-  if (0 != serial)
-    dbus_message_set_serial (ret, serial);
-
-  /* Field: REPLY_SERIAL */
-  serial = dbus_message_get_reply_serial (message);
-
-  if (0 != serial && !dbus_message_set_reply_serial (ret, serial))
-    goto err;
-
-  /* Field: SENDER */
-  sender = dbus_message_get_sender (message);
-
-  if (NULL != sender && !dbus_message_set_sender (ret, sender))
-    goto err;
-
-  /* BODY LENGTH */
-  if (!gvariant)
-    _dbus_header_update_lengths (&ret->header,
-                                 _dbus_string_get_length (&ret->body));
-  /* For GVariant: */
-    /* Field: SIGNATURE to body; add body offset - this is done with dbus_message_lock() */
-
-  return ret;
-
-err:
-  _dbus_header_free (&ret->header);
-  _dbus_string_free (&ret->body);
-
-#ifdef HAVE_UNIX_FD_PASSING
-  close_unix_fds(ret->unix_fds, &ret->n_unix_fds);
-  dbus_free(ret->unix_fds);
-#endif
-
-  return NULL;
-}
-
-void
-dbus_set_protocol_version (unsigned char version)
-{
-  _dbus_default_protocol_version = version;
-}
-
-DBusMessage *
-_dbus_generate_local_error_message (dbus_uint32_t serial,
-                                    char *error_name,
-                                    char *error_msg)
-{
-  DBusMessage *message;
-  message = dbus_message_new (DBUS_MESSAGE_TYPE_ERROR);
-  if (!message)
-    goto out;
-
-  if (!dbus_message_set_error_name (message, error_name))
-    {
-      dbus_message_unref (message);
-      message = NULL;
-      goto out;
-    }
-
-  dbus_message_set_no_reply (message, TRUE);
-
-  if (!dbus_message_set_reply_serial (message,
-                                      serial))
-    {
-      dbus_message_unref (message);
-      message = NULL;
-      goto out;
-    }
-
-  if (error_msg != NULL)
-    {
-      DBusMessageIter iter;
-
-      dbus_message_iter_init_append (message, &iter);
-      if (!dbus_message_iter_append_basic (&iter,
-                                           DBUS_TYPE_STRING,
-                                           &error_msg))
-        {
-          dbus_message_unref (message);
-          message = NULL;
-	  goto out;
-        }
-    }
-
- out:
-  return message;
-}
-
-dbus_bool_t
-_dbus_message_assure_dbus1 (DBusMessage **message)
-{
-  if ((*message)->header.protocol_version != DBUS_MAJOR_PROTOCOL_VERSION)
-    {
-      *message = _dbus_message_remarshal (*message, FALSE);
-    }
-  return *message != NULL;
-}
-
-dbus_bool_t
-_dbus_message_assure_gvariant (DBusMessage **message)
-{
-  if ((*message)->header.protocol_version != DBUS_PROTOCOL_VERSION_GVARIANT)
-    {
-      *message = _dbus_message_remarshal (*message, TRUE);
-    }
-  return *message != NULL;
 }
 
 /** @} */

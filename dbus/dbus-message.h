@@ -2,7 +2,6 @@
 /* dbus-message.h DBusMessage object
  *
  * Copyright (C) 2002, 2003, 2005 Red Hat Inc.
- * Copyright (C) 2015  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  * 
@@ -50,72 +49,21 @@ typedef struct DBusMessageIter DBusMessageIter;
  * DBusMessageIter struct; contains no public fields. 
  */
 struct DBusMessageIter
-{                                              /* layout on a standard 64-bit system */
-  void *dummy1;         /**< Don't use this */ /* message */
-  dbus_uint32_t dummy3a : 21; /**< Don't use this */
-  dbus_uint32_t dummy3b : 3; /**< Don't use this */
-  dbus_uint32_t dummy3c : 8; /**< Don't use this */
-
-                                             /* padding before union */
-  union {
-    struct
-    {
-      dbus_uint32_t dummy1a : 8;     /**< Don't use this */
-      dbus_uint32_t dummy1b : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1c : 3;     /**< Don't use this */
-      dbus_uint32_t dummy1d : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1e : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1f : 1;     /**< Don't use this */
-      void *dummy2;             /**< Don't use this */
-      int dummy3;               /**< Don't use this */
-      void *dummy4;             /**< Don't use this */
-      int dummy5;               /**< Don't use this */
-      int dummy6;               /**< Don't use this */
-      size_t dummy7;            /**< Don't use this */
-      size_t dummy8;            /**< Don't use this */
-      int dummy9;               /**< Don't use this */
-
-      void *dummy10;            /**< Don't use this */
-      union
-      {
-        struct {
-          int dummy11;          /**< Don't use this */
-        };
-      } u;
-    } s1;
-
-    struct
-    {
-      dbus_uint32_t dummy1a : 8;     /**< Don't use this */
-      dbus_uint32_t dummy1b : 8;     /**< Don't use this */
-      dbus_uint32_t dummy1c : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1d : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1e : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1f : 1;     /**< Don't use this */
-      dbus_uint32_t dummy1g : 1;     /**< Don't use this */
-
-      void *dummy2;             /**< Don't use this */
-      int dummy3;               /**< Don't use this */
-      void *dummy4;             /**< Don't use this */
-      int dummy5;               /**< Don't use this */
-      size_t dummy6;            /**< Don't use this */
-      void *dummy7;             /**< Don't use this */
-      int dummy8;               /**< Don't use this */
-      char dummy9;              /**< Don't use this */
-
-      union
-      {
-        struct {
-          int dummy10;           /**< Don't use this */
-          int dummy11;           /**< Don't use this */
-          int dummy12;           /**< Don't use this */
-        };
-        struct {
-          size_t dummy13;        /**< Don't use this */
-        };
-      } u;
-    } s2;
-  } u;
+{ 
+  void *dummy1;         /**< Don't use this */
+  void *dummy2;         /**< Don't use this */
+  dbus_uint32_t dummy3; /**< Don't use this */
+  int dummy4;           /**< Don't use this */
+  int dummy5;           /**< Don't use this */
+  int dummy6;           /**< Don't use this */
+  int dummy7;           /**< Don't use this */
+  int dummy8;           /**< Don't use this */
+  int dummy9;           /**< Don't use this */
+  int dummy10;          /**< Don't use this */
+  int dummy11;          /**< Don't use this */
+  int pad1;             /**< Don't use this */
+  int pad2;             /**< Don't use this */
+  void *pad3;           /**< Don't use this */
 };
 
 DBUS_EXPORT
@@ -364,9 +312,6 @@ void dbus_message_set_allow_interactive_authorization (DBusMessage *message,
 DBUS_EXPORT
 dbus_bool_t dbus_message_get_allow_interactive_authorization (
     DBusMessage *message);
-
-DBUS_EXPORT
-void         dbus_set_protocol_version (unsigned char version);
 
 /** @} */
 

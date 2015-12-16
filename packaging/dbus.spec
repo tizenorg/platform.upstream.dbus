@@ -1,7 +1,5 @@
 %define dbus_user_uid           81
 
-%bcond_with kdbus
-
 Name:           dbus
 Url:            http://dbus.freedesktop.org/
 Summary:        D-Bus Message Bus System
@@ -91,9 +89,6 @@ export V=1
     --enable-doxygen-docs						\
 %if %{with_systemd}
     --enable-systemd							\
-%endif
-%if %{with kdbus}
-    --enable-kdbus-transport                                            \
 %endif
     --with-console-auth-dir=/var/run/dbus/at_console/			\
     --with-systemdsystemunitdir=%{_unitdir}				\

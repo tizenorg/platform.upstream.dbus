@@ -71,11 +71,6 @@ struct DBusTransportVTable
   /**< Get socket file descriptor */
 };
 
-typedef dbus_bool_t (*DBusTransportGetUnixUserFunction) (DBusTransport *transport,
-                                                         unsigned long *uid);
-typedef dbus_bool_t (*DBusTransportGetUnixPIDFunction)  (DBusTransport *transport,
-                                                         unsigned long *uid);
-typedef dbus_bool_t (*DBusTransportAssureProtocolFunction) (DBusMessage **message);
 /**
  * Object representing a transport such as a socket.
  * A transport can shuttle messages from point A to point B,
@@ -114,10 +109,6 @@ struct DBusTransport
   void *windows_user_data;                            /**< Data for windows_user_function */
   
   DBusFreeFunction free_windows_user_data;            /**< Function to free windows_user_data */
-
-  DBusTransportGetUnixUserFunction get_unix_user_function;      /**< Function for getting Unix user ID */
-  DBusTransportGetUnixPIDFunction get_unix_process_id_function; /**< Function for getting Unix process ID */
-  DBusTransportAssureProtocolFunction assure_protocol_function; /**< Function for converting messages, if needed */
   
   unsigned int disconnected : 1;              /**< #TRUE if we are disconnected. */
   unsigned int authenticated : 1;             /**< Cache of auth state; use _dbus_transport_peek_is_authenticated() to query value */
@@ -132,18 +123,8 @@ dbus_bool_t _dbus_transport_init_base     (DBusTransport             *transport,
                                            const DBusTransportVTable *vtable,
                                            const DBusString          *server_guid,
                                            const DBusString          *address);
-dbus_bool_t _dbus_transport_init_base_authenticated     (DBusTransport             *transport,
-                                                         const DBusTransportVTable *vtable,
-                                                         const DBusString          *server_guid,
-                                                         const DBusString          *address);
 void        _dbus_transport_finalize_base (DBusTransport             *transport);
 
-void        _dbus_transport_set_get_unix_user_function       (DBusTransport                    *transport,
-                                                              DBusTransportGetUnixUserFunction  function);
-void        _dbus_transport_set_get_unix_process_id_function (DBusTransport                    *transport,
-                                                              DBusTransportGetUnixPIDFunction   function);
-void        _dbus_transport_set_assure_protocol_function     (DBusTransport                    *transport,
-                                                              DBusTransportAssureProtocolFunction function);
 
 typedef enum
 {

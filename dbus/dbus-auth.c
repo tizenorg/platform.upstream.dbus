@@ -2353,39 +2353,6 @@ _dbus_auth_client_new (void)
 }
 
 /**
- * Creates a new auth conversation object for the client side.
- * In fact it only initialize structures and sets authenticated state
- * and leaves authentication to different transport-dependent
- * mechanisms.
- *
- * @returns the new object or #NULL if no memory
- */
-DBusAuth*
-_dbus_auth_client_new_authenticated (void)
-{
-  DBusAuth *auth;
-  DBusString guid_str;
-
-  if (!_dbus_string_init (&guid_str))
-    return NULL;
-
-  auth = _dbus_auth_new (sizeof (DBusAuthClient));
-  if (auth == NULL)
-    {
-      _dbus_string_free (&guid_str);
-      return NULL;
-    }
-
-  DBUS_AUTH_CLIENT (auth)->guid_from_server = guid_str;
-
-  auth->side = auth_side_client;
-  auth->state = &common_state_authenticated;
-  auth->unix_fd_negotiated = TRUE;
-
-  return auth;
-}
-
-/**
  * Increments the refcount of an auth object.
  *
  * @param auth the auth conversation

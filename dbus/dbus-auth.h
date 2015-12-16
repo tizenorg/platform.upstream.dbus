@@ -46,8 +46,6 @@ DBusAuth*     _dbus_auth_server_new          (const DBusString       *guid);
 DBUS_PRIVATE_EXPORT
 DBusAuth*     _dbus_auth_client_new          (void);
 DBUS_PRIVATE_EXPORT
-DBusAuth* 	  _dbus_auth_client_new_authenticated 	 (void);
-DBUS_PRIVATE_EXPORT
 DBusAuth*     _dbus_auth_ref                 (DBusAuth               *auth);
 DBUS_PRIVATE_EXPORT
 void          _dbus_auth_unref               (DBusAuth               *auth);

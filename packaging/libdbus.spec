@@ -1,5 +1,3 @@
-%bcond_with kdbus
-
 Name:           libdbus
 Url:            http://dbus.freedesktop.org/
 Summary:        Library package for D-Bus
@@ -70,9 +68,6 @@ export V=1
     --enable-inotify							\
     --with-console-auth-dir=/var/run/dbus/at_console/			\
     --with-systemdsystemunitdir=%{_unitdir}				\
-%if %{with kdbus}
-    --enable-kdbus-transport                                            \
-%endif
     --enable-smack
 
 make %{?_smp_mflags} -C dbus libdbus-1.la

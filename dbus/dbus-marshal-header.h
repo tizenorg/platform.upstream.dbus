@@ -57,7 +57,6 @@ struct DBusHeader
 
   dbus_uint32_t padding : 3;        /**< bytes of alignment in header */
   dbus_uint32_t byte_order : 8;     /**< byte order of header */
-  unsigned char protocol_version;
 };
 
 dbus_bool_t   _dbus_header_init                   (DBusHeader        *header);
@@ -112,8 +111,7 @@ dbus_bool_t   _dbus_header_have_message_untrusted (int                max_messag
                                                    int               *body_len,
                                                    const DBusString  *str,
                                                    int                start,
-                                                   int                len,
-                                                   dbus_bool_t       *is_gvariant);
+                                                   int                len);
 dbus_bool_t   _dbus_header_load                   (DBusHeader        *header,
                                                    DBusValidationMode mode,
                                                    DBusValidity      *validity,

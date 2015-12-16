@@ -131,7 +131,6 @@ dbus_bool_t       _dbus_connection_putback_message                (DBusConnectio
 DBUS_PRIVATE_EXPORT
 dbus_bool_t       _dbus_connection_remove_message                 (DBusConnection *connection,
                                                                    DBusMessage    *message);
-int               _dbus_connection_get_n_incoming               (DBusConnection *connection);
 
 /* if DBUS_ENABLE_STATS */
 DBUS_PRIVATE_EXPORT
