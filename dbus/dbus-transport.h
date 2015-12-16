@@ -98,10 +98,6 @@ dbus_bool_t        _dbus_transport_set_auth_mechanisms    (DBusTransport        
 void               _dbus_transport_set_allow_anonymous    (DBusTransport              *transport,
                                                            dbus_bool_t                 value);
 
-dbus_bool_t        _dbus_transport_assure_protocol_version (DBusTransport             *transport,
-                                                            DBusMessage              **message);
-
-
 /* if DBUS_ENABLE_STATS */
 void _dbus_transport_get_stats (DBusTransport  *transport,
                                 dbus_uint32_t  *queue_bytes,

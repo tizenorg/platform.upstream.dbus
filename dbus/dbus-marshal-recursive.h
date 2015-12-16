@@ -2,7 +2,6 @@
 /* dbus-marshal-recursive.h  Marshalling routines for recursive types
  *
  * Copyright (C) 2004, 2005 Red Hat, Inc.
- * Copyright (C) 2015  Samsung Electronics
  *
  * Licensed under the Academic Free License version 2.1
  *
@@ -45,17 +44,10 @@ struct DBusTypeReader
                                  * where we don't have another way to tell
                                  */
   dbus_uint32_t array_len_offset : 3; /**< bytes back from start_pos that len ends */
-  dbus_uint32_t gvariant : 1;   /**< TRUE if gvariant marshaling should be used */
-  dbus_uint32_t offsets_from_back : 1; /**< for GVariant marshalling: direction of offsets */
-  dbus_uint32_t is_variant : 1;     /**< for GVariant marshalling: indicator of variant type */
   const DBusString *type_str;   /**< string containing signature of block */
   int type_pos;                 /**< current position in signature */
   const DBusString *value_str;  /**< string containing values of block */
   int value_pos;                /**< current position in values */
-  int variable_index;           /**< index of value within variable values in the container */
-  size_t value_start;           /**< start of container */
-  size_t value_end;             /**< end of container */
-  int n_offsets;                /**< for GVariant marshalling: number of variable offsets */
 
   const DBusTypeReaderClass *klass; /**< the vtable for the reader */
   union
@@ -79,18 +71,10 @@ struct DBusTypeWriter
 
   dbus_uint32_t enabled : 1; /**< whether to write values */
 
-  dbus_uint32_t gvariant : 1;   /**< TRUE if gvariant marshaling should be used */
-  dbus_uint32_t body_container : 1;   /**< TRUE if this writer is top-level */
-  dbus_uint32_t is_fixed : 1;   /**< TRUE if this writer wrote only fixed-size values so far */
-
   DBusString *type_str; /**< where to write typecodes (or read type expectations) */
   int type_pos;         /**< current pos in type_str */
   DBusString *value_str; /**< where to write values */
   int value_pos;         /**< next position to write */
-  size_t value_start;    /**< start of the container */
-  DBusString *offsets; /**< for GVariant marshalling: actual offsets */
-  int alignment;         /**< for GVariant marshalling: for enclosing containers */
-  char offsets_size;  /**< for GVariant marshalling: current size of offsets */
 
   union
   {
@@ -99,9 +83,6 @@ struct DBusTypeWriter
       int len_pos;   /**< position of length of the array */
       int element_type_pos; /**< position of array element type in type_str */
     } array;
-    struct {
-      size_t last_offset; /**< for GVariant marshalling: position of end of last field */
-    } struct_or_dict;
   } u; /**< class-specific data */
 };
 
@@ -165,11 +146,6 @@ void        _dbus_type_writer_init_types_delayed   (DBusTypeWriter        *write
                                                     int                    byte_order,
                                                     DBusString            *value_str,
                                                     int                    value_pos);
-void        _dbus_type_writer_gvariant_init_types_delayed   (DBusTypeWriter        *writer,
-                                                             int                    byte_order,
-                                                             DBusString            *value_str,
-                                                             int                    value_pos,
-                                                             dbus_bool_t            gvariant);
 void        _dbus_type_writer_add_types            (DBusTypeWriter        *writer,
                                                     DBusString            *type_str,
                                                     int                    type_pos);
@@ -183,11 +159,6 @@ void        _dbus_type_writer_init_values_only     (DBusTypeWriter        *write
 dbus_bool_t _dbus_type_writer_write_basic          (DBusTypeWriter        *writer,
                                                     int                    type,
                                                     const void            *value);
-dbus_bool_t _dbus_type_writer_write_basic_with_gvariant
-                                                   (DBusTypeWriter        *writer,
-                                                    int                    type,
-                                                    const void            *value,
-                                                    dbus_bool_t            gvariant);
 dbus_bool_t _dbus_type_writer_write_fixed_multi    (DBusTypeWriter        *writer,
                                                     int                    element_type,
                                                     const void            *value,
