@@ -2,7 +2,7 @@ Name:           dbus-x11
 %define _name   dbus
 BuildRequires:  pkgconfig(x11)
 Url:            http://dbus.freedesktop.org/
-License:        GPL2+ or AFL 2.1
+License:        GPL-2.0+ or AFL-2.1
 Group:          Base/IPC
 Summary:        D-Bus Message Bus System
 # COMMON1-BEGIN
