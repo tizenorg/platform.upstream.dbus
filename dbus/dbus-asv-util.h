@@ -28,20 +28,26 @@
 
 DBUS_BEGIN_DECLS
 
-DBusMessage *_dbus_asv_new_method_return (DBusMessage      *message,
-                                          DBusMessageIter  *iter,
-                                          DBusMessageIter  *arr_iter);
-dbus_bool_t  _dbus_asv_close             (DBusMessageIter *iter,
-                                          DBusMessageIter *arr_iter);
-void         _dbus_asv_abandon           (DBusMessageIter *iter,
-                                          DBusMessageIter *arr_iter);
+DBUS_PRIVATE_EXPORT
+DBusMessage *_dbus_asv_new_method_return  (DBusMessage      *message,
+                                           DBusMessageIter  *iter,
+                                           DBusMessageIter  *arr_iter);
+DBUS_PRIVATE_EXPORT
+dbus_bool_t  _dbus_asv_close              (DBusMessageIter *iter,
+                                           DBusMessageIter *arr_iter);
+DBUS_PRIVATE_EXPORT
+void         _dbus_asv_abandon            (DBusMessageIter *iter,
+                                           DBusMessageIter *arr_iter);
 
+DBUS_PRIVATE_EXPORT
 dbus_bool_t  _dbus_asv_add_uint32        (DBusMessageIter *arr_iter,
                                           const char      *key,
                                           dbus_uint32_t    value);
+DBUS_PRIVATE_EXPORT
 dbus_bool_t  _dbus_asv_add_string        (DBusMessageIter *arr_iter,
                                           const char      *key,
                                           const char      *value);
+DBUS_PRIVATE_EXPORT
 dbus_bool_t  _dbus_asv_add_byte_array    (DBusMessageIter *arr_iter,
                                           const char      *key,
                                           const void      *value,

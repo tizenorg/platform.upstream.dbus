@@ -125,6 +125,7 @@ set (DBUS_SHARED_SOURCES
 	${DBUS_DIR}/dbus-string.c
 	${DBUS_DIR}/dbus-sysdeps.c
 	${DBUS_DIR}/dbus-pipe.c
+	${DBUS_DIR}/dbus-asv-util.c
 )
 
 set (DBUS_SHARED_HEADERS
@@ -147,7 +148,6 @@ set (DBUS_SHARED_HEADERS
 ### should be underscore-prefixed but don't really need 
 ### to be unless they move to DBUS_SHARED_SOURCES later)
 set (DBUS_UTIL_SOURCES
-	${DBUS_DIR}/dbus-asv-util.c
 	${DBUS_DIR}/dbus-auth-script.c
 	${DBUS_DIR}/dbus-auth-util.c
 	${DBUS_DIR}/dbus-credentials-util.c
