@@ -48,7 +48,7 @@
   (type == DBUS_TYPE_STRING || type == DBUS_TYPE_SIGNATURE || \
    type == DBUS_TYPE_OBJECT_PATH)
 
-unsigned char _dbus_default_protocol_version = DBUS_PROTOCOL_VERSION_GVARIANT;
+unsigned char _dbus_default_protocol_version = DBUS_MAJOR_PROTOCOL_VERSION; /* DBUS_PROTOCOL_VERSION_GVARIANT; */
 
 static void dbus_message_finalize (DBusMessage *message);
 
