@@ -113,6 +113,10 @@ struct DBusMessageIter
         struct {
           size_t dummy13;        /**< Don't use this */
         };
+        struct {
+          size_t *dummy14;       /**< Don't use this */
+          size_t *dummy15;       /**< Don't use this */
+        };
       } u;
     } s2;
   } u;

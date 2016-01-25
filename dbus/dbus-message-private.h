@@ -134,6 +134,8 @@ struct DBusMessage
 #endif
   DBusString *signature; /**< A placeholder for signature of received GVariant messages */
   DBusString *unique_sender; /**< A placeholder for sender name of received GVariant messages */
+  size_t gvariant_body_last_offset; /**< Offset of end of last variable-sized element of body. */
+  size_t gvariant_body_last_pos; /**< Offset of last writing position. */
 };
 
 DBUS_PRIVATE_EXPORT
