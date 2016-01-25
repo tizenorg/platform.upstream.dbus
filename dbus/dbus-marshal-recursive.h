@@ -102,6 +102,10 @@ struct DBusTypeWriter
     struct {
       size_t last_offset; /**< for GVariant marshalling: position of end of last field */
     } struct_or_dict;
+    struct {
+      size_t *last_offset; /**< for GVariant: pointer to root-level last offset */
+      size_t *last_pos;    /**< for GVariant: pointer to root-level last writing position */
+    } root;
   } u; /**< class-specific data */
 };
 
@@ -169,7 +173,9 @@ void        _dbus_type_writer_gvariant_init_types_delayed   (DBusTypeWriter     
                                                              int                    byte_order,
                                                              DBusString            *value_str,
                                                              int                    value_pos,
-                                                             dbus_bool_t            gvariant);
+                                                             dbus_bool_t            gvariant,
+                                                             size_t                *last_offset,
+                                                             size_t                *last_pos);
 void        _dbus_type_writer_add_types            (DBusTypeWriter        *writer,
                                                     DBusString            *type_str,
                                                     int                    type_pos);

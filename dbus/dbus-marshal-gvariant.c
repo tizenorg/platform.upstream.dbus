@@ -1154,38 +1154,37 @@ _dbus_writer_gvariant_add_offset_with_variability (DBusTypeWriter *writer,
 {
   writer->is_fixed = writer->is_fixed && fixed;
 
-  if (writer->body_container ||
-      DBUS_TYPE_STRUCT == writer->container_type ||
-      DBUS_TYPE_DICT_ENTRY == writer->container_type)
+  if (writer->body_container)
+  {
+    if (*writer->u.root.last_offset != 0)
+    {
+      check_offsets_in_body_for_adding (writer);
+
+      write_offset (writer->value_str,
+                    *writer->u.root.last_offset,
+                    writer->offsets_size,
+                    writer->value_pos);
+    }
+    if (!fixed)
+      *writer->u.root.last_offset = writer->value_pos - writer->value_start;
+    else
+      *writer->u.root.last_offset = 0;
+  }
+  else if (DBUS_TYPE_STRUCT == writer->container_type ||
+           DBUS_TYPE_DICT_ENTRY == writer->container_type)
   {
     if (writer->u.struct_or_dict.last_offset != 0)
     {
-      if (writer->body_container)
-      {
-        check_offsets_in_body_for_adding (writer);
+      check_offsets_for_adding (writer);
 
-        write_offset (writer->value_str,
+      prepend_offset (writer->offsets,
                       writer->u.struct_or_dict.last_offset,
-                      writer->offsets_size,
-                      writer->value_pos);
-      }
-      else
-      {
-        check_offsets_for_adding (writer);
-
-        prepend_offset (writer->offsets,
-                        writer->u.struct_or_dict.last_offset,
-                        writer->offsets_size);
-      }
+                      writer->offsets_size);
     }
     if (!fixed)
-    {
       writer->u.struct_or_dict.last_offset = writer->value_pos - writer->value_start;
-    }
     else
-    {
       writer->u.struct_or_dict.last_offset = 0;
-    }
   }
   else if (DBUS_TYPE_ARRAY == writer->container_type)
   {
@@ -1255,6 +1254,13 @@ fix_struct_alignment (DBusTypeWriter *writer, int type)
   return fix_struct_alignment_value (writer, get_alignment (type));
 }
 
+static void
+update_root_last_pos (DBusTypeWriter *writer)
+{
+  if (writer->body_container)
+    *writer->u.root.last_pos = writer->value_pos;
+}
+
 dbus_bool_t
 _dbus_type_writer_gvariant_write_basic_no_typecode (DBusTypeWriter *writer,
                                                     int             type,
@@ -1271,6 +1277,8 @@ _dbus_type_writer_gvariant_write_basic_no_typecode (DBusTypeWriter *writer,
                                                          value,
                                                          writer->byte_order,
                                                          &writer->value_pos);
+
+  update_root_last_pos (writer);
 
   result = result && _dbus_writer_gvariant_add_offset (writer, type);
   return result;
@@ -1363,6 +1371,8 @@ _dbus_writer_unrecurse_gvariant_write (DBusTypeWriter *writer,
     default:
       _dbus_assert_not_reached("Invalid container type");
   }
+
+  update_root_last_pos (writer);
 
   /* well, we don't know where in the type string beginning of current container is */
   result = result && _dbus_writer_gvariant_add_offset_with_variability (writer, sub->is_fixed);

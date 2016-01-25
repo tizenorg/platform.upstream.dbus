@@ -1697,12 +1697,26 @@ _dbus_type_writer_init_types_delayed (DBusTypeWriter *writer,
                           NULL, 0, value_str, value_pos);
 }
 
+/**
+ * Initialize a write iterator, with the signature to be provided
+ * later. Supports GVariant
+ *
+ * @param writer the writer to init
+ * @param byte_order the byte order to marshal into
+ * @param value_str the string to write values into
+ * @param value_pos where to insert values
+ * @param gvariant TRUE if append values with GVariant marshalling
+ * @param last_offset pointer to root level offset of last variable-size value
+ * @param last_pos pointer to root level position of offsets
+ */
 void
-_dbus_type_writer_gvariant_init_types_delayed (DBusTypeWriter *writer,
-                                      int             byte_order,
-                                      DBusString     *value_str,
-                                      int             value_pos,
-                                      dbus_bool_t     gvariant)
+_dbus_type_writer_gvariant_init_types_delayed (DBusTypeWriter  *writer,
+                                               int              byte_order,
+                                               DBusString      *value_str,
+                                               int              value_pos,
+                                               dbus_bool_t      gvariant,
+                                               size_t          *last_offset,
+                                               size_t          *last_pos)
 {
   _dbus_type_writer_init (writer, byte_order,
                           NULL, 0, value_str, value_pos);
@@ -1710,9 +1724,16 @@ _dbus_type_writer_gvariant_init_types_delayed (DBusTypeWriter *writer,
   writer->body_container = TRUE;
   writer->is_fixed = TRUE;
   writer->alignment = 8;
-  writer->u.struct_or_dict.last_offset = 0;
+  writer->u.root.last_offset = last_offset;
+  writer->u.root.last_pos = last_pos;
   writer->offsets_size = 1;
   writer->offsets = NULL;
+
+  if (gvariant)
+    {
+      writer->value_pos = *last_pos;
+      writer->value_start = 0;
+    }
 }
 
 /**
@@ -2003,7 +2024,8 @@ writer_recurse_struct_or_dict_entry (DBusTypeWriter   *writer,
                                           sub->value_pos,
                                           _DBUS_ALIGN_VALUE (sub->value_pos, 8) - sub->value_pos,
                                           '\0'))
-          _dbus_assert_not_reached ("should not have failed to insert alignment padding for struct");
+            _dbus_assert_not_reached ("should not have failed to insert alignment padding for struct");
+
           sub->value_pos =  _DBUS_ALIGN_VALUE (sub->value_pos, 8);
         }
     }
