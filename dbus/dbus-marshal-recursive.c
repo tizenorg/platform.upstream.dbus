@@ -1698,11 +1698,12 @@ _dbus_type_writer_init_types_delayed (DBusTypeWriter *writer,
 }
 
 void
-_dbus_type_writer_gvariant_init_types_delayed (DBusTypeWriter *writer,
-                                      int             byte_order,
-                                      DBusString     *value_str,
-                                      int             value_pos,
-                                      dbus_bool_t     gvariant)
+_dbus_type_writer_gvariant_init_types_delayed (DBusTypeWriter  *writer,
+                                               int              byte_order,
+                                               DBusString      *value_str,
+                                               int              value_pos,
+                                               dbus_bool_t      gvariant,
+                                               size_t          *last_offset)
 {
   _dbus_type_writer_init (writer, byte_order,
                           NULL, 0, value_str, value_pos);
@@ -1710,7 +1711,7 @@ _dbus_type_writer_gvariant_init_types_delayed (DBusTypeWriter *writer,
   writer->body_container = TRUE;
   writer->is_fixed = TRUE;
   writer->alignment = 8;
-  writer->u.struct_or_dict.last_offset = 0;
+  writer->u.struct_or_dict.root_last_offset = last_offset;
   writer->offsets_size = 1;
   writer->offsets = NULL;
 }

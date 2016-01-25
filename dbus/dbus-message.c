@@ -1382,6 +1382,7 @@ dbus_message_new_empty_header (dbus_bool_t gvariant)
 
   message->signature = NULL;
   message->unique_sender = NULL;
+  message->gvariant_body_last_offset = 0;
 
   return message;
 }
@@ -2549,7 +2550,8 @@ dbus_message_iter_init_append (DBusMessage     *message,
                               _dbus_header_get_byte_order (&message->header),
                               &message->body,
                               _dbus_string_get_length (&message->body),
-                              _dbus_message_is_gvariant (message));
+                              _dbus_message_is_gvariant (message),
+                              &message->gvariant_body_last_offset);
 }
 
 /**

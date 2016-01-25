@@ -1154,38 +1154,37 @@ _dbus_writer_gvariant_add_offset_with_variability (DBusTypeWriter *writer,
 {
   writer->is_fixed = writer->is_fixed && fixed;
 
-  if (writer->body_container ||
-      DBUS_TYPE_STRUCT == writer->container_type ||
-      DBUS_TYPE_DICT_ENTRY == writer->container_type)
+  if (writer->body_container)
+  {
+    if (*writer->u.struct_or_dict.root_last_offset != 0)
+    {
+      check_offsets_in_body_for_adding (writer);
+
+      write_offset (writer->value_str,
+                    *writer->u.struct_or_dict.root_last_offset,
+                    writer->offsets_size,
+                    writer->value_pos);
+    }
+    if (!fixed)
+      *writer->u.struct_or_dict.root_last_offset = writer->value_pos - writer->value_start;
+    else
+      *writer->u.struct_or_dict.root_last_offset = 0;
+  }
+  else if (DBUS_TYPE_STRUCT == writer->container_type ||
+           DBUS_TYPE_DICT_ENTRY == writer->container_type)
   {
     if (writer->u.struct_or_dict.last_offset != 0)
     {
-      if (writer->body_container)
-      {
-        check_offsets_in_body_for_adding (writer);
+      check_offsets_for_adding (writer);
 
-        write_offset (writer->value_str,
+      prepend_offset (writer->offsets,
                       writer->u.struct_or_dict.last_offset,
-                      writer->offsets_size,
-                      writer->value_pos);
-      }
-      else
-      {
-        check_offsets_for_adding (writer);
-
-        prepend_offset (writer->offsets,
-                        writer->u.struct_or_dict.last_offset,
-                        writer->offsets_size);
-      }
+                      writer->offsets_size);
     }
     if (!fixed)
-    {
       writer->u.struct_or_dict.last_offset = writer->value_pos - writer->value_start;
-    }
     else
-    {
       writer->u.struct_or_dict.last_offset = 0;
-    }
   }
   else if (DBUS_TYPE_ARRAY == writer->container_type)
   {
