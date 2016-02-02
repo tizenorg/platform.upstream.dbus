@@ -2629,7 +2629,7 @@ _handle_padding (const struct kdbus_msg *msg,
 
 static int
 kdbus_decode_dbus_message (const struct kdbus_msg *msg,
-                           char *data,
+                           char                   *data,
                            DBusTransportKdbus     *kdbus_transport,
                            int                    *fds,
                            int                    *n_fds)
@@ -3036,16 +3036,12 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
   ret_size = kdbus_decode_msg (msg, data, kdbus_transport, fds, n_fds);
 
   if (ret_size == -1) /* error */
-    {
-      _dbus_string_set_length (buffer, start);
-      return -1;
-    }
-  else if (buf_size != ret_size) /* case of locally generated message */
-    {
-      _dbus_string_set_length (buffer, start + ret_size);
-    }
+    _dbus_string_set_length (buffer, start);
+  else if (ret_size >= 0 && buf_size != ret_size) /* case of locally generated message */
+    _dbus_string_set_length (buffer, start + ret_size);
 
-  _dbus_message_loader_set_unique_sender_id (kdbus_transport->base.loader, msg->src_id);
+  if (ret_size >= 0)
+    _dbus_message_loader_set_unique_sender_id (kdbus_transport->base.loader, msg->src_id);
 
   if (kdbus_transport->activator != NULL)
     return ret_size;
