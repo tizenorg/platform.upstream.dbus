@@ -654,7 +654,6 @@ _dbus_marshal_skip_gvariant_basic (const DBusString *str,
 
 dbus_bool_t
 _dbus_header_load_gvariant (DBusHeader     *header,
-                            DBusTypeReader *reader,
                             DBusValidity   *validity)
 {
   size_t fields_offsets[DBUS_HEADER_FIELD_LAST];

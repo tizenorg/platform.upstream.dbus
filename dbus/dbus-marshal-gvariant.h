@@ -77,7 +77,6 @@ void          _dbus_marshal_skip_gvariant_basic      (const DBusString *str,
                                                       int              *pos);
 
 dbus_bool_t   _dbus_header_load_gvariant             (DBusHeader     *header,
-                                                      DBusTypeReader *reader,
                                                       DBusValidity   *validity);
 
 dbus_bool_t   _dbus_gvariant_raw_get_lengths         (const DBusString *str,

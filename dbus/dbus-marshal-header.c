@@ -1235,7 +1235,7 @@ _dbus_header_load (DBusHeader        *header,
     }
   if (reader.gvariant)
     {
-      if (!_dbus_header_load_gvariant (header, &reader, validity))
+      if (!_dbus_header_load_gvariant (header, validity))
         goto invalid;
     }
   else

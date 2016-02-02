@@ -184,14 +184,16 @@ get_const_signature (DBusMessage       *message,
                                                                 type_str_p,
                                                                 type_pos_p,
                                                                 &type_str_len);
-          if (got_signature)
+          if (got_signature && type_str_len > 1)
             {
               message->signature = dbus_new (DBusString, 1);
               got_signature = got_signature &&
-                             _dbus_string_init_preallocated (message->signature, type_str_len + 1);
+                             _dbus_string_init_preallocated (message->signature, type_str_len - 1);
 
+              /* we need to copy the signature, but to ensure backward compatibility
+               * it must be stripped off outer parentheses - they are always there */
               got_signature = got_signature &&
-                              _dbus_string_copy_len (*type_str_p, *type_pos_p, type_str_len,
+                              _dbus_string_copy_len (*type_str_p, *type_pos_p + 1, type_str_len - 2,
                                                      message->signature, 0);
               got_signature = got_signature &&
                               _dbus_string_append_byte (message->signature, 0);
@@ -5156,8 +5158,10 @@ _dbus_message_remarshal (DBusMessage *message, dbus_bool_t gvariant)
   if (!gvariant)
     _dbus_header_update_lengths (&ret->header,
                                  _dbus_string_get_length (&ret->body));
-  /* For GVariant: */
+    /* For GVariant: */
     /* Field: SIGNATURE to body; add body offset - this is done with dbus_message_lock() */
+  else
+    dbus_message_lock (ret);
 
   return ret;
 
