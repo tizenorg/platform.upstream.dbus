@@ -20,12 +20,11 @@ BuildRequires:  libzio
 BuildRequires:  pkg-config
 BuildRequires:  xmlto
 %if %{with_systemd}
-BuildRequires:  pkgconfig(libsystemd-daemon)
-BuildRequires:  pkgconfig(libsystemd-login)
+BuildRequires:  pkgconfig(libsystemd)
 %endif
 BuildRequires:  pkgconfig(cynara-client-async)
 BuildRequires:  pkgconfig(cynara-session)
-Version:        1.8.2
+Version:        1.10.6
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1:        rc.boot.dbus
@@ -47,6 +46,8 @@ BuildRequires:  pkgconfig(cynara-client)
 # COMMON1-END
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 Provides:       dbus-1
+# This is an artificial requirement needed to keep proper order of building of the packages
+BuildRequires:  libdbus = %{version}
 
 
 
@@ -165,6 +166,8 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %license  COPYING
 %config(noreplace) %{_sysconfdir}/dbus-1/session.conf
 %config(noreplace) %{_sysconfdir}/dbus-1/system.conf
+%config(noreplace) %{_datadir}/dbus-1/session.conf
+%config(noreplace) %{_datadir}/dbus-1/system.conf
 %{_sysconfdir}/ConsoleKit
 %{_bindir}/dbus-cleanup-sockets
 %{_bindir}/dbus-daemon
@@ -172,6 +175,8 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %{_bindir}/dbus-run-session
 %{_bindir}/dbus-send
 %{_bindir}/dbus-uuidgen
+%{_bindir}/dbus-test-tool
+%{_bindir}/dbus-update-activation-environment
 # See doc/system-activation.txt in source tarball for the rationale
 # behind these permissions
 %attr(4750,root,dbus) %verify(not mode) %{_libdir}/dbus/dbus-daemon-launch-helper
@@ -189,8 +194,8 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %dir %{_unitdir}/sockets.target.wants
 %{_unitdir}/sockets.target.wants/dbus.socket
 %dir %{_sysconfdir}/dbus-1
-%dir %{_sysconfdir}/dbus-1/session.d
-%dir %{_sysconfdir}/dbus-1/system.d
+%dir %{_datadir}/dbus-1/session.d
+%dir %{_datadir}/dbus-1/system.d
 %dir %{_datadir}/dbus-1
 %dir %{_datadir}/dbus-1/interfaces
 %dir %{_datadir}/dbus-1/services
@@ -213,9 +218,14 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %doc %{_datadir}/doc/dbus/dbus-test-plan.html
 %doc %{_datadir}/doc/dbus/dbus-tutorial.html
 %doc %{_datadir}/doc/dbus/dbus-uuidgen.1.html
+%doc %{_datadir}/doc/dbus/dbus-test-tool.1.html
+%doc %{_datadir}/doc/dbus/dbus-update-activation-environment.1.html
 %doc %{_datadir}/doc/dbus/dbus.devhelp
 %doc %{_datadir}/doc/dbus/diagram.*
 %doc %{_datadir}/doc/dbus/system-activation.txt
 %doc doc/*.txt doc/file-boilerplate.c doc/TODO
+%doc %{_datadir}/doc/dbus/examples/GetAllMatchRules.py
+%doc %{_datadir}/doc/dbus/examples/example-session-disable-stats.conf
+%doc %{_datadir}/doc/dbus/examples/example-system-enable-stats.conf
 
 %changelog

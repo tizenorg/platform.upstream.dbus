@@ -1,12 +1,14 @@
 %bcond_with kdbus
 %bcond_with dbuspolicy
 
+%define with_systemd 1
+
 Name:           libdbus
 Url:            http://dbus.freedesktop.org/
 Summary:        Library package for D-Bus
 License:        GPL-2.0+ or AFL-2.1, LGPL-2.1+
 Group:          System/Libraries
-Version:        1.8.2
+Version:        1.10.6
 Release:        0
 Source0:        http://dbus.freedesktop.org/releases/dbus/dbus-%{version}.tar.gz
 Source1001:     libdbus.manifest
@@ -15,6 +17,9 @@ BuildRequires:  expat-devel
 BuildRequires:  libtool
 BuildRequires:  pkg-config
 BuildRequires:  pkgconfig(libsmack)
+%if %{with_systemd}
+BuildRequires:  pkgconfig(libsystemd)
+%endif
 # Enable support for libdbuspolicy (only for kdbus transport)
 %if %{with kdbus}
 %if %{with dbuspolicy}
@@ -76,6 +81,9 @@ export V=1
     --with-init-scripts=suse						\
     --enable-inotify							\
     --with-console-auth-dir=/var/run/dbus/at_console/			\
+%if %{with_systemd}
+    --enable-systemd							\
+%endif
     --with-systemdsystemunitdir=%{_unitdir}				\
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
