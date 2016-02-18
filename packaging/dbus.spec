@@ -48,7 +48,16 @@ BuildRequires:  pkgconfig(cynara-client)
 Requires(pre):  /usr/sbin/groupadd /usr/sbin/useradd
 Provides:       dbus-1
 
+%package -n libdbus
+Summary:        Library package for D-Bus
+Group:          Base/IPC
 
+%package devel
+Summary:        Developer package for D-Bus
+Group:          Development/Libraries
+Requires:       libdbus = %{version}
+Requires:       dbus
+Requires:       glibc-devel
 
 %package devel-doc
 
@@ -68,6 +77,22 @@ bus daemon).
 %description devel-doc
 D-Bus is a message bus system, a simple way for applications to talk to
 one another. D-BUS supplies both a system daemon and a
+per-user-login-session daemon. Also, the message bus is built on top of
+a general one-to-one message passing framework, which can be used by
+any two apps to communicate directly (without going through the message
+bus daemon).
+
+%description -n libdbus
+D-Bus is a message bus system, a simple way for applications to talk to
+one another. D-Bus supplies both a system daemon and a
+per-user-login-session daemon. Also, the message bus is built on top of
+a general one-to-one message passing framework, which can be used by
+any two apps to communicate directly (without going through the message
+bus daemon).
+
+%description devel
+D-Bus is a message bus system, a simple way for applications to talk to
+one another. D-Bus supplies both a system daemon and a
 per-user-login-session daemon. Also, the message bus is built on top of
 a general one-to-one message passing framework, which can be used by
 any two apps to communicate directly (without going through the message
@@ -122,7 +147,10 @@ mkdir -p %{buildroot}/%{_libdir}/pkgconfig
 mkdir -p %{buildroot}/lib/dbus-1/system-services
 mkdir -p %{buildroot}/%{_datadir}/dbus-1/system-services
 mkdir -p %{buildroot}/%{_datadir}/dbus-1/interfaces
+rm -f %{buildroot}/%{_libdir}/*.la
 #
+rm -f %{buildroot}/%{_bindir}/dbus-launch
+rm -f %{buildroot}/%{_mandir}/man1/dbus-launch.1*
 chmod a-x AUTHORS COPYING HACKING NEWS README doc/*.txt doc/file-boilerplate.c doc/TODO
 #
 install -d %{buildroot}%{_sysconfdir}/ConsoleKit/run-session.d
@@ -133,15 +161,6 @@ touch %{buildroot}/%{_localstatedir}/lib/dbus/machine-id
 mkdir -p %{buildroot}%{_unitdir_user}
 install -m0644 %{SOURCE5} %{buildroot}%{_unitdir_user}/dbus.service
 install -m0644 %{SOURCE6} %{buildroot}%{_unitdir_user}/dbus.socket
-# File packaged by libdbus and dbus-devel
-rm -rf %{buildroot}/%{_includedir}/*
-rm -rf %{buildroot}/%{_libdir}/*.la
-rm -rf %{buildroot}/%{_libdir}/libdbus-1.so
-rm -rf %{buildroot}/%{_libdir}/libdbus-1.so.*
-rm -rf %{buildroot}/%{_libdir}/dbus-1.0/include
-rm -rf %{buildroot}/%{_libdir}/pkgconfig/dbus-1.pc
-rm -rf %{buildroot}/%{_mandir}/man1/dbus-launch.1*
-rm -rf %{buildroot}/%{_bindir}/dbus-launch
 
 # install script for login shells (/etc/profile.d)
 install -d %{buildroot}%{_sysconfdir}/profile.d
@@ -152,6 +171,10 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 /usr/sbin/groupadd -r -g %{dbus_user_uid} dbus 2>/dev/null || :
 /usr/sbin/useradd -c 'System message bus' -u %{dbus_user_uid} -g %{dbus_user_uid} \
         -s /sbin/nologin -r -d '/' dbus 2> /dev/null || :
+
+%post -p /sbin/ldconfig
+
+%postun -p /sbin/ldconfig
 
 %docs_package
 %manifest dbus.manifest
@@ -196,6 +219,20 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %dir %{_datadir}/dbus-1/services
 %dir %{_datadir}/dbus-1/system-services
 %{_sysconfdir}/profile.d/dbus.sh
+
+%files -n libdbus
+%manifest %{name}.manifest
+%defattr(-, root, root)
+%{_libdir}/libdbus-1.so.*
+
+%files devel
+%manifest %{name}.manifest
+%defattr(-,root,root)
+%{_includedir}/*
+%{_libdir}/libdbus-1.so
+%{_libdir}/dbus-1.0/include
+%{_libdir}/pkgconfig/dbus-1.pc
+%dir %{_libdir}/dbus-1.0
 
 %files devel-doc
 %manifest %{name}.manifest
