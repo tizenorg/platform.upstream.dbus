@@ -5229,24 +5229,33 @@ _dbus_generate_local_error_message (dbus_uint32_t serial,
   return message;
 }
 
-dbus_bool_t
-_dbus_message_assure_dbus1 (DBusMessage **message)
+static dbus_bool_t
+_dbus_message_assure_protocol (DBusMessage **message,
+                               unsigned char protocol_version,
+                               dbus_bool_t gvariant)
 {
-  if ((*message)->header.protocol_version != DBUS_MAJOR_PROTOCOL_VERSION)
+  if ((*message)->header.protocol_version != protocol_version)
     {
-      *message = _dbus_message_remarshal (*message, FALSE);
+      DBusMessage *new_message = _dbus_message_remarshal (*message, gvariant);
+      if (new_message != NULL)
+      {
+        dbus_message_unref (*message);
+        *message = new_message;
+      }
     }
   return *message != NULL;
 }
 
 dbus_bool_t
+_dbus_message_assure_dbus1 (DBusMessage **message)
+{
+  return _dbus_message_assure_protocol (message, DBUS_MAJOR_PROTOCOL_VERSION, FALSE);
+}
+
+dbus_bool_t
 _dbus_message_assure_gvariant (DBusMessage **message)
 {
-  if ((*message)->header.protocol_version != DBUS_PROTOCOL_VERSION_GVARIANT)
-    {
-      *message = _dbus_message_remarshal (*message, TRUE);
-    }
-  return *message != NULL;
+  return _dbus_message_assure_protocol (message, DBUS_PROTOCOL_VERSION_GVARIANT, TRUE);
 }
 
 /** @} */
