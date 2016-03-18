@@ -4,7 +4,7 @@
 Name:           libdbus
 Url:            http://dbus.freedesktop.org/
 Summary:        Library package for D-Bus
-License:        GPL-2.0+ or AFL-2.1
+License:        GPL-2.0+ or AFL-2.1, LGPL-2.1+
 Group:          System/Libraries
 Version:        1.8.2
 Release:        0
