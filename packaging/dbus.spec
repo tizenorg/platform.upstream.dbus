@@ -140,8 +140,8 @@ rm -rf %{buildroot}/%{_libdir}/libdbus-1.so
 rm -rf %{buildroot}/%{_libdir}/libdbus-1.so.*
 rm -rf %{buildroot}/%{_libdir}/dbus-1.0/include
 rm -rf %{buildroot}/%{_libdir}/pkgconfig/dbus-1.pc
-rm -rf %{buildroot}/%{_mandir}/man1/dbus-launch.1*
-rm -rf %{buildroot}/%{_bindir}/dbus-launch
+#rm -rf %{buildroot}/%{_mandir}/man1/dbus-launch.1*
+#rm -rf %{buildroot}/%{_bindir}/dbus-launch
 
 # install script for login shells (/etc/profile.d)
 install -d %{buildroot}%{_sysconfdir}/profile.d
@@ -168,6 +168,7 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %{_sysconfdir}/ConsoleKit
 %{_bindir}/dbus-cleanup-sockets
 %{_bindir}/dbus-daemon
+%{_bindir}/dbus-launch
 %{_bindir}/dbus-monitor
 %{_bindir}/dbus-run-session
 %{_bindir}/dbus-send
