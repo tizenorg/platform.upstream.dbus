@@ -1,6 +1,8 @@
 %bcond_with kdbus
 %bcond_with dbuspolicy
 
+%define with_systemd 1
+
 Name:           libdbus
 Url:            http://dbus.freedesktop.org/
 Summary:        Library package for D-Bus
@@ -15,6 +17,9 @@ BuildRequires:  expat-devel
 BuildRequires:  libtool
 BuildRequires:  pkg-config
 BuildRequires:  pkgconfig(libsmack)
+%if %{with_systemd}
+BuildRequires:  pkgconfig(libsystemd)
+%endif
 # Enable support for libdbuspolicy (only for kdbus transport)
 %if %{with kdbus}
 %if %{with dbuspolicy}
@@ -76,6 +81,9 @@ export V=1
     --with-init-scripts=suse						\
     --enable-inotify							\
     --with-console-auth-dir=/var/run/dbus/at_console/			\
+%if %{with_systemd}
+    --enable-systemd							\
+%endif
     --with-systemdsystemunitdir=%{_unitdir}				\
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
