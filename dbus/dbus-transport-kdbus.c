@@ -2772,6 +2772,8 @@ can_receive (DBusTransportKdbus     *transport,
         const char *seclabel = NULL;
         DBusString names;
 
+        result = FALSE;
+
         _dbus_string_init (&names);
 
         KDBUS_ITEM_FOREACH(item, msg, items)
@@ -2808,12 +2810,15 @@ can_receive (DBusTransportKdbus     *transport,
 
         if (NULL != message_data && message_len > 0)
           {
-            if (!load_dbus_header (transport, &header, message_data, message_len))
-              return FALSE;
-            got_header = TRUE;
+            if (load_dbus_header (transport, &header, message_data, message_len))
+              got_header = TRUE;
           }
 
-        if (got_header && got_creds && got_seclabel)
+        if (got_header && _dbus_header_get_message_type (&header) != DBUS_MESSAGE_TYPE_METHOD_CALL)
+          {
+            result = TRUE;
+          }
+        else if (got_header && got_creds && got_seclabel)
           {
             const char *destination = NULL;
             const char *path = NULL;
@@ -2873,10 +2878,6 @@ can_receive (DBusTransportKdbus     *transport,
                                         reply_cookie,
                                         requested_reply);
             result = (1 == ret);
-          }
-        else
-          {
-            result = FALSE;
           }
 
         _dbus_string_free (&names);
