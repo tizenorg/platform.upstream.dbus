@@ -3389,6 +3389,7 @@ transport_finalize (DBusTransport *transport)
   free_policies ( kdbus_transport );
 
   _kdbus_free (kdbus_transport->kdbus);
+  free (kdbus_transport->my_DBus_unique_name);
 
   dbus_free (transport);
 }

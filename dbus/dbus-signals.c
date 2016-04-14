@@ -1548,7 +1548,9 @@ free_matchmaker (Matchmaker *matchmaker)
           if (*items == NULL)
             _dbus_hash_iter_remove_entry (&iter);
         }
+      _dbus_hash_table_unref (p->rules_by_iface);
     }
+  dbus_free (matchmaker);
 }
 
 int

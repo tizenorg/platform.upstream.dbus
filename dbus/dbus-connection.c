@@ -594,12 +594,13 @@ _dbus_connection_queue_synthesized_message_link (DBusConnection *connection,
   msg = (DBusMessage *)link->data;
 
   rmsg = msg;
-  _dbus_transport_assure_protocol_version (connection->transport, &rmsg);
-
-  if (rmsg != msg) {
-    _dbus_list_free_link(link);
-    link = _dbus_list_alloc_link (rmsg);
-  }
+  if (_dbus_transport_assure_protocol_version (connection->transport, &rmsg))
+    {
+      /* If the message is converted, then we don't need the old format anymore */
+      _dbus_list_free_link(link);
+      link = _dbus_list_alloc_link (rmsg);
+      dbus_message_unref (msg);
+    }
 
   _dbus_list_append_link (&connection->incoming_messages, link);
 
@@ -2085,7 +2086,13 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
   dbus_message_lock (message);
 
   /* This converts message if neccessary */
-  _dbus_transport_assure_protocol_version (connection->transport, &message);
+  if (!_dbus_transport_assure_protocol_version (connection->transport, &message))
+    {
+      /* Only non-converted messages must be refed.
+       * Converted messages are local anyway.
+       */
+      dbus_message_ref (message);
+    }
 
   preallocated->queue_link->data = message;
   _dbus_list_prepend_link (&connection->outgoing_messages,
@@ -2098,8 +2105,6 @@ _dbus_connection_send_preallocated_unlocked_no_update (DBusConnection       *con
 
   dbus_free (preallocated);
   preallocated = NULL;
-  
-  dbus_message_ref (message);
   
   connection->n_outgoing += 1;
 

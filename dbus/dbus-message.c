@@ -742,12 +742,14 @@ dbus_message_cache_or_finalize (DBusMessage *message)
   if (NULL != message->signature)
   {
     _dbus_string_free (message->signature);
+    dbus_free (message->signature);
     message->signature = NULL;
   }
 
   if (NULL != message->unique_sender)
   {
     _dbus_string_free (message->unique_sender);
+    dbus_free (message->unique_sender);
     message->unique_sender = NULL;
   }
 
@@ -4486,6 +4488,7 @@ set_unique_sender (DBusMessage *message, uint64_t unique_sender_id)
   if (!_dbus_string_append_printf (message->unique_sender, ":1.%llu", (unsigned long long)unique_sender_id))
     {
       _dbus_string_free (message->unique_sender);
+      dbus_free (message->unique_sender);
       message->unique_sender = NULL;
       return FALSE;
     }
@@ -5317,8 +5320,9 @@ _dbus_message_assure_dbus1 (DBusMessage **message)
   if ((*message)->header.protocol_version != DBUS_MAJOR_PROTOCOL_VERSION)
     {
       *message = _dbus_message_remarshal (*message, FALSE);
+      return TRUE;
     }
-  return *message != NULL;
+  return FALSE;
 }
 
 dbus_bool_t
@@ -5327,8 +5331,9 @@ _dbus_message_assure_gvariant (DBusMessage **message)
   if ((*message)->header.protocol_version != DBUS_PROTOCOL_VERSION_GVARIANT)
     {
       *message = _dbus_message_remarshal (*message, TRUE);
+      return TRUE;
     }
-  return *message != NULL;
+  return FALSE;
 }
 
 /** @} */
