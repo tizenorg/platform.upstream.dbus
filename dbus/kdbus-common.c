@@ -50,7 +50,7 @@ struct kdbus_t
                                      */
   size_t pool_size;                                     /**< Size of mapped memory */
   __u64 id;                                       /**< unique id of the connection */
-  char bus_id[sizeof(((struct kdbus_cmd_hello *)(0))->id128)];  /**< id of the bus */
+  char bus_id[sizeof (((struct kdbus_cmd_hello *)(0))->id128)];  /**< id of the bus */
   struct kdbus_bloom_parameter bloom;                         /**< bloom parameters*/
 };
 
@@ -59,7 +59,7 @@ int _kdbus_fd (kdbus_t *kdbus) { return kdbus->fd; }
 void *_kdbus_mmap_ptr (kdbus_t *kdbus) { return kdbus->mmap_ptr; }
 dbus_uint64_t _kdbus_id (kdbus_t *kdbus) { return kdbus->id; }
 char *_kdbus_bus_id (kdbus_t *kdbus) { return kdbus->bus_id; }
-dbus_uint64_t _kdbus_bus_id_size (void) { return sizeof(((struct kdbus_t *)(0))->bus_id); }
+dbus_uint64_t _kdbus_bus_id_size (void) { return sizeof (((struct kdbus_t *)(0))->bus_id); }
 struct kdbus_bloom_parameter *_kdbus_bloom (kdbus_t *kdbus) { return &kdbus->bloom; }
 
 
@@ -103,13 +103,13 @@ free_by_offset (kdbus_t  *kdbus,
   return 0;
 }
 
-static void make_item_name(const char *name, struct kdbus_item *item)
+static void make_item_name (const char *name, struct kdbus_item *item)
 {
-  size_t len = strlen(name) + 1;
+  size_t len = strlen (name) + 1;
   item->size = KDBUS_ITEM_HEADER_SIZE + len;
   item->type = KDBUS_ITEM_NAME;
 
-  memcpy(item->str, name, len);
+  memcpy (item->str, name, len);
 }
 
 /**
@@ -386,7 +386,7 @@ _kdbus_send (kdbus_t           *kdbus,
 {
   struct kdbus_cmd_send cmd;
 
-  cmd.size = sizeof(cmd);
+  cmd.size = sizeof (cmd);
   cmd.msg_address = (__u64)msg;
   cmd.flags = flags;
 
@@ -676,32 +676,32 @@ _kdbus_request_name (kdbus_t     *kdbus,
                      const __u64  flags)
 {
   struct kdbus_cmd *cmd_name;
-  size_t len = strlen(name) + 1;
+  size_t len = strlen (name) + 1;
 
-  __u64 size = sizeof(*cmd_name) + KDBUS_ITEM_SIZE(len);
+  __u64 size = sizeof (*cmd_name) + KDBUS_ITEM_SIZE (len);
   __u64 flags_kdbus = 0;
 
-  cmd_name = alloca(size);
+  cmd_name = alloca (size);
   cmd_name->size = size;
 
-  if(flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
+  if (flags & DBUS_NAME_FLAG_ALLOW_REPLACEMENT)
     flags_kdbus |= KDBUS_NAME_ALLOW_REPLACEMENT;
-  if(!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
+  if (!(flags & DBUS_NAME_FLAG_DO_NOT_QUEUE))
     flags_kdbus |= KDBUS_NAME_QUEUE;
-  if(flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
+  if (flags & DBUS_NAME_FLAG_REPLACE_EXISTING)
     flags_kdbus |= KDBUS_NAME_REPLACE_EXISTING;
 
   cmd_name->flags = flags_kdbus;
-  make_item_name(name, &(cmd_name->items[0]));
+  make_item_name (name, &(cmd_name->items[0]));
 
-  _dbus_verbose("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
+  _dbus_verbose ("Request name - flags sent: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
 
-  if (ioctl(kdbus->fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name) < 0)
+  if (ioctl (kdbus->fd, KDBUS_CMD_NAME_ACQUIRE, cmd_name) < 0)
     {
       _dbus_verbose ("error acquiring name '%s': %m, %d\n", name, errno);
-      if(errno == EEXIST)
+      if (errno == EEXIST)
         return DBUS_REQUEST_NAME_REPLY_EXISTS;
-      if(errno == EALREADY)
+      if (errno == EALREADY)
         return DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER;
       return -errno;
     }
@@ -709,9 +709,9 @@ _kdbus_request_name (kdbus_t     *kdbus,
        && !(cmd_name->return_flags & KDBUS_NAME_ACQUIRED))
     return DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER;
 
-  _dbus_verbose("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
+  _dbus_verbose ("Request name - received flag: 0x%llx       !!!!!!!!!\n", cmd_name->flags);
 
-  if(cmd_name->return_flags & KDBUS_NAME_IN_QUEUE)
+  if (cmd_name->return_flags & KDBUS_NAME_IN_QUEUE)
     return DBUS_REQUEST_NAME_REPLY_IN_QUEUE;
 
   return DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER;
@@ -723,7 +723,6 @@ _kdbus_request_name (kdbus_t     *kdbus,
  * which can be then assigned to another connection or the connection
  * is being removed from the queue for that name
  *
- * @param fd - file descriptor of the connection
  * @param name the name to request
  * @param id unique id of the connection for which the name is being released
  * @returns a DBus result code on success, -errno on error
@@ -734,17 +733,17 @@ _kdbus_release_name (kdbus_t    *kdbus,
 {
   struct kdbus_cmd *cmd_name;
 
-  size_t len = strlen(name)+1;
-  __u64 size = sizeof(*cmd_name) + KDBUS_ITEM_SIZE(len);
+  size_t len = strlen (name)+1;
+  __u64 size = sizeof (*cmd_name) + KDBUS_ITEM_SIZE (len);
 
-  cmd_name = alloca(size);
+  cmd_name = alloca (size);
   cmd_name->size = size;
   cmd_name->flags = 0;
-  make_item_name(name, &(cmd_name->items[0]));
+  make_item_name (name, &(cmd_name->items[0]));
 
-  if (ioctl(kdbus->fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
+  if (ioctl (kdbus->fd, KDBUS_CMD_NAME_RELEASE, cmd_name))
     {
-      if((errno == ESRCH))
+      if ((errno == ESRCH))
         return DBUS_RELEASE_NAME_REPLY_NON_EXISTENT;
       else if (errno == EADDRINUSE)
         return DBUS_RELEASE_NAME_REPLY_NOT_OWNER;
@@ -752,7 +751,7 @@ _kdbus_release_name (kdbus_t    *kdbus,
       return -errno;
     }
 
-  _dbus_verbose("Name '%s' released\n", name);
+  _dbus_verbose ("Name '%s' released\n", name);
 
   return DBUS_RELEASE_NAME_REPLY_RELEASED;
 }
@@ -764,7 +763,7 @@ decode_connection_info (struct kdbus_info *connection_info,
 {
   struct kdbus_item *item;
 
-  memset (pInfo, 0, sizeof(*pInfo));
+  memset (pInfo, 0, sizeof (*pInfo));
 
   pInfo->uniqueId = connection_info->id;
   pInfo->flags = connection_info->flags;
@@ -832,10 +831,10 @@ process_connection_info_cmd (kdbus_t               *kdbus,
   ret = free_by_offset (kdbus, cmd->offset);
   if (ret != 0)
     {
-      _dbus_verbose("kdbus error freeing pool: %d (%m)\n", errno);
+      _dbus_verbose ("kdbus error freeing pool: %d (%m)\n", errno);
       if (get_sec_label)
         {
-          free(pInfo->sec_label);
+          free (pInfo->sec_label);
           pInfo->sec_label = NULL;
         }
     }
@@ -851,7 +850,7 @@ prepare_connection_info_cmd (dbus_uint64_t  id,
                              dbus_bool_t    get_sec_label)
 {
   struct kdbus_cmd_info *cmd;
-  dbus_uint64_t size = sizeof(*cmd);
+  dbus_uint64_t size = sizeof (*cmd);
   if (NULL != name)
     {
       size += KDBUS_ITEM_SIZE (strlen (name) + 1);
@@ -918,10 +917,10 @@ _kdbus_connection_info_by_name (kdbus_t         *kdbus,
   struct kdbus_cmd_info *cmd;
 
   /* if name starts with ":1." it is a unique name and should be send as number */
-  if((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))
+  if ((name[0] == ':') && (name[1] == '1') && (name[2] == '.'))
   {
     return _kdbus_connection_info_by_id (kdbus,
-                                         strtoull(&name[3], NULL, 10),
+                                         strtoull (&name[3], NULL, 10),
                                          get_sec_label,
                                          pInfo);
   }
@@ -946,7 +945,7 @@ remove_match_kdbus (kdbus_t *kdbus,
   struct kdbus_cmd_match cmd;
 
   cmd.cookie = cookie;
-  cmd.size = sizeof(struct kdbus_cmd_match);
+  cmd.size = sizeof (struct kdbus_cmd_match);
   cmd.flags = 0;
 
   if(ioctl (kdbus->fd, KDBUS_CMD_MATCH_REMOVE, &cmd))
@@ -990,7 +989,7 @@ _kdbus_remove_match (kdbus_t    *kdbus,
 
           if (match_rule_equal_lib (rule, rule_to_remove))
             {
-              cookie = match_rule_get_cookie(rule);
+              cookie = match_rule_get_cookie (rule);
               break;
             }
 
@@ -998,14 +997,14 @@ _kdbus_remove_match (kdbus_t    *kdbus,
         }
     }
 
-  if(cookie == 0)
+  if (cookie == 0)
     {
       dbus_set_error (error, DBUS_ERROR_MATCH_RULE_NOT_FOUND,
                       "The given match rule wasn't found and can't be removed");
       return FALSE;
     }
 
-  if(!remove_match_kdbus (kdbus, cookie))
+  if (!remove_match_kdbus (kdbus, cookie))
     {
       dbus_set_error (error, _dbus_error_from_errno (errno), "Could not remove match rule");
       return FALSE;

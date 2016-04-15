@@ -153,7 +153,7 @@ typedef struct DBusTransportKdbus DBusTransportKdbus;
 struct DBusTransportKdbus
 {
   DBusTransport base;                   /**< Parent instance */
-  kdbus_t   *kdbus;
+  kdbus_t   *kdbus;                     /**< kdbus data for low level operations */
   DBusWatch *read_watch;                /**< Watch for readability. */
   DBusWatch *write_watch;               /**< Watch for writability. */
 
@@ -1251,9 +1251,9 @@ request_DBus_name (DBusTransportKdbus *transport,
   dbus_uint32_t flags;
 
   if (!dbus_message_get_args (msg, error,
-                             DBUS_TYPE_STRING, &name,
-                             DBUS_TYPE_UINT32, &flags,
-                             DBUS_TYPE_INVALID))
+                              DBUS_TYPE_STRING, &name,
+                              DBUS_TYPE_UINT32, &flags,
+                              DBUS_TYPE_INVALID))
    return FALSE;
 
   _dbus_string_init_const (&service_name_real, name);
@@ -1517,8 +1517,6 @@ get_bloom (kdbus_t *kdbus, MatchRule *rule)
 /**
  * Adds a match rule to match broadcast messages going through the message bus.
  * Do no affect messages addressed directly.
- *
- * copied a lot from systemd bus_add_match_internal_kernel ()
  *
  * TODO add error reporting
  *
@@ -2335,7 +2333,7 @@ struct CaptureHandlers {
 static struct CaptureHandlers capture_handlers[] =
 {
 // "Hello" is handled separately
-//  HANDLER_ELEMENT(Hello),
+//  HANDLER_ELEMENT (Hello),
   HANDLER_ELEMENT (RequestName),
   HANDLER_ELEMENT (ReleaseName),
   HANDLER_ELEMENT (AddMatch),
@@ -2523,11 +2521,11 @@ kdbus_message_size (const struct kdbus_msg *msg)
   const struct kdbus_item *item;
   int ret_size = 0;
 
-  KDBUS_ITEM_FOREACH(item, msg, items)
+  KDBUS_ITEM_FOREACH (item, msg, items)
     {
       if (item->size < KDBUS_ITEM_HEADER_SIZE)
         {
-          _dbus_verbose ("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
+          _dbus_verbose ("  +%s (%llu bytes) invalid data record\n", enum_MSG (item->type), item->size);
           return -1;
         }
       switch (item->type)
@@ -2592,10 +2590,10 @@ generate_NameSignal (const char         *signal,
  */
 static int
 kdbus_handle_name_owner_changed (__u64               type,
-                                const char         *bus_name,
-                                __u64               old,
-                                __u64               new,
-                                DBusTransportKdbus *transport)
+                                 const char         *bus_name,
+                                 __u64               old,
+                                 __u64               new,
+                                 DBusTransportKdbus *transport)
 {
   DBusMessage *message = NULL;
   DBusMessageIter args;
@@ -2686,24 +2684,24 @@ error:
 }
 
 static void
-_handle_item_timestamp (const struct kdbus_item *item)
+handle_item_timestamp (const struct kdbus_item *item)
 {
 #if KDBUS_MSG_DECODE_DEBUG == 1
   _dbus_verbose ("  +%s (%llu bytes) realtime=%lluns monotonic=%lluns\n",
-                enum_MSG(item->type), item->size,
+                enum_MSG (item->type), item->size,
                 (unsigned long long)item->timestamp.realtime_ns,
                 (unsigned long long)item->timestamp.monotonic_ns);
 #endif
 }
 
 static void
-_handle_unexpected_item (const struct kdbus_item *item)
+handle_unexpected_item (const struct kdbus_item *item)
 {
   _dbus_assert_not_reached ("unexpected item from kdbus");
 }
 
 static void
-_handle_padding (const struct kdbus_msg *msg,
+handle_padding (const struct kdbus_msg *msg,
                  const struct kdbus_item *end_of_items)
 {
 #if KDBUS_MSG_DECODE_DEBUG == 1
@@ -2901,11 +2899,11 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
 
   *n_fds = 0;
 
-  KDBUS_ITEM_FOREACH(item, msg, items)
+  KDBUS_ITEM_FOREACH (item, msg, items)
     {
       if (item->size < KDBUS_ITEM_HEADER_SIZE)
         {
-          _dbus_verbose ("  +%s (%llu bytes) invalid data record\n", enum_MSG(item->type), item->size);
+          _dbus_verbose ("  +%s (%llu bytes) invalid data record\n", enum_MSG (item->type), item->size);
           ret_size = -1;
           break;
         }
@@ -2923,7 +2921,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
             }
 
             _dbus_verbose ("  +%s (%llu bytes) off=%llu size=%llu\n",
-                enum_MSG(item->type), item->size,
+                enum_MSG (item->type), item->size,
                 (unsigned long long)item->vec.offset,
                 (unsigned long long)item->vec.size);
             break;
@@ -2951,7 +2949,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
               close (item->memfd.fd);
 
               _dbus_verbose ("  +%s (%llu bytes) off=%llu size=%llu\n",
-                  enum_MSG(item->type), item->size,
+                  enum_MSG (item->type), item->size,
                   (unsigned long long)item->vec.offset,
                   (unsigned long long)item->vec.size);
             }
@@ -2971,7 +2969,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
           case KDBUS_ITEM_CREDS:
 #if KDBUS_MSG_DECODE_DEBUG == 1
             _dbus_verbose ("  +%s (%llu bytes) uid=%lld, gid=%lld, pid=%lld, tid=%lld, starttime=%lld\n",
-                          enum_MSG(item->type), item->size,
+                          enum_MSG (item->type), item->size,
                           item->creds.uid, item->creds.gid,
                           item->creds.pid, item->creds.tid,
                           item->creds.starttime);
@@ -2986,7 +2984,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
           case KDBUS_ITEM_DST_NAME:
 #if KDBUS_MSG_DECODE_DEBUG == 1
             _dbus_verbose ("  +%s (%llu bytes) '%s' (%zu)\n",
-                          enum_MSG(item->type), item->size, item->str, strlen (item->str));
+                          enum_MSG (item->type), item->size, item->str, strlen (item->str));
 #endif
             break;
 
@@ -2998,7 +2996,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
               const char *str = item->str;
               int count = 0;
 
-              _dbus_verbose ("  +%s (%llu bytes) ", enum_MSG(item->type), item->size);
+              _dbus_verbose ("  +%s (%llu bytes) ", enum_MSG (item->type), item->size);
               while (size)
               {
                 _dbus_verbose ("'%s' ", str);
@@ -3015,7 +3013,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
           case KDBUS_ITEM_AUDIT:
 #if KDBUS_MSG_DECODE_DEBUG == 1
             _dbus_verbose ("  +%s (%llu bytes) loginuid=%llu sessionid=%llu\n",
-                          enum_MSG(item->type), item->size,
+                          enum_MSG (item->type), item->size,
                           (unsigned long long)item->data64[0],
                           (unsigned long long)item->data64[1]);
 #endif
@@ -3029,7 +3027,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
               int i;
 
               _dbus_verbose ("  +%s (%llu bytes) len=%llu bytes)\n",
-                  enum_MSG(item->type), item->size,
+                  enum_MSG (item->type), item->size,
                   (unsigned long long)item->size - KDBUS_ITEM_HEADER_SIZE);
 
               cap = item->data32;
@@ -3056,7 +3054,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
             break;
 
           case KDBUS_ITEM_TIMESTAMP:
-            _handle_item_timestamp (item);
+            handle_item_timestamp (item);
             break;
 
           case KDBUS_ITEM_BLOOM_FILTER:
@@ -3064,12 +3062,12 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
             break;
 
           default:
-            _handle_unexpected_item (item);
+            handle_unexpected_item (item);
             break;
         }
     }
 
-  _handle_padding (msg, item);
+  handle_padding (msg, item);
 
   if (!can_receive (kdbus_transport, msg, buffer, ret_size))
     return 0;   /* ignore message if not allowed */
@@ -3124,7 +3122,7 @@ kdbus_decode_kernel_message (const struct kdbus_msg *msg,
               int local_ret;
 
               _dbus_verbose ("  +%s (%llu bytes) '%s', old id=%lld, new id=%lld, old flags=0x%llx, new flags=0x%llx\n",
-                             enum_MSG(item->type), (unsigned long long) item->size,
+                             enum_MSG (item->type), (unsigned long long) item->size,
                              item->name_change.name, item->name_change.old_id.id,
                              item->name_change.new_id.id, item->name_change.old_id.flags,
                              item->name_change.new_id.flags);
@@ -3163,7 +3161,7 @@ kdbus_decode_kernel_message (const struct kdbus_msg *msg,
           case KDBUS_ITEM_ID_ADD:
           case KDBUS_ITEM_ID_REMOVE:
             _dbus_verbose ("  +%s (%llu bytes) id=%llu flags=%llu\n",
-                          enum_MSG(item->type), (unsigned long long) item->size,
+                          enum_MSG (item->type), (unsigned long long) item->size,
                           (unsigned long long) item->id_change.id,
                           (unsigned long long) item->id_change.flags);
 
@@ -3181,16 +3179,16 @@ kdbus_decode_kernel_message (const struct kdbus_msg *msg,
             break;
 
           case KDBUS_ITEM_TIMESTAMP:
-            _handle_item_timestamp (item);
+            handle_item_timestamp (item);
             break;
 
           default:
-            _handle_unexpected_item (item);
+            handle_unexpected_item (item);
             break;
         }
     }
 
-  _handle_padding (msg, item);
+  handle_padding (msg, item);
 
 out:
   return ret_size;
@@ -3220,7 +3218,7 @@ kdbus_decode_msg (const struct kdbus_msg *msg,
 
 #if KDBUS_MSG_DECODE_DEBUG == 1
   _dbus_verbose ("MESSAGE: %s (%llu bytes) flags=0x%llx, %s → %s, cookie=%llu, timeout=%llu\n",
-                enum_PAYLOAD(msg->payload_type),
+                enum_PAYLOAD (msg->payload_type),
                 (unsigned long long) msg->size,
                 (unsigned long long) msg->flags,
                 msg_id (msg->src_id),
@@ -3292,7 +3290,7 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
 
   /* What is the maximum size of the locally generated message?
      I just assume 2048 bytes */
-  buf_size = MAX(buf_size, 2048);
+  buf_size = MAX (buf_size, 2048);
 
   if (!_dbus_string_lengthen (buffer, buf_size))
     {
@@ -3836,7 +3834,7 @@ kdbus_connection_set (DBusTransport *transport)
  * could block a write call forever (if there are no incoming
  * messages).
  */
-static  void
+static void
 kdbus_do_iteration (DBusTransport *transport,
                    unsigned int   flags,
                    int            timeout_milliseconds)

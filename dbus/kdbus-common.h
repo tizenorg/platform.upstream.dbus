@@ -100,7 +100,7 @@ int         _kdbus_add_match_id_change             (kdbus_t *kdbus,
                                                     dbus_uint64_t id,
                                                     dbus_uint64_t id_flags);
 
-int         _kdbus_add_match                      (kdbus_t *kdbus,
+int         _kdbus_add_match                      (kdbus_t                *kdbus,
                                                    struct kdbus_cmd_match *cmd);
 
 int         _kdbus_connection_info_by_name         (kdbus_t         *kdbus,
