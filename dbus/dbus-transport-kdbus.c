@@ -30,6 +30,7 @@
 #include "dbus-transport-protected.h"
 #include "dbus-connection-internal.h"
 #include "dbus-marshal-gvariant.h"
+#include "dbus-marshal-validate.h"
 #include "dbus-asv-util.h"
 #include "kdbus.h"
 #include "dbus-watch.h"
@@ -657,27 +658,25 @@ bus_message_setup_bloom (DBusMessage                  *msg,
 /**
  * Checks if a string is a unique name or well known name.
  *
- * @param name - the string to check
- * @param id - return pointer for unique id
- * @returns 1 if the name is unique id, returns 0 if well-known name and -1 on error
+ * @param name a valid D-Bus name
+ * @returns 0 for well-known names, otherwise unique id
  */
-static int
-parse_name (const char *name,
-            uint64_t   *id)
+static dbus_uint64_t
+parse_name (const char *name)
 {
+  dbus_uint64_t unique_id = 0;
   char *endptr;
   /* if name is unique name it must be converted to unique id */
   if (strncmp (name, ":1.", 3) == 0)
     {
       errno = 0;
-      *id = strtoull (&name[3], &endptr, 10);
-      if (*id == 0 || *endptr != '\0' || errno ==  ERANGE)
-        return -1;
-      else
-        return 1;
+      unique_id = strtoull (&name[3], &endptr, 10);
+
+      if (unique_id == 0 || *endptr != '\0' || errno ==  ERANGE)
+        return 0;
     }
-  else
-    return 0;  //well known name
+
+  return unique_id;
 }
 
 static int
@@ -882,23 +881,29 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
   dbus_uint64_t flags = 0;
   dbus_uint64_t timeout_ns_or_cookie_reply = 0;
 
+
   dbus_error_init (&error);
 
   // determine destination and destination id
   if (destination)
     {
-      dst_id = KDBUS_DST_ID_NAME;
-      switch (parse_name (destination, &dst_id))
+      DBusString str;
+
+      _dbus_string_init_const (&str, destination);
+      if (!_dbus_validate_bus_name (&str, 0, _dbus_string_get_length (&str)))
         {
-          case 0: /* well-known name - nothing to do */
-            break;
-          case 1: /* unique name */
-            destination = NULL;
-            break;
-          default: /* error */
-            _dbus_verbose ("error: unique name is not valid: %s\n", destination);
-            return -1;
+          _dbus_verbose ("error: unique name is not valid: %s\n", destination);
+          return -1;
         }
+
+      dst_id = parse_name (destination);
+      if (0 != dst_id)
+        destination = NULL;
+      else
+        dst_id = KDBUS_DST_ID_NAME;     /* OK, this is zero anyway
+                                         * but leave it in case
+                                         * the kdbus constant changes
+                                         */
     }
 
   _dbus_message_get_network_data (message, &header, &body);
@@ -1522,8 +1527,6 @@ add_match_kdbus (DBusTransportKdbus *transport,
 {
   struct kdbus_cmd_match    *cmd;
   struct kdbus_item         *item;
-  int         sender = -1;
-  int         sender_size = 0;
   __u64       bloom_size;
   __u64       rule_cookie;
   uint64_t    src_id = KDBUS_MATCH_ID_ANY;
@@ -1604,16 +1607,24 @@ add_match_kdbus (DBusTransportKdbus *transport,
   rule_sender = _match_rule_get_sender (rule);
   if (rule_sender != NULL)
     {
-      sender = parse_name (rule_sender, &src_id);
-      if (sender < 0)
+      DBusString str;
+      _dbus_string_init_const (&str, rule_sender);
+
+      if (!_dbus_validate_bus_name (&str, 0, _dbus_string_get_length (&str)))
         return FALSE;
 
-      if (sender > 0) /* unique_id */
-          items_size += KDBUS_ITEM_SIZE (sizeof (uint64_t));
-      else /* well-known name */
+      src_id = parse_name (rule_sender);
+      if (0 == src_id)
         {
-          sender_size = strlen (rule_sender) + 1;
-          items_size += KDBUS_ITEM_SIZE (sender_size);
+          /* well-known name */
+          src_id = KDBUS_MATCH_ID_ANY;
+          items_size += KDBUS_ITEM_SIZE (strlen (rule_sender) + 1);
+        }
+      else
+        {
+          /* unique id */
+          rule_sender = NULL;
+          items_size += KDBUS_ITEM_SIZE (sizeof (uint64_t));
         }
     }
 
@@ -1626,12 +1637,12 @@ add_match_kdbus (DBusTransportKdbus *transport,
   else
     {
       item = cmd->items;
-      if (0 == sender)  /* well-known name */
+      if (NULL != rule_sender)  /* well-known name */
         {
           item = _kdbus_item_add_string (item,
                                          KDBUS_ITEM_NAME,
                                          rule_sender,
-                                         sender_size);
+                                         strlen (rule_sender) + 1);
           _dbus_verbose ("Adding sender %s \n", rule_sender);
         }
       else if (KDBUS_MATCH_ID_ANY != src_id) /* unique id */
@@ -2416,9 +2427,59 @@ capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
   return ret;  //send message to daemon
 }
 
+#ifdef DBUS_ENABLE_VERBOSE_MODE
+#define ENUM_NAME_ITEM(x) case x : return #x
+
+static const char *
+enum_MSG (long long id)
+{
+  switch (id)
+    {
+      ENUM_NAME_ITEM (_KDBUS_ITEM_NULL);
+      ENUM_NAME_ITEM (KDBUS_ITEM_PAYLOAD_VEC);
+      ENUM_NAME_ITEM (KDBUS_ITEM_PAYLOAD_OFF);
+      ENUM_NAME_ITEM (KDBUS_ITEM_PAYLOAD_MEMFD);
+      ENUM_NAME_ITEM (KDBUS_ITEM_FDS);
+      ENUM_NAME_ITEM (KDBUS_ITEM_BLOOM_PARAMETER);
+      ENUM_NAME_ITEM (KDBUS_ITEM_BLOOM_FILTER);
+      ENUM_NAME_ITEM (KDBUS_ITEM_DST_NAME);
+      ENUM_NAME_ITEM (KDBUS_ITEM_CREDS);
+      ENUM_NAME_ITEM (KDBUS_ITEM_PID_COMM);
+      ENUM_NAME_ITEM (KDBUS_ITEM_TID_COMM);
+      ENUM_NAME_ITEM (KDBUS_ITEM_EXE);
+      ENUM_NAME_ITEM (KDBUS_ITEM_CMDLINE);
+      ENUM_NAME_ITEM (KDBUS_ITEM_CGROUP);
+      ENUM_NAME_ITEM (KDBUS_ITEM_CAPS);
+      ENUM_NAME_ITEM (KDBUS_ITEM_SECLABEL);
+      ENUM_NAME_ITEM (KDBUS_ITEM_AUDIT);
+      ENUM_NAME_ITEM (KDBUS_ITEM_CONN_DESCRIPTION);
+      ENUM_NAME_ITEM (KDBUS_ITEM_NAME);
+      ENUM_NAME_ITEM (KDBUS_ITEM_TIMESTAMP);
+      ENUM_NAME_ITEM (KDBUS_ITEM_NAME_ADD);
+      ENUM_NAME_ITEM (KDBUS_ITEM_NAME_REMOVE);
+      ENUM_NAME_ITEM (KDBUS_ITEM_NAME_CHANGE);
+      ENUM_NAME_ITEM (KDBUS_ITEM_ID_ADD);
+      ENUM_NAME_ITEM (KDBUS_ITEM_ID_REMOVE);
+      ENUM_NAME_ITEM (KDBUS_ITEM_REPLY_TIMEOUT);
+      ENUM_NAME_ITEM (KDBUS_ITEM_REPLY_DEAD);
+    }
+  return "UNKNOWN";
+}
+
 #if KDBUS_MSG_DECODE_DEBUG == 1
-static const char
-*msg_id (uint64_t id)
+static const char *
+enum_PAYLOAD (long long id)
+{
+  switch (id)
+    {
+      ENUM_NAME_ITEM (KDBUS_PAYLOAD_KERNEL);
+      ENUM_NAME_ITEM (KDBUS_PAYLOAD_DBUS);
+    }
+  return "UNKNOWN";
+}
+
+static const char *
+msg_id (uint64_t id)
 {
   char buf[64];
   const char* const_ptr;
@@ -2434,60 +2495,7 @@ static const char
   return const_ptr;
 }
 #endif
-struct kdbus_enum_table {
-  long long id;
-  const char *name;
-};
-#define _STRINGIFY(x) #x
-#define STRINGIFY(x) _STRINGIFY(x)
-#define ELEMENTSOF(x) (sizeof (x)/sizeof ((x)[0]))
-#define TABLE(what) static struct kdbus_enum_table kdbus_table_##what[]
-#define ENUM(_id) { .id=_id, .name=STRINGIFY(_id) }
-#define LOOKUP(what)                              \
-  const char *enum_##what (long long id) {         \
-  size_t i;                                       \
-  for (i = 0; i < ELEMENTSOF(kdbus_table_##what); i++)  \
-    if (id == kdbus_table_##what[i].id)           \
-      return kdbus_table_##what[i].name;          \
-    return "UNKNOWN";                             \
-  }
-const char *enum_MSG(long long id);
-TABLE(MSG) = {
-  ENUM(_KDBUS_ITEM_NULL),
-  ENUM(KDBUS_ITEM_PAYLOAD_VEC),
-  ENUM(KDBUS_ITEM_PAYLOAD_OFF),
-  ENUM(KDBUS_ITEM_PAYLOAD_MEMFD),
-  ENUM(KDBUS_ITEM_FDS),
-  ENUM(KDBUS_ITEM_BLOOM_PARAMETER),
-  ENUM(KDBUS_ITEM_BLOOM_FILTER),
-  ENUM(KDBUS_ITEM_DST_NAME),
-  ENUM(KDBUS_ITEM_CREDS),
-  ENUM(KDBUS_ITEM_PID_COMM),
-  ENUM(KDBUS_ITEM_TID_COMM),
-  ENUM(KDBUS_ITEM_EXE),
-  ENUM(KDBUS_ITEM_CMDLINE),
-  ENUM(KDBUS_ITEM_CGROUP),
-  ENUM(KDBUS_ITEM_CAPS),
-  ENUM(KDBUS_ITEM_SECLABEL),
-  ENUM(KDBUS_ITEM_AUDIT),
-  ENUM(KDBUS_ITEM_CONN_DESCRIPTION),
-  ENUM(KDBUS_ITEM_NAME),
-  ENUM(KDBUS_ITEM_TIMESTAMP),
-  ENUM(KDBUS_ITEM_NAME_ADD),
-  ENUM(KDBUS_ITEM_NAME_REMOVE),
-  ENUM(KDBUS_ITEM_NAME_CHANGE),
-  ENUM(KDBUS_ITEM_ID_ADD),
-  ENUM(KDBUS_ITEM_ID_REMOVE),
-  ENUM(KDBUS_ITEM_REPLY_TIMEOUT),
-  ENUM(KDBUS_ITEM_REPLY_DEAD),
-};
-LOOKUP(MSG);
-const char *enum_PAYLOAD(long long id);
-TABLE(PAYLOAD) = {
-  ENUM(KDBUS_PAYLOAD_KERNEL),
-  ENUM(KDBUS_PAYLOAD_DBUS),
-};
-LOOKUP(PAYLOAD);
+#endif
 
 static dbus_uint32_t
 get_next_client_serial (DBusTransportKdbus *transport)
