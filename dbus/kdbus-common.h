@@ -63,6 +63,11 @@ void        _kdbus_free                            (kdbus_t *kdbus);
 int         _kdbus_open                            (kdbus_t *kdbus, const char *path);
 int         _kdbus_close                           (kdbus_t *kdbus);
 
+int         _kdbus_get_fd                          (kdbus_t *kdbus);
+__u64       _kdbus_get_id                          (kdbus_t *kdbus);
+char       *_kdbus_get_bus_id                      (kdbus_t *kdbus);
+__u64       _kdbus_get_bus_id_size                 (void);
+
 int         _kdbus_hello                           (kdbus_t       *kdbus,
                                                     __u64          flags,
                                                     __u64          attach_flags_send,
@@ -193,11 +198,6 @@ dbus_bool_t _kdbus_remove_match                    (kdbus_t *kdbus,
                                                     DBusError *error);
 
 /** temporary accessors - to delete soon */
-int _kdbus_fd (kdbus_t *kdbus);
-void *_kdbus_mmap_ptr (kdbus_t *kdbus);
-dbus_uint64_t _kdbus_id (kdbus_t *kdbus);
-char *_kdbus_bus_id (kdbus_t *kdbus);
-dbus_uint64_t _kdbus_bus_id_size (void);
 struct kdbus_bloom_parameter *_kdbus_bloom (kdbus_t *kdbus);
 
 #endif /* KDBUS_COMMON_H_ */

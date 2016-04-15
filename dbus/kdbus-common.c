@@ -55,11 +55,6 @@ struct kdbus_t
 };
 
 /** temporary accessors - to delete soon */
-int _kdbus_fd (kdbus_t *kdbus) { return kdbus->fd; }
-void *_kdbus_mmap_ptr (kdbus_t *kdbus) { return kdbus->mmap_ptr; }
-dbus_uint64_t _kdbus_id (kdbus_t *kdbus) { return kdbus->id; }
-char *_kdbus_bus_id (kdbus_t *kdbus) { return kdbus->bus_id; }
-dbus_uint64_t _kdbus_bus_id_size (void) { return sizeof (((struct kdbus_t *)(0))->bus_id); }
 struct kdbus_bloom_parameter *_kdbus_bloom (kdbus_t *kdbus) { return &kdbus->bloom; }
 
 
@@ -290,6 +285,30 @@ _kdbus_close (kdbus_t *kdbus)
   if (0 != errunmap)
     return -errunmap;
   return 0;
+}
+
+int
+_kdbus_get_fd (kdbus_t *kdbus)
+{
+  return kdbus->fd;
+}
+
+__u64
+_kdbus_get_id (kdbus_t *kdbus)
+{
+  return kdbus->id;
+}
+
+char *
+_kdbus_get_bus_id (kdbus_t *kdbus)
+{
+  return kdbus->bus_id;
+}
+
+__u64
+_kdbus_get_bus_id_size (void)
+{
+  return sizeof (((struct kdbus_t *)(0))->bus_id);
 }
 
 int
@@ -677,7 +696,6 @@ _kdbus_request_name (kdbus_t     *kdbus,
 {
   struct kdbus_cmd *cmd_name;
   size_t len = strlen (name) + 1;
-
   __u64 size = sizeof (*cmd_name) + KDBUS_ITEM_SIZE (len);
   __u64 flags_kdbus = 0;
 
@@ -732,7 +750,6 @@ _kdbus_release_name (kdbus_t    *kdbus,
                      const char *name)
 {
   struct kdbus_cmd *cmd_name;
-
   size_t len = strlen (name)+1;
   __u64 size = sizeof (*cmd_name) + KDBUS_ITEM_SIZE (len);
 

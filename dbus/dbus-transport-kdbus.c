@@ -136,12 +136,6 @@ int debug = -1;
  */
 #define KDBUS_MSG_DECODE_DEBUG 0
 
-#define MSG_ITEM_BUILD_VEC(data, datasize)                                \
-        item->type = KDBUS_ITEM_PAYLOAD_VEC;                              \
-        item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_vec);   \
-        item->vec.address = (unsigned long) data;                         \
-        item->vec.size = datasize;
-
 /**
  * Opaque object representing a transport.
  */
@@ -380,8 +374,7 @@ oom_free:
  * @returns 0 on success, otherwise -1
  */
 static int
-kdbus_acquire_memfd (DBusTransportKdbus *kdbus_transport,
-                     uint64_t            fsize)
+kdbus_acquire_memfd ( void )
 {
   int fd;
 
@@ -915,7 +908,7 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
 
   /* check whether we can and should use memfd */
   if ((dst_id != KDBUS_DST_ID_BROADCAST) && (ret_size > MEMFD_SIZE_THRESHOLD))
-      memfd = kdbus_acquire_memfd (transport, ret_size);
+      memfd = kdbus_acquire_memfd ();
 
   _dbus_message_get_unix_fds (message, &unix_fds, &fds_count);
 
@@ -1213,14 +1206,14 @@ bus_register_kdbus (DBusTransportKdbus *transport,
       return FALSE;
     }
 
-  transport->my_DBus_unique_name = create_unique_name_from_unique_id (_kdbus_id (transport->kdbus));
+  transport->my_DBus_unique_name = create_unique_name_from_unique_id (_kdbus_get_id (transport->kdbus));
   if (NULL == transport->my_DBus_unique_name)
     {
       dbus_set_error (error, DBUS_ERROR_NO_MEMORY, "Hello post failed: %d", -ret);
       return FALSE;
     }
 
-  _dbus_verbose ("-- Our peer ID is: %llu\n", (unsigned long long)_kdbus_id (transport->kdbus));
+  _dbus_verbose ("-- Our peer ID is: %llu\n", (unsigned long long)_kdbus_get_id (transport->kdbus));
 
   return TRUE;
 }
@@ -1302,7 +1295,7 @@ request_DBus_name (DBusTransportKdbus *transport,
   if (*result == -EPERM)
    {
      dbus_set_error (error, DBUS_ERROR_ACCESS_DENIED,
-         "Kdbus don't allow %s to own the service \"%s\"",
+         "Kdbus doesn't allow %s to own the service \"%s\"",
          transport->my_DBus_unique_name, _dbus_string_get_const_data (service_name));
      return FALSE;
    }
@@ -1988,10 +1981,10 @@ capture_org_freedesktop_DBus_GetId (DBusTransportKdbus *transport,
                                     DBusMessage        *message,
                                     DBusError          *error)
 {
-  dbus_uint64_t bus_id_size = _kdbus_bus_id_size ();
+  dbus_uint64_t bus_id_size = _kdbus_get_bus_id_size ();
   char bus_id[bus_id_size*2+1];
   char *bus_id_ptr = bus_id;
-  char *bus_id_original = _kdbus_bus_id (transport->kdbus);
+  char *bus_id_original = _kdbus_get_bus_id (transport->kdbus);
   int i = 0;
   for (; i < bus_id_size; i++)
     sprintf (bus_id + 2*i, "%02x", bus_id_original[i]);
@@ -3127,9 +3120,9 @@ kdbus_decode_kernel_message (const struct kdbus_msg *msg,
                              item->name_change.new_id.id, item->name_change.old_id.flags,
                              item->name_change.new_id.flags);
 
-              if (item->name_change.new_id.id == _kdbus_id (kdbus_transport->kdbus))
+              if (item->name_change.new_id.id == _kdbus_get_id (kdbus_transport->kdbus))
                 ret_size = generate_NameSignal ("NameAcquired", item->name_change.name, kdbus_transport);
-              else if (item->name_change.old_id.id == _kdbus_id (kdbus_transport->kdbus))
+              else if (item->name_change.old_id.id == _kdbus_get_id (kdbus_transport->kdbus))
                 ret_size = generate_NameSignal ("NameLost", item->name_change.name, kdbus_transport);
 
               if (ret_size == -1)
@@ -3417,7 +3410,7 @@ check_write_watch (DBusTransportKdbus *kdbus_transport)
 
   _dbus_verbose ("check_write_watch (): needed = %d on connection %p watch %p fd = %d outgoing messages exist %d\n",
                  needed, transport->connection, kdbus_transport->write_watch,
-                 _kdbus_fd (kdbus_transport->kdbus),
+                 _kdbus_get_fd (kdbus_transport->kdbus),
                  _dbus_connection_has_messages_to_send_unlocked (transport->connection));
 
   _dbus_connection_toggle_watch_unlocked (transport->connection,
@@ -3437,7 +3430,7 @@ check_read_watch (DBusTransportKdbus *kdbus_transport)
   dbus_bool_t need_read_watch;
   DBusTransport *transport = &kdbus_transport->base;
 
-  _dbus_verbose ("fd = %d\n", _kdbus_fd (kdbus_transport->kdbus));
+  _dbus_verbose ("fd = %d\n",_kdbus_get_fd (kdbus_transport->kdbus));
 
   if (transport->connection == NULL)
     return;
@@ -3495,7 +3488,8 @@ do_writing (DBusTransport *transport)
     }
 
   _dbus_verbose ("do_writing (), have_messages = %d, fd = %d\n",
-  _dbus_connection_has_messages_to_send_unlocked (transport->connection), _kdbus_fd (kdbus_transport->kdbus));
+                 _dbus_connection_has_messages_to_send_unlocked (transport->connection),
+                 _kdbus_get_fd (kdbus_transport->kdbus));
 
   while (!transport->disconnected && _dbus_connection_has_messages_to_send_unlocked (transport->connection))
     {
@@ -3604,7 +3598,7 @@ do_reading (DBusTransport *transport)
   int *fds, n_fds;
   int total = 0;
 
-  _dbus_verbose ("fd = %d\n",_kdbus_fd (kdbus_transport->kdbus));
+  _dbus_verbose ("fd = %d\n", _kdbus_get_fd (kdbus_transport->kdbus));
 
  again:
 
@@ -3850,9 +3844,9 @@ kdbus_do_iteration (DBusTransport *transport,
                  timeout_milliseconds,
                  kdbus_transport->read_watch,
                  kdbus_transport->write_watch,
-                 _kdbus_fd (kdbus_transport->kdbus));
+                 _kdbus_get_fd (kdbus_transport->kdbus));
 
-   poll_fd.fd = _kdbus_fd (kdbus_transport->kdbus);
+   poll_fd.fd = _kdbus_get_fd (kdbus_transport->kdbus);
    poll_fd.events = 0;
 
    /*
@@ -3993,7 +3987,7 @@ kdbus_get_kdbus_fd (DBusTransport *transport,
 {
   DBusTransportKdbus *kdbus_transport = (DBusTransportKdbus*) transport;
 
-  fd_p->fd = _kdbus_fd (kdbus_transport->kdbus);
+  fd_p->fd = _kdbus_get_fd (kdbus_transport->kdbus);
 
   return TRUE;
 }
@@ -4031,7 +4025,7 @@ _dbus_transport_kdbus_get_connection_info_ulong_field (DBusTransportKdbus       
   int ret;
 
   ret = _kdbus_connection_info_by_id (transport->kdbus,
-                                      _kdbus_id (transport->kdbus),
+                                      _kdbus_get_id (transport->kdbus),
                                       FALSE,
                                       &conn_info);
   if (ret != 0)
@@ -4082,14 +4076,14 @@ new_kdbus_transport (kdbus_t          *kdbus,
 
   kdbus_transport->kdbus = kdbus;
 
-  kdbus_transport->write_watch = _dbus_watch_new (_kdbus_fd (kdbus),
+  kdbus_transport->write_watch = _dbus_watch_new (_kdbus_get_fd (kdbus),
                                                  DBUS_WATCH_WRITABLE,
                                                  FALSE,
                                                  NULL, NULL, NULL);
   if (kdbus_transport->write_watch == NULL)
     goto failed_2;
 
-  kdbus_transport->read_watch = _dbus_watch_new (_kdbus_fd (kdbus),
+  kdbus_transport->read_watch = _dbus_watch_new (_kdbus_get_fd (kdbus),
                                                 DBUS_WATCH_READABLE,
                                                 FALSE,
                                                 NULL, NULL, NULL);
