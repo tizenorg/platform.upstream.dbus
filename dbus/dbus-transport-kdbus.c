@@ -389,176 +389,32 @@ kdbus_acquire_memfd ( void )
   return fd;
 }
 
-/*
- * Macros for SipHash algorithm
- */
-#define ROTL(x,b) (uint64_t)( ((x) << (b)) | ( (x) >> (64 - (b))) )
-
-#define U32TO8_LE(p, v)         \
-    (p)[0] = (unsigned char)((v)      ); (p)[1] = (unsigned char)((v) >>  8); \
-    (p)[2] = (unsigned char)((v) >> 16); (p)[3] = (unsigned char)((v) >> 24);
-
-#define U64TO8_LE(p, v)         \
-  U32TO8_LE((p),     (uint32_t)((v)      ));   \
-  U32TO8_LE((p) + 4, (uint32_t)((v) >> 32));
-
-#define U8TO64_LE(p) \
-  (((uint64_t)((p)[0])      ) | \
-   ((uint64_t)((p)[1]) <<  8) | \
-   ((uint64_t)((p)[2]) << 16) | \
-   ((uint64_t)((p)[3]) << 24) | \
-   ((uint64_t)((p)[4]) << 32) | \
-   ((uint64_t)((p)[5]) << 40) | \
-   ((uint64_t)((p)[6]) << 48) | \
-   ((uint64_t)((p)[7]) << 56))
-
-#define SIPROUND            \
-  do {              \
-    v0 += v1; v1=ROTL(v1,13); v1 ^= v0; v0=ROTL(v0,32); \
-    v2 += v3; v3=ROTL(v3,16); v3 ^= v2;     \
-    v0 += v3; v3=ROTL(v3,21); v3 ^= v0;     \
-    v2 += v1; v1=ROTL(v1,17); v1 ^= v2; v2=ROTL(v2,32); \
-  } while (0)
-
-
-/*
- * Hash keys for bloom filters
- */
-const unsigned char hash_keys[8][16] =
-{
-  {0xb9,0x66,0x0b,0xf0,0x46,0x70,0x47,0xc1,0x88,0x75,0xc4,0x9c,0x54,0xb9,0xbd,0x15},
-  {0xaa,0xa1,0x54,0xa2,0xe0,0x71,0x4b,0x39,0xbf,0xe1,0xdd,0x2e,0x9f,0xc5,0x4a,0x3b},
-  {0x63,0xfd,0xae,0xbe,0xcd,0x82,0x48,0x12,0xa1,0x6e,0x41,0x26,0xcb,0xfa,0xa0,0xc8},
-  {0x23,0xbe,0x45,0x29,0x32,0xd2,0x46,0x2d,0x82,0x03,0x52,0x28,0xfe,0x37,0x17,0xf5},
-  {0x56,0x3b,0xbf,0xee,0x5a,0x4f,0x43,0x39,0xaf,0xaa,0x94,0x08,0xdf,0xf0,0xfc,0x10},
-  {0x31,0x80,0xc8,0x73,0xc7,0xea,0x46,0xd3,0xaa,0x25,0x75,0x0f,0x9e,0x4c,0x09,0x29},
-  {0x7d,0xf7,0x18,0x4b,0x7b,0xa4,0x44,0xd5,0x85,0x3c,0x06,0xe0,0x65,0x53,0x96,0x6d},
-  {0xf2,0x77,0xe9,0x6f,0x93,0xb5,0x4e,0x71,0x9a,0x0c,0x34,0x88,0x39,0x25,0xbf,0x35}
-};
-
-/*
- * SipHash algorithm
- */
 static void
-_g_siphash24 (unsigned char       out[8],
-              const void         *_in,
-              size_t              inlen,
-              const unsigned char k[16])
-{
-  uint64_t v0 = 0x736f6d6570736575ULL;
-  uint64_t v1 = 0x646f72616e646f6dULL;
-  uint64_t v2 = 0x6c7967656e657261ULL;
-  uint64_t v3 = 0x7465646279746573ULL;
-  uint64_t b;
-  uint64_t k0 = U8TO64_LE (k);
-  uint64_t k1 = U8TO64_LE (k + 8);
-  uint64_t m;
-  const unsigned char *in = _in;
-  const unsigned char *end = in + inlen - (inlen % sizeof (uint64_t));
-  const int left = inlen & 7;
-  b = ((uint64_t) inlen) << 56;
-  v3 ^= k1;
-  v2 ^= k0;
-  v1 ^= k1;
-  v0 ^= k0;
-
-  for (; in != end; in += 8)
-    {
-      m = U8TO64_LE (in);
-      v3 ^= m;
-      SIPROUND;
-      SIPROUND;
-      v0 ^= m;
-    }
-
-  switch (left)
-    {
-      case 7: b |= ((uint64_t) in[6]) << 48;
-      case 6: b |= ((uint64_t) in[5]) << 40;
-      case 5: b |= ((uint64_t) in[4]) << 32;
-      case 4: b |= ((uint64_t) in[3]) << 24;
-      case 3: b |= ((uint64_t) in[2]) << 16;
-      case 2: b |= ((uint64_t) in[1]) <<  8;
-      case 1: b |= ((uint64_t) in[0]); break;
-      case 0: break;
-    }
-
-  v3 ^= b;
-  SIPROUND;
-  SIPROUND;
-  v0 ^= b;
-
-  v2 ^= 0xff;
-  SIPROUND;
-  SIPROUND;
-  SIPROUND;
-  SIPROUND;
-  b = v0 ^ v1 ^ v2  ^ v3;
-  U64TO8_LE (out, b);
-}
-
-static void
-bloom_add_data (uint64_t                      bloom_data [],
-                struct kdbus_bloom_parameter *bloom_params,
-                const void                   *data,
-                size_t                        n)
-{
-  unsigned char hash[8];
-  uint64_t bit_num;
-  unsigned int bytes_num = 0;
-  unsigned int cnt_1, cnt_2;
-  unsigned int hash_index = 0;
-
-  unsigned int c = 0;
-  uint64_t p = 0;
-
-  bit_num = bloom_params->size * 8;
-
-  if (bit_num > 1)
-    bytes_num = ((__builtin_clzll (bit_num) ^ 63U) + 7) / 8;
-
-  for (cnt_1 = 0; cnt_1 < bloom_params->n_hash; cnt_1++)
-    {
-      for (cnt_2 = 0, hash_index = 0; cnt_2 < bytes_num; cnt_2++)
-        {
-          if (c <= 0)
-            {
-              _g_siphash24(hash, data, n, hash_keys[hash_index++]);
-              c += 8;
-            }
-
-          p = (p << 8ULL) | (uint64_t) hash[8 - c];
-          c--;
-        }
-
-      p &= bit_num - 1;
-      bloom_data[p >> 6] |= 1ULL << (p & 63);
-    }
-}
-
-static void
-bloom_add_pair (uint64_t                      bloom_data [],
-                struct kdbus_bloom_parameter *bloom_params,
-                const char                   *parameter,
-                const char                   *value)
+bloom_add_pair (kdbus_bloom_data_t *bloom_data,
+                kdbus_t            *kdbus,
+                const char         *parameter,
+                const char         *value)
 {
   char buf[1024];
   size_t size;
+
+  if (NULL == value)
+    return;
 
   size = strlen (parameter) + strlen (value) + 1;
   if (size > 1024)
     return;
 
   strcpy (stpcpy (stpcpy (buf, parameter), ":"), value);
-  bloom_add_data (bloom_data, bloom_params, buf, size);
+  _kdbus_bloom_add_data (kdbus, bloom_data, buf, size);
 }
 
 static void
-bloom_add_prefixes (uint64_t                      bloom_data [],
-                    struct kdbus_bloom_parameter *bloom_params,
-                    const char                   *parameter,
-                    const char                   *value,
-                    char                          separator)
+bloom_add_prefixes (kdbus_bloom_data_t *bloom_data,
+                    kdbus_t            *kdbus,
+                    const char         *parameter,
+                    const char         *value,
+                    char                separator)
 {
   char buf[1024];
   size_t size;
@@ -577,42 +433,38 @@ bloom_add_prefixes (uint64_t                      bloom_data [],
         break;
 
       *last_sep = 0;
-      bloom_add_data (bloom_data, bloom_params, buf, last_sep-buf);
+      _kdbus_bloom_add_data (kdbus, bloom_data, buf, last_sep-buf);
     }
 }
 
 static int
-bus_message_setup_bloom (DBusMessage                  *msg,
-                        struct kdbus_bloom_filter    *bloom,
-                        struct kdbus_bloom_parameter *bloom_params)
+setup_bloom_filter_for_message (DBusMessage               *msg,
+                                kdbus_t                   *kdbus,
+                                struct kdbus_bloom_filter *bloom_filter)
 {
-  void *data;
+  kdbus_bloom_data_t *bloom_data;
   unsigned i;
   const char *str;
   DBusMessageIter args;
 
   _dbus_assert (msg);
-  _dbus_assert (bloom);
+  _dbus_assert (bloom_filter);
 
-  data = bloom->data;
-  memset (data, 0, bloom_params->size);
-  bloom->generation = 0;
+  bloom_data = _kdbus_bloom_filter_get_data (bloom_filter);
 
-  bloom_add_pair (data, bloom_params, "message-type",
-      dbus_message_type_to_string (dbus_message_get_type (msg))); //Fixme in systemd type invalid returns NULL but in dbus it returns "invalid"
+  bloom_add_pair (bloom_data,
+                  kdbus,
+                  "message-type",
+                  dbus_message_type_to_string (dbus_message_get_type (msg)));
 
-  str = dbus_message_get_interface (msg);
-  if (str)
-    bloom_add_pair (data, bloom_params, "interface", str);
-  str = dbus_message_get_member (msg);
-  if (str)
-    bloom_add_pair (data, bloom_params, "member", str);
+  bloom_add_pair (bloom_data, kdbus, "interface", dbus_message_get_interface (msg));
+  bloom_add_pair (bloom_data, kdbus, "member", dbus_message_get_member (msg));
   str = dbus_message_get_path (msg);
   if (str)
     {
-      bloom_add_pair (data, bloom_params, "path", str);
-      bloom_add_pair (data, bloom_params, "path-slash-prefix", str);
-      bloom_add_prefixes (data, bloom_params, "path-slash-prefix", str, '/');
+      bloom_add_pair (bloom_data, kdbus, "path", str);
+      bloom_add_pair (bloom_data, kdbus, "path-slash-prefix", str);
+      bloom_add_prefixes (bloom_data, kdbus, "path-slash-prefix", str, '/');
     }
 
   if (!dbus_message_iter_init (msg, &args))
@@ -641,12 +493,12 @@ bus_message_setup_bloom (DBusMessage                  *msg,
       }
 
       *e = 0;
-      bloom_add_pair (data, bloom_params, buf, str);
+      bloom_add_pair (bloom_data, kdbus, buf, str);
 
       strcpy (e, "-dot-prefix");
-      bloom_add_prefixes (data, bloom_params, buf, str, '.');
+      bloom_add_prefixes (bloom_data, kdbus, buf, str, '.');
       strcpy (e, "-slash-prefix");
-      bloom_add_prefixes (data, bloom_params, buf, str, '/');
+      bloom_add_prefixes (bloom_data, kdbus, buf, str, '/');
 
       if (!dbus_message_iter_next (&args))
         break;
@@ -1022,12 +874,11 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
                                      strlen (destination) + 1);
   else if (dst_id == KDBUS_DST_ID_BROADCAST)
     {
-      struct kdbus_bloom_parameter *bloom = _kdbus_bloom (transport->kdbus);
       struct kdbus_bloom_filter *filter = NULL;
       item = _kdbus_item_add_bloom_filter (item,
-                                           bloom->size,
+                                           transport->kdbus,
                                            &filter);
-      bus_message_setup_bloom (message, filter, bloom);
+      setup_bloom_filter_for_message (message, transport->kdbus, filter);
     }
 
   if (check_privileges && !can_send (transport, message))
@@ -1432,55 +1283,46 @@ is_bloom_needed (MatchRule *rule)
   return FALSE;
 }
 
-static dbus_uint64_t *
-get_bloom (kdbus_t *kdbus, MatchRule *rule)
+static void
+get_bloom (kdbus_t *kdbus, MatchRule *rule, kdbus_bloom_data_t *bloom_data)
 {
-  dbus_uint64_t *bloom;
-  dbus_uint64_t bloom_size;
   int rule_int;
   const char *rule_string;
   int i;
   char argument_buf[sizeof ("arg")-1 + 2 + sizeof ("-slash-prefix") +1];
 
-  bloom_size = _kdbus_bloom (kdbus)->size;
-  bloom = dbus_malloc (bloom_size);
-  if (bloom == NULL)
-    return NULL;
-
-  memset (bloom, 0, bloom_size);
-
   rule_int = _match_rule_get_message_type (rule);
   if (rule_int != DBUS_MESSAGE_TYPE_INVALID)
   {
-    bloom_add_pair (bloom, _kdbus_bloom (kdbus), "message-type", dbus_message_type_to_string (rule_int));
+    bloom_add_pair (bloom_data, kdbus, "message-type", dbus_message_type_to_string (rule_int));
     _dbus_verbose ("Adding type %s \n", dbus_message_type_to_string (rule_int));
   }
 
   rule_string = _match_rule_get_interface (rule);
   if (rule_string != NULL)
     {
-      bloom_add_pair (bloom, _kdbus_bloom (kdbus), "interface", rule_string);
+      bloom_add_pair (bloom_data, kdbus, "interface", rule_string);
       _dbus_verbose ("Adding interface %s \n", rule_string);
     }
 
   rule_string = _match_rule_get_member (rule);
   if (rule_string != NULL)
   {
-    bloom_add_pair (bloom, _kdbus_bloom (kdbus), "member", rule_string);
+    bloom_add_pair (bloom_data, kdbus, "member", rule_string);
     _dbus_verbose ("Adding member %s \n", rule_string);
   }
 
   rule_string = _match_rule_get_path (rule);
   if (rule_string != NULL)
   {
-    bloom_add_pair (bloom, _kdbus_bloom (kdbus), "path", rule_string);
+    bloom_add_pair (bloom_data, kdbus, "path", rule_string);
     _dbus_verbose ("Adding path %s \n", rule_string);
   }
 
   rule_string = _match_rule_get_path_namespace (rule);
   if (rule_string != NULL)
   {
-    bloom_add_pair (bloom, _kdbus_bloom (kdbus), "path-slash-prefix", rule_string);
+    bloom_add_pair (bloom_data, kdbus, "path-slash-prefix", rule_string);
     _dbus_verbose ("Adding path-slash-prefix %s \n", rule_string);
   }
 
@@ -1494,22 +1336,20 @@ get_bloom (kdbus_t *kdbus, MatchRule *rule)
           if (rule_arg_lens & MATCH_ARG_IS_PATH)
             {
               sprintf (argument_buf, "arg%d-slash-prefix", i);
-              bloom_add_prefixes (bloom, _kdbus_bloom (kdbus), argument_buf, rule_string, '/');
+              bloom_add_prefixes (bloom_data, kdbus, argument_buf, rule_string, '/');
             }
           else if (rule_arg_lens & MATCH_ARG_NAMESPACE)
             {
               sprintf (argument_buf, "arg%d-dot-prefix", i);
-              bloom_add_prefixes (bloom, _kdbus_bloom (kdbus), argument_buf, rule_string, '.');
+              bloom_add_prefixes (bloom_data, kdbus, argument_buf, rule_string, '.');
             }
           else
             {
               sprintf (argument_buf, "arg%d", i);
-              bloom_add_pair (bloom, _kdbus_bloom (kdbus), argument_buf, rule_string);
+              bloom_add_pair (bloom_data, kdbus, argument_buf, rule_string);
             }
         }
     }
-
-  return bloom;
 }
 
 /**
@@ -1527,11 +1367,9 @@ add_match_kdbus (DBusTransportKdbus *transport,
 {
   struct kdbus_cmd_match    *cmd;
   struct kdbus_item         *item;
-  __u64       bloom_size;
   __u64       rule_cookie;
   uint64_t    src_id = KDBUS_MATCH_ID_ANY;
-  uint64_t    items_size;
-  uint64_t    *bloom;
+  __u64       items_size;
   dbus_bool_t need_bloom = FALSE;
 
   const char *rule_sender;
@@ -1592,17 +1430,7 @@ add_match_kdbus (DBusTransportKdbus *transport,
  * kdbus doesn't use it to check kdbus (kernel) generated broadcasts
  */
 
-  items_size = 0;
-
   need_bloom = is_bloom_needed (rule);
-  if (need_bloom)
-    {
-      bloom_size = _kdbus_bloom (transport->kdbus)->size;
-      items_size += KDBUS_ITEM_SIZE (bloom_size);
-      bloom = get_bloom (transport->kdbus, rule);
-      if (NULL == bloom)
-        return FALSE;
-    }
 
   rule_sender = _match_rule_get_sender (rule);
   if (rule_sender != NULL)
@@ -1615,18 +1443,17 @@ add_match_kdbus (DBusTransportKdbus *transport,
 
       src_id = parse_name (rule_sender);
       if (0 == src_id)
-        {
           /* well-known name */
           src_id = KDBUS_MATCH_ID_ANY;
-          items_size += KDBUS_ITEM_SIZE (strlen (rule_sender) + 1);
-        }
       else
-        {
           /* unique id */
           rule_sender = NULL;
-          items_size += KDBUS_ITEM_SIZE (sizeof (uint64_t));
-        }
     }
+
+  items_size = _kdbus_compute_match_items_size (transport->kdbus,
+                                                need_bloom,
+                                                src_id,
+                                                rule_sender);
 
   cmd = _kdbus_new_cmd_match (transport->kdbus,
                               items_size,
@@ -1653,8 +1480,9 @@ add_match_kdbus (DBusTransportKdbus *transport,
 
       if (need_bloom)
         {
-          item = _kdbus_item_add_bloom_mask (item, bloom, bloom_size);
-          dbus_free (bloom);
+          __u64 *bloom;
+          item = _kdbus_item_add_bloom_mask (item, transport->kdbus, &bloom);
+          get_bloom (transport->kdbus, rule, bloom);
         }
 
       ret = _kdbus_add_match (transport->kdbus, cmd);
@@ -1768,6 +1596,25 @@ failed:
   return -1;
 }
 
+static dbus_uint64_t
+get_match_cookie_for_remove (Matchmaker *matchmaker, MatchRule *rule_to_remove)
+{
+  DBusList *rules = matchmaker_get_rules_list (matchmaker, rule_to_remove);
+  if (NULL != rules)
+    {
+      DBusList *link = _dbus_list_get_last_link (&rules);
+      while (NULL != link)
+        {
+          if (match_rule_equal_lib (link->data, rule_to_remove))
+            {
+              return match_rule_get_cookie (link->data);
+            }
+          link = _dbus_list_get_prev_link (&rules, link);
+        }
+    }
+  return 0;
+}
+
 static int
 capture_org_freedesktop_DBus_RemoveMatch (DBusTransportKdbus *transport,
                                           DBusMessage        *message,
@@ -1777,33 +1624,49 @@ capture_org_freedesktop_DBus_RemoveMatch (DBusTransportKdbus *transport,
   DBusString arg_str;
   MatchRule *rule = NULL;
   DBusConnection *connection = transport->base.connection;
+  dbus_uint64_t cookie;
 
   if (!dbus_message_get_args (message, error,
         DBUS_TYPE_STRING, &arg,
         DBUS_TYPE_INVALID))
-    goto failed_remove;
+    return -1;
 
   _dbus_string_init_const (&arg_str, arg);
 
   rule = match_rule_parse (connection, &arg_str, error);
-  if (rule == NULL)
-    goto failed_remove;
+  if (rule != NULL)
+    {
+      cookie = get_match_cookie_for_remove (transport->matchmaker, rule);
+      if (0 == cookie)
+        {
+          dbus_set_error (error,
+                          DBUS_ERROR_MATCH_RULE_NOT_FOUND,
+                          "The given match rule wasn't found and can't be removed");
+        }
+      else
+        {
+          int ret = _kdbus_remove_match (transport->kdbus, cookie);
+          if (ret != 0)
+            dbus_set_error (error,
+                            _dbus_error_from_errno (ret),
+                            "Could not remove match rule");
 
-  if (!_kdbus_remove_match (transport->kdbus, matchmaker_get_rules_list (transport->matchmaker, rule),
-        transport->my_DBus_unique_name, rule, error))
-    goto failed_remove;
+          if (!dbus_error_is_set (error))
+            matchmaker_remove_rule_by_value (transport->matchmaker, rule, error);
+        }
 
-  if (!matchmaker_remove_rule_by_value (transport->matchmaker, rule, error))
-    goto failed_remove;
+      match_rule_unref (rule);
+    }
 
-  match_rule_unref (rule);
+  if (dbus_error_is_set (error))
+    {
+      _dbus_verbose ("Error during RemoveMatch in lib: %s, %s\n",
+                     error->name,
+                     error->message);
+      return -1;
+    }
+
   return reply_ack (message, connection);
-
-failed_remove:
-  if (rule)
-    match_rule_unref (rule);
-  _dbus_verbose ("Error during RemoveMatch in lib: %s, %s\n", error->name, error->message);
-  return -1;
 }
 
 static int

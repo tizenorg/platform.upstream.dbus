@@ -54,11 +54,6 @@ struct kdbus_t
   struct kdbus_bloom_parameter bloom;                         /**< bloom parameters*/
 };
 
-/** temporary accessors - to delete soon */
-struct kdbus_bloom_parameter *_kdbus_bloom (kdbus_t *kdbus) { return &kdbus->bloom; }
-
-
-
 /* ALIGN8 and KDBUS_FOREACH taken from systemd */
 #define ALIGN8(l) (((l) + 7) & ~7)
 #define KDBUS_FOREACH(iter, first, _size)                               \
@@ -167,13 +162,23 @@ _kdbus_item_add_fds (struct kdbus_item *item,
 
 struct kdbus_item *
 _kdbus_item_add_bloom_filter (struct kdbus_item          *item,
-                              dbus_uint64_t               data_size,
+                              kdbus_t                    *kdbus,
                               struct kdbus_bloom_filter **out_ptr)
 {
   item->type = KDBUS_ITEM_BLOOM_FILTER;
-  item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_bloom_filter) + data_size;
+  item->size = KDBUS_ITEM_HEADER_SIZE
+               + sizeof (struct kdbus_bloom_filter)
+               + kdbus->bloom.size;
+  memset (item->bloom_filter.data, 0, kdbus->bloom.size);
+  item->bloom_filter.generation = 0;
   *out_ptr = &item->bloom_filter;
   return KDBUS_ITEM_NEXT (item);
+}
+
+kdbus_bloom_data_t *
+_kdbus_bloom_filter_get_data (struct kdbus_bloom_filter *bloom_filter)
+{
+  return bloom_filter->data;
 }
 
 struct kdbus_item *
@@ -215,13 +220,15 @@ _kdbus_item_add_id (struct kdbus_item *item,
 }
 
 struct kdbus_item *
-_kdbus_item_add_bloom_mask (struct kdbus_item *item,
-                            dbus_uint64_t     *bloom,
-                            dbus_uint64_t      bloom_size)
+_kdbus_item_add_bloom_mask (struct kdbus_item   *item,
+                            kdbus_t             *kdbus,
+                            kdbus_bloom_data_t **bloom)
 {
-  item->size = KDBUS_ITEM_HEADER_SIZE + bloom_size;
+  item->size = KDBUS_ITEM_HEADER_SIZE + kdbus->bloom.size;
   item->type = KDBUS_ITEM_BLOOM_MASK;
-  memcpy (item->data, bloom, bloom_size);
+  memset (item->data64, 0, kdbus->bloom.size);
+  if (NULL != bloom)
+    *bloom = item->data64;
   return KDBUS_ITEM_NEXT (item);
 }
 
@@ -461,6 +468,25 @@ _kdbus_list (kdbus_t            *kdbus,
   *list_size = cmd.list_size;
 
   return 0;
+}
+
+__u64
+_kdbus_compute_match_items_size (kdbus_t       *kdbus,
+                                 dbus_bool_t    with_bloom_mask,
+                                 __u64          sender_id,
+                                 const char    *sender_name)
+{
+  __u64 size = 0;
+
+  if (with_bloom_mask)
+    size += KDBUS_ITEM_SIZE (kdbus->bloom.size);
+
+  if (KDBUS_MATCH_ID_ANY != sender_id) /* unique name present */
+    size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_notify_id_change));
+  else if (NULL != sender_name)
+    size += KDBUS_ITEM_SIZE (strlen (sender_name) + 1);
+
+  return size;
 }
 
 struct kdbus_cmd_match *
@@ -947,17 +973,14 @@ _kdbus_connection_info_by_name (kdbus_t         *kdbus,
   return process_connection_info_cmd (kdbus, cmd, pInfo, get_sec_label);
 }
 
-/**
- * Opposing to dbus, in kdbus removes all match rules with given
- * cookie, which in this implementation is equal to uniqe id.
- *
+/*
+ * Removes match rule in kdbus on behalf of sender of the message
  * @param kdbus kdbus object
- * @param id connection id for which rules are to be removed
  * @param cookie cookie of the rules to be removed
  */
-static dbus_bool_t
-remove_match_kdbus (kdbus_t *kdbus,
-                    __u64    cookie)
+int
+_kdbus_remove_match (kdbus_t    *kdbus,
+                     __u64       cookie)
 {
   struct kdbus_cmd_match cmd;
 
@@ -965,67 +988,157 @@ remove_match_kdbus (kdbus_t *kdbus,
   cmd.size = sizeof (struct kdbus_cmd_match);
   cmd.flags = 0;
 
-  if(ioctl (kdbus->fd, KDBUS_CMD_MATCH_REMOVE, &cmd))
-    {
-      _dbus_verbose ("Failed removing match rule %llu, error: %d, %m\n", cookie, errno);
-      return FALSE;
-    }
-  else
-    {
-      _dbus_verbose ("Match rule %llu removed correctly.\n", cookie);
-      return TRUE;
-    }
+  if (safe_ioctl (kdbus->fd, KDBUS_CMD_MATCH_REMOVE, &cmd) != 0)
+    return errno;
+
+  return 0;
 }
 
+/************************* BLOOM FILTERS ***********************/
+
 /*
- *  Removes match rule in kdbus on behalf of sender of the message
+ * Macros for SipHash algorithm
  */
-dbus_bool_t
-_kdbus_remove_match (kdbus_t    *kdbus,
-                     DBusList   *rules,
-                     const char *sender,
-                     MatchRule  *rule_to_remove,
-                     DBusError  *error)
+#define ROTL(x,b) (uint64_t)( ((x) << (b)) | ( (x) >> (64 - (b))) )
+
+#define U32TO8_LE(p, v)         \
+    (p)[0] = (unsigned char)((v)      ); (p)[1] = (unsigned char)((v) >>  8); \
+    (p)[2] = (unsigned char)((v) >> 16); (p)[3] = (unsigned char)((v) >> 24);
+
+#define U64TO8_LE(p, v)         \
+  U32TO8_LE((p),     (uint32_t)((v)      ));   \
+  U32TO8_LE((p) + 4, (uint32_t)((v) >> 32));
+
+#define U8TO64_LE(p) \
+  (((uint64_t)((p)[0])      ) | \
+   ((uint64_t)((p)[1]) <<  8) | \
+   ((uint64_t)((p)[2]) << 16) | \
+   ((uint64_t)((p)[3]) << 24) | \
+   ((uint64_t)((p)[4]) << 32) | \
+   ((uint64_t)((p)[5]) << 40) | \
+   ((uint64_t)((p)[6]) << 48) | \
+   ((uint64_t)((p)[7]) << 56))
+
+#define SIPROUND            \
+  do {              \
+    v0 += v1; v1=ROTL(v1,13); v1 ^= v0; v0=ROTL(v0,32); \
+    v2 += v3; v3=ROTL(v3,16); v3 ^= v2;     \
+    v0 += v3; v3=ROTL(v3,21); v3 ^= v0;     \
+    v2 += v1; v1=ROTL(v1,17); v1 ^= v2; v2=ROTL(v2,32); \
+  } while (0)
+
+
+/*
+ * Hash keys for bloom filters
+ */
+static const unsigned char hash_keys[8][16] =
 {
-  __u64 cookie = 0;
-  DBusList *link = NULL;
+  {0xb9,0x66,0x0b,0xf0,0x46,0x70,0x47,0xc1,0x88,0x75,0xc4,0x9c,0x54,0xb9,0xbd,0x15},
+  {0xaa,0xa1,0x54,0xa2,0xe0,0x71,0x4b,0x39,0xbf,0xe1,0xdd,0x2e,0x9f,0xc5,0x4a,0x3b},
+  {0x63,0xfd,0xae,0xbe,0xcd,0x82,0x48,0x12,0xa1,0x6e,0x41,0x26,0xcb,0xfa,0xa0,0xc8},
+  {0x23,0xbe,0x45,0x29,0x32,0xd2,0x46,0x2d,0x82,0x03,0x52,0x28,0xfe,0x37,0x17,0xf5},
+  {0x56,0x3b,0xbf,0xee,0x5a,0x4f,0x43,0x39,0xaf,0xaa,0x94,0x08,0xdf,0xf0,0xfc,0x10},
+  {0x31,0x80,0xc8,0x73,0xc7,0xea,0x46,0xd3,0xaa,0x25,0x75,0x0f,0x9e,0x4c,0x09,0x29},
+  {0x7d,0xf7,0x18,0x4b,0x7b,0xa4,0x44,0xd5,0x85,0x3c,0x06,0xe0,0x65,0x53,0x96,0x6d},
+  {0xf2,0x77,0xe9,0x6f,0x93,0xb5,0x4e,0x71,0x9a,0x0c,0x34,0x88,0x39,0x25,0xbf,0x35}
+};
 
-  if (rules != NULL)
+/*
+ * SipHash algorithm
+ */
+static void
+_g_siphash24 (unsigned char       out[8],
+              const void         *_in,
+              size_t              inlen,
+              const unsigned char k[16])
+{
+  uint64_t v0 = 0x736f6d6570736575ULL;
+  uint64_t v1 = 0x646f72616e646f6dULL;
+  uint64_t v2 = 0x6c7967656e657261ULL;
+  uint64_t v3 = 0x7465646279746573ULL;
+  uint64_t b;
+  uint64_t k0 = U8TO64_LE (k);
+  uint64_t k1 = U8TO64_LE (k + 8);
+  uint64_t m;
+  const unsigned char *in = _in;
+  const unsigned char *end = in + inlen - (inlen % sizeof (uint64_t));
+  const int left = inlen & 7;
+  b = ((uint64_t) inlen) << 56;
+  v3 ^= k1;
+  v2 ^= k0;
+  v1 ^= k1;
+  v0 ^= k0;
+
+  for (; in != end; in += 8)
     {
-      /* we traverse backward because bus_connection_remove_match_rule()
-       * removes the most-recently-added rule
-       */
-      link = _dbus_list_get_last_link (&rules);
-      while (link != NULL)
+      m = U8TO64_LE (in);
+      v3 ^= m;
+      SIPROUND;
+      SIPROUND;
+      v0 ^= m;
+    }
+
+  switch (left)
+    {
+      case 7: b |= ((uint64_t) in[6]) << 48;
+      case 6: b |= ((uint64_t) in[5]) << 40;
+      case 5: b |= ((uint64_t) in[4]) << 32;
+      case 4: b |= ((uint64_t) in[3]) << 24;
+      case 3: b |= ((uint64_t) in[2]) << 16;
+      case 2: b |= ((uint64_t) in[1]) <<  8;
+      case 1: b |= ((uint64_t) in[0]); break;
+      case 0: break;
+    }
+
+  v3 ^= b;
+  SIPROUND;
+  SIPROUND;
+  v0 ^= b;
+
+  v2 ^= 0xff;
+  SIPROUND;
+  SIPROUND;
+  SIPROUND;
+  SIPROUND;
+  b = v0 ^ v1 ^ v2  ^ v3;
+  U64TO8_LE (out, b);
+}
+
+void
+_kdbus_bloom_add_data (kdbus_t            *kdbus,
+                       kdbus_bloom_data_t *bloom_data,
+                       const void         *data,
+                       size_t              data_size)
+{
+  unsigned char hash[8];
+  uint64_t bit_num;
+  unsigned int bytes_num = 0;
+  unsigned int cnt_1, cnt_2;
+  unsigned int hash_index = 0;
+
+  unsigned int c = 0;
+  uint64_t p = 0;
+
+  bit_num = kdbus->bloom.size * 8;
+
+  if (bit_num > 1)
+    bytes_num = ((__builtin_clzll (bit_num) ^ 63U) + 7) / 8;
+
+  for (cnt_1 = 0; cnt_1 < kdbus->bloom.n_hash; cnt_1++)
+    {
+      for (cnt_2 = 0, hash_index = 0; cnt_2 < bytes_num; cnt_2++)
         {
-          MatchRule *rule;
-          DBusList *prev;
-
-          rule = link->data;
-          prev = _dbus_list_get_prev_link (&rules, link);
-
-          if (match_rule_equal_lib (rule, rule_to_remove))
+          if (c <= 0)
             {
-              cookie = match_rule_get_cookie (rule);
-              break;
+              _g_siphash24 (hash, data, data_size, hash_keys[hash_index++]);
+              c += 8;
             }
 
-          link = prev;
+          p = (p << 8ULL) | (uint64_t) hash[8 - c];
+          c--;
         }
-    }
 
-  if (cookie == 0)
-    {
-      dbus_set_error (error, DBUS_ERROR_MATCH_RULE_NOT_FOUND,
-                      "The given match rule wasn't found and can't be removed");
-      return FALSE;
+      p &= bit_num - 1;
+      bloom_data[p >> 6] |= 1ULL << (p & 63);
     }
-
-  if (!remove_match_kdbus (kdbus, cookie))
-    {
-      dbus_set_error (error, _dbus_error_from_errno (errno), "Could not remove match rule");
-      return FALSE;
-    }
-
-  return TRUE;
 }

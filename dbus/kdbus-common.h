@@ -57,6 +57,8 @@ struct nameInfo
 
 typedef struct kdbus_t kdbus_t;
 
+typedef __u64 kdbus_bloom_data_t;
+
 kdbus_t *   _kdbus_new                             (void);
 void        _kdbus_free                            (kdbus_t *kdbus);
 
@@ -137,6 +139,11 @@ struct kdbus_msg * _kdbus_new_msg                  (kdbus_t                *kdbu
 
 void               _kdbus_free_msg                 (struct kdbus_msg *msg);
 
+__u64              _kdbus_compute_match_items_size (kdbus_t       *kdbus,
+                                                    dbus_bool_t    with_bloom_mask,
+                                                    __u64          sender_id,
+                                                    const char    *sender_name);
+
 struct kdbus_cmd_match *_kdbus_new_cmd_match       (kdbus_t       *kdbus,
                                                     __u64          items_size,
                                                     __u64          flags,
@@ -165,8 +172,10 @@ struct kdbus_item * _kdbus_item_add_fds            (struct kdbus_item *item,
                                                     int                fds_count);
 
 struct kdbus_item * _kdbus_item_add_bloom_filter   (struct kdbus_item          *item,
-                                                    dbus_uint64_t               data_size,
+                                                    kdbus_t                    *kdbus,
                                                     struct kdbus_bloom_filter **out_ptr);
+
+kdbus_bloom_data_t *_kdbus_bloom_filter_get_data   (struct kdbus_bloom_filter *bloom_filter);
 
 struct kdbus_item * _kdbus_item_add_name_change    (struct kdbus_item *item,
                                                     __u64              old_id,
@@ -181,9 +190,9 @@ struct kdbus_item * _kdbus_item_add_id_add         (struct kdbus_item *item,
 struct kdbus_item * _kdbus_item_add_id             (struct kdbus_item *item,
                                                     __u64              id);
 
-struct kdbus_item * _kdbus_item_add_bloom_mask     (struct kdbus_item *item,
-                                                    dbus_uint64_t     *bloom,
-                                                    dbus_uint64_t      bloom_size);
+struct kdbus_item * _kdbus_item_add_bloom_mask     (struct kdbus_item   *item,
+                                                    kdbus_t             *kdbus,
+                                                    kdbus_bloom_data_t **bloom);
 
 int         _kdbus_request_name                    (kdbus_t *kdbus,
                                                     const char *name,
@@ -191,13 +200,11 @@ int         _kdbus_request_name                    (kdbus_t *kdbus,
 int         _kdbus_release_name                    (kdbus_t *kdbus,
                                                     const char *name);
 
-dbus_bool_t _kdbus_remove_match                    (kdbus_t *kdbus,
-                                                    DBusList *rules,
-                                                    const char *sender,
-                                                    MatchRule *rule_to_remove,
-                                                    DBusError *error);
+int         _kdbus_remove_match                    (kdbus_t    *kdbus,
+                                                    __u64       cookie);
 
-/** temporary accessors - to delete soon */
-struct kdbus_bloom_parameter *_kdbus_bloom (kdbus_t *kdbus);
-
+void        _kdbus_bloom_add_data                  (kdbus_t            *kdbus,
+                                                    kdbus_bloom_data_t *bloom_data,
+                                                    const void         *data,
+                                                    size_t              data_size);
 #endif /* KDBUS_COMMON_H_ */
