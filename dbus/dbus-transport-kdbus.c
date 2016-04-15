@@ -2047,7 +2047,7 @@ reply_listNames (DBusTransportKdbus *transport,
   /* First, get the list from kdbus */
 
   struct kdbus_info *name_list, *name;
-  dbus_uint64_t list_size;
+  __u64 list_size;
   int ret;
   DBusMessageIter iter;
   DBusMessageIter array_iter;

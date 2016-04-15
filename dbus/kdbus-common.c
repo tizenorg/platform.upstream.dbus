@@ -123,9 +123,9 @@ static void make_item_name (const char *name, struct kdbus_item *item)
  */
 struct kdbus_item *
 _kdbus_item_add_string (struct kdbus_item *item,
-                        dbus_uint64_t      item_type,
+                        __u64              item_type,
                         const char        *item_string,
-                        dbus_uint64_t      item_string_size)
+                        __u64              item_string_size)
 {
   item->size = KDBUS_ITEM_HEADER_SIZE + item_string_size;
   item->type = item_type;
@@ -135,8 +135,8 @@ _kdbus_item_add_string (struct kdbus_item *item,
 
 struct kdbus_item *
 _kdbus_item_add_payload_memfd (struct kdbus_item *item,
-                               dbus_uint64_t      start,
-                               dbus_uint64_t      size,
+                               __u64              start,
+                               __u64              size,
                                int                fd)
 {
   item->type = KDBUS_ITEM_PAYLOAD_MEMFD;
@@ -149,8 +149,8 @@ _kdbus_item_add_payload_memfd (struct kdbus_item *item,
 
 struct kdbus_item *
 _kdbus_item_add_payload_vec (struct kdbus_item *item,
-                             dbus_uint64_t      size,
-                             dbus_uint64_t      address_or_offset)
+                             __u64              size,
+                             __u64              address_or_offset)
 {
   item->type = KDBUS_ITEM_PAYLOAD_VEC;
   item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_vec);
@@ -183,10 +183,10 @@ _kdbus_item_add_bloom_filter (struct kdbus_item          *item,
 
 struct kdbus_item *
 _kdbus_item_add_name_change (struct kdbus_item *item,
-                             dbus_uint64_t old_id,
-                             dbus_uint64_t old_id_flags,
-                             dbus_uint64_t new_id,
-                             dbus_uint64_t new_id_flags)
+                             __u64              old_id,
+                             __u64              old_id_flags,
+                             __u64              new_id,
+                             __u64              new_id_flags)
 {
   item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_notify_name_change);
   item->type = KDBUS_ITEM_NAME_CHANGE;
@@ -199,8 +199,8 @@ _kdbus_item_add_name_change (struct kdbus_item *item,
 
 struct kdbus_item *
 _kdbus_item_add_id_add (struct kdbus_item *item,
-                        dbus_uint64_t      id,
-                        dbus_uint64_t      id_flags)
+                        __u64              id,
+                        __u64              id_flags)
 {
   item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_notify_id_change);
   item->type = KDBUS_ITEM_ID_ADD;
@@ -211,7 +211,7 @@ _kdbus_item_add_id_add (struct kdbus_item *item,
 
 struct kdbus_item *
 _kdbus_item_add_id (struct kdbus_item *item,
-                    dbus_uint64_t      id)
+                    __u64              id)
 {
   item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_notify_id_change);
   item->type = KDBUS_ITEM_ID;
@@ -294,10 +294,10 @@ _kdbus_close (kdbus_t *kdbus)
 
 int
 _kdbus_hello (kdbus_t       *kdbus,
-              dbus_uint64_t  flags,
-              dbus_uint64_t  attach_flags_send,
-              dbus_uint64_t  attach_flags_recv,
-              dbus_uint64_t  pool_size,
+              __u64          flags,
+              __u64          attach_flags_send,
+              __u64          attach_flags_recv,
+              __u64          pool_size,
               const char    *activator_name,
               const char    *connection_name)
 {
@@ -380,7 +380,7 @@ _kdbus_hello (kdbus_t       *kdbus,
 
 int
 _kdbus_send (kdbus_t           *kdbus,
-             dbus_uint64_t      flags,
+             __u64              flags,
              struct kdbus_msg  *msg,
              struct kdbus_msg **msg_reply)
 {
@@ -406,8 +406,8 @@ _kdbus_send (kdbus_t           *kdbus,
 
 int
 _kdbus_recv (kdbus_t           *kdbus,
-             dbus_uint64_t      flags,
-             dbus_int64_t       priority,
+             __u64              flags,
+             __s64              priority,
              struct kdbus_msg **msg)
 {
   struct kdbus_cmd_recv cmd;
@@ -426,9 +426,9 @@ _kdbus_recv (kdbus_t           *kdbus,
 
 int
 _kdbus_list (kdbus_t            *kdbus,
-             dbus_uint64_t       flags,
+             __u64               flags,
              struct kdbus_info **name_list,
-             dbus_uint64_t      *list_size)
+             __u64              *list_size)
 {
   struct kdbus_cmd_list cmd;
 
@@ -446,12 +446,12 @@ _kdbus_list (kdbus_t            *kdbus,
 
 struct kdbus_cmd_match *
 _kdbus_new_cmd_match (kdbus_t       *kdbus,
-                      dbus_uint64_t  items_size,
-                      dbus_uint64_t  flags,
-                      dbus_uint64_t  cookie)
+                      __u64          items_size,
+                      __u64          flags,
+                      __u64          cookie)
 {
   struct kdbus_cmd_match *cmd;
-  dbus_uint64_t cmd_size = sizeof (*cmd) + items_size;
+  __u64 cmd_size = sizeof (*cmd) + items_size;
   cmd = dbus_malloc (cmd_size);
   if (NULL == cmd)
     return NULL;
@@ -471,12 +471,12 @@ _kdbus_free_cmd_match (struct kdbus_cmd_match *cmd)
 
 int
 _kdbus_add_match_name_change (kdbus_t *kdbus,
-                              dbus_uint64_t flags,
-                              dbus_uint64_t cookie,
-                              dbus_uint64_t old_id,
-                              dbus_uint64_t old_id_flags,
-                              dbus_uint64_t new_id,
-                              dbus_uint64_t new_id_flags)
+                              __u64    flags,
+                              __u64    cookie,
+                              __u64    old_id,
+                              __u64    old_id_flags,
+                              __u64    new_id,
+                              __u64    new_id_flags)
 {
   struct kdbus_cmd_match *cmd;
   struct kdbus_item *item;
@@ -515,10 +515,10 @@ _kdbus_add_match_name_change (kdbus_t *kdbus,
 
 int
 _kdbus_add_match_id_change (kdbus_t *kdbus,
-                            dbus_uint64_t flags,
-                            dbus_uint64_t cookie,
-                            dbus_uint64_t id,
-                            dbus_uint64_t id_flags)
+                            __u64    flags,
+                            __u64    cookie,
+                            __u64    id,
+                            __u64    id_flags)
 {
   struct kdbus_cmd_match *cmd;
   struct kdbus_item *item;
@@ -567,17 +567,17 @@ int _kdbus_add_match (kdbus_t *kdbus,
  */
 struct kdbus_msg *
 _kdbus_new_msg (kdbus_t                *kdbus,
-                dbus_uint64_t           size_for_items,
-                dbus_uint64_t           flags,
-                dbus_int64_t            priority,
-                dbus_uint64_t           dst_id,
-                dbus_uint64_t           src_id,
+                __u64                   size_for_items,
+                __u64                   flags,
+                __s64                   priority,
+                __u64                   dst_id,
+                __u64                   src_id,
                 enum kdbus_payload_type payload_type,
-                dbus_uint64_t           cookie,
-                dbus_uint64_t           timeout_ns_or_cookie_reply)
+                __u64                   cookie,
+                __u64                   timeout_ns_or_cookie_reply)
 {
   struct kdbus_msg *msg;
-  dbus_uint64_t msg_size = sizeof (struct kdbus_msg) + size_for_items;
+  __u64 msg_size = sizeof (struct kdbus_msg) + size_for_items;
 
   msg = dbus_malloc (msg_size);
   if (NULL == msg)
@@ -621,15 +621,15 @@ _kdbus_free_mem (kdbus_t *kdbus, void *mem)
  * @param fds_count Number of file descriptors sent in the message.
  * @returns size in bytes needed for the message object
  */
-dbus_uint64_t
+__u64
 _kdbus_compute_msg_items_size (kdbus_t       *kdbus,
                                const char    *destination,
-                               dbus_uint64_t  dst_id,
-                               dbus_uint64_t  body_size,
+                               __u64          dst_id,
+                               __u64          body_size,
                                dbus_bool_t    use_memfd,
                                int            fds_count)
 {
-  dbus_uint64_t items_size = 0;
+  __u64 items_size = 0;
 
   if (use_memfd)
     {
@@ -637,8 +637,8 @@ _kdbus_compute_msg_items_size (kdbus_t       *kdbus,
     }
   else
     {
-      dbus_uint64_t vectors = (body_size + KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE - 1)
-                              / KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
+      __u64 vectors = (body_size + KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE - 1)
+                       / KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
       /* 1st vector -> for header */
       items_size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_vec));
       /* subsequent vectors -> parts of body */
@@ -845,12 +845,12 @@ process_connection_info_cmd (kdbus_t               *kdbus,
 }
 
 static struct kdbus_cmd_info *
-prepare_connection_info_cmd (dbus_uint64_t  id,
+prepare_connection_info_cmd (__u64          id,
                              const char    *name,
                              dbus_bool_t    get_sec_label)
 {
   struct kdbus_cmd_info *cmd;
-  dbus_uint64_t size = sizeof (*cmd);
+  __u64 size = sizeof (*cmd);
   if (NULL != name)
     {
       size += KDBUS_ITEM_SIZE (strlen (name) + 1);
@@ -887,7 +887,7 @@ prepare_connection_info_cmd (dbus_uint64_t  id,
  */
 int
 _kdbus_connection_info_by_id (kdbus_t         *kdbus,
-                              dbus_uint64_t    id,
+                              __u64            id,
                               dbus_bool_t      get_sec_label,
                               struct nameInfo *pInfo)
 {
