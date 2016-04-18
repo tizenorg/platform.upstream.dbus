@@ -83,6 +83,19 @@ free_by_offset (kdbus_t  *kdbus,
 {
   struct kdbus_cmd_free cmd;
 
+  /*
+   * Kdbus requires to initialize ioctl params partially. Some parts
+   * are for data passed from user to kernel, and other parts
+   * for data passed from kernel to user.
+   *
+   * Valgrind detects when uninitialized data is passed to kernel
+   * and has no way to know that it is meant to be filled by kernel.
+   * Thus, we initialize params for Valgrind to stop complaining.
+   */
+#ifdef WITH_VALGRIND
+  memset (&cmd, 0, sizeof (cmd));
+#endif
+
   cmd.size = sizeof (cmd);
   cmd.offset = offset;
   cmd.flags = 0;
@@ -353,6 +366,10 @@ _kdbus_hello (kdbus_t       *kdbus,
   if (NULL == hello)
     return -ENOMEM;
 
+#ifdef WITH_VALGRIND
+  memset (hello, 0, hello_size);
+#endif
+
   hello->flags = flags;
   hello->attach_flags_send = attach_flags_send;
   hello->attach_flags_recv = attach_flags_recv;
@@ -412,6 +429,10 @@ _kdbus_send (kdbus_t           *kdbus,
 {
   struct kdbus_cmd_send cmd;
 
+#ifdef WITH_VALGRIND
+  memset (&cmd, 0, sizeof (cmd));
+#endif
+
   cmd.size = sizeof (cmd);
   cmd.msg_address = (__u64)msg;
   cmd.flags = flags;
@@ -438,6 +459,10 @@ _kdbus_recv (kdbus_t           *kdbus,
 {
   struct kdbus_cmd_recv cmd;
 
+#ifdef WITH_VALGRIND
+  memset (&cmd, 0, sizeof (cmd));
+#endif
+
   cmd.size = sizeof (cmd);
   cmd.flags = flags;
   cmd.priority = priority;
@@ -457,6 +482,10 @@ _kdbus_list (kdbus_t            *kdbus,
              __u64              *list_size)
 {
   struct kdbus_cmd_list cmd;
+
+#ifdef WITH_VALGRIND
+  memset (&cmd, 0, sizeof (cmd));
+#endif
 
   cmd.size = sizeof (cmd);
   cmd.flags = flags;
@@ -500,6 +529,10 @@ _kdbus_new_cmd_match (kdbus_t       *kdbus,
   cmd = dbus_malloc (cmd_size);
   if (NULL == cmd)
     return NULL;
+
+#ifdef WITH_VALGRIND
+  memset (cmd, 0, cmd_size);
+#endif
 
   cmd->size = cmd_size;
   cmd->flags = flags;
@@ -983,6 +1016,10 @@ _kdbus_remove_match (kdbus_t    *kdbus,
                      __u64       cookie)
 {
   struct kdbus_cmd_match cmd;
+
+#ifdef WITH_VALGRIND
+  memset (&cmd, 0, sizeof (cmd));
+#endif
 
   cmd.cookie = cookie;
   cmd.size = sizeof (struct kdbus_cmd_match);
