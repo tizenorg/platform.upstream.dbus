@@ -120,7 +120,7 @@ append_offsets (DBusString *str,
                 size_t *fields_offsets,
                 size_t n_fields_offsets)
 {
-  int i;
+  size_t i;
   size_t array_size = _dbus_string_get_length (str) - FIRST_GVARIANT_FIELD_OFFSET;
   size_t offset_size = bus_gvariant_determine_word_size (array_size, n_fields_offsets);
 
@@ -966,11 +966,7 @@ _dbus_reader_count_offsets (const DBusTypeReader *reader)
   int variables = 0;
   dbus_bool_t prev_is_variable = FALSE;
   int current_type;
-  int ending_char;
-
-  /* if signature is not empty, it must be after initial parenthesis */
-  /* empty signature has length 1 - only nul byte */
-  _dbus_assert (reader->type_pos > 0);
+  int ending_char = 0;
 
   _dbus_type_reader_init_types_only (&r,
                                      reader->type_str,
@@ -978,18 +974,26 @@ _dbus_reader_count_offsets (const DBusTypeReader *reader)
   r.gvariant = TRUE;
   r.klass = reader->klass;
 
-  /* Check what container we're in */
-  switch (_dbus_string_get_byte (r.type_str, r.type_pos-1))
+  /* In case we are in root container, we have signature without external parentheses.
+   *  We go until ending nul, starting with position 0.
+   * Otherwise, we are in a container, so let's check what kind of container it is,
+   *  and set proper terminating character.
+   */
+  if (r.type_pos > 0)
     {
-      case DBUS_STRUCT_BEGIN_CHAR:
-        ending_char = DBUS_STRUCT_END_CHAR;
-        break;
-      case DBUS_DICT_ENTRY_BEGIN_CHAR:
-        ending_char = DBUS_DICT_ENTRY_END_CHAR;
-        break;
-      default:
-        _dbus_assert_not_reached ("function must be called inside structs or dict entries");
-        break;
+      /* Check what container we're in */
+      switch (_dbus_string_get_byte (r.type_str, r.type_pos-1))
+        {
+          case DBUS_STRUCT_BEGIN_CHAR:
+            ending_char = DBUS_STRUCT_END_CHAR;
+            break;
+          case DBUS_DICT_ENTRY_BEGIN_CHAR:
+            ending_char = DBUS_DICT_ENTRY_END_CHAR;
+            break;
+          default:
+            _dbus_assert_not_reached ("function must be called inside structs or dict entries");
+            break;
+        }
     }
   r.finished = (_dbus_string_get_byte (r.type_str, r.type_pos) == ending_char);
 

@@ -48,6 +48,13 @@ VALGRIND_MAKE_MEM_UNDEFINED (void   *addr,
 }
 
 static inline int
+VALGRIND_MAKE_MEM_DEFINED (void   *addr,
+                           size_t  len)
+{
+  return 0;
+}
+
+static inline int
 VALGRIND_PRINTF (const char *format,
                  ...)
 {
