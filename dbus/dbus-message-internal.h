@@ -129,6 +129,8 @@ DBusMessage *      _dbus_generate_local_error_message           (dbus_uint32_t s
 dbus_bool_t       _dbus_message_assure_dbus1                    (DBusMessage **message);
 dbus_bool_t       _dbus_message_assure_gvariant                 (DBusMessage **message);
 
+void              _dbus_on_new_bus                              (int type);
+
 DBUS_END_DECLS
 
 #endif /* DBUS_MESSAGE_INTERNAL_H */

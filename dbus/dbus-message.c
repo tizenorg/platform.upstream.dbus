@@ -48,7 +48,15 @@
   (type == DBUS_TYPE_STRING || type == DBUS_TYPE_SIGNATURE || \
    type == DBUS_TYPE_OBJECT_PATH)
 
-unsigned char _dbus_default_protocol_version = DBUS_MAJOR_PROTOCOL_VERSION; /* DBUS_PROTOCOL_VERSION_GVARIANT; */
+static unsigned char _dbus_default_protocol_version = DBUS_MAJOR_PROTOCOL_VERSION; /* DBUS_PROTOCOL_VERSION_GVARIANT; */
+static dbus_bool_t _dbus_first_bus_open = FALSE;
+
+static void protocol_strategy_last_type (int type);
+static void protocol_strategy_static (int type);
+
+typedef void (*DBusProtocolStrategyFunction)(int type);
+static DBusProtocolStrategyFunction _dbus_protocol_strategy_bus_function = protocol_strategy_last_type;
+static DBusProtocolStrategyFunction _dbus_protocol_strategy_message_function = protocol_strategy_static;
 
 static void dbus_message_finalize (DBusMessage *message);
 
@@ -5153,6 +5161,20 @@ _dbus_message_copy_recursive(DBusMessageIter *iter, DBusMessageIter *dest)
   return TRUE;
 }
 
+void
+_dbus_on_new_bus (int type)
+{
+  _dbus_assert (type == DBUS_MAJOR_PROTOCOL_VERSION || type == DBUS_PROTOCOL_VERSION_GVARIANT);
+  _dbus_protocol_strategy_bus_function (type);
+}
+
+static void
+_dbus_on_send_message (int type)
+{
+  _dbus_assert (type == DBUS_MAJOR_PROTOCOL_VERSION || type == DBUS_PROTOCOL_VERSION_GVARIANT);
+  _dbus_protocol_strategy_message_function (type);
+}
+
 DBusMessage *
 _dbus_message_remarshal (DBusMessage *message, dbus_bool_t gvariant)
 {
@@ -5163,6 +5185,8 @@ _dbus_message_remarshal (DBusMessage *message, dbus_bool_t gvariant)
   const char *sender;
 
   _dbus_assert (message->locked);
+
+  _dbus_on_send_message (gvariant ? DBUS_PROTOCOL_VERSION_GVARIANT : DBUS_MAJOR_PROTOCOL_VERSION);
 
   ret = _dbus_message_create_protocol_version (dbus_message_get_type(message),
 					       dbus_message_get_destination(message),
@@ -5266,6 +5290,63 @@ void
 dbus_set_protocol_version (unsigned char version)
 {
   _dbus_default_protocol_version = version;
+}
+
+static void
+protocol_strategy_first_type (int type)
+{
+  /* change protocol once */
+  if (!_dbus_first_bus_open)
+    {
+      _dbus_first_bus_open = TRUE;
+      _dbus_default_protocol_version = type;
+    }
+}
+
+static void
+protocol_strategy_last_type (int type)
+{
+  /* change protocol every time it is needed */
+  if (_dbus_default_protocol_version != type)
+    _dbus_default_protocol_version = type;
+}
+
+static void
+protocol_strategy_static (int type)
+{
+  /* do not change */
+}
+
+void
+dbus_set_default_protocol_strategy (const char *strategy_name)
+{
+  if (strcmp (strategy_name, "first-bus") == 0)
+    {
+      _dbus_protocol_strategy_bus_function = protocol_strategy_first_type;
+      _dbus_protocol_strategy_message_function = protocol_strategy_static;
+    }
+  else if (strcmp (strategy_name, "dbus1") == 0)
+    {
+      _dbus_default_protocol_version = DBUS_MAJOR_PROTOCOL_VERSION;
+      _dbus_protocol_strategy_bus_function = protocol_strategy_static;
+      _dbus_protocol_strategy_message_function = protocol_strategy_static;
+    }
+  else if (strcmp (strategy_name, "gvariant") == 0)
+    {
+      _dbus_default_protocol_version = DBUS_PROTOCOL_VERSION_GVARIANT;
+      _dbus_protocol_strategy_bus_function = protocol_strategy_static;
+      _dbus_protocol_strategy_message_function = protocol_strategy_static;
+    }
+  else if (strcmp (strategy_name, "last-message") == 0)
+    {
+      _dbus_protocol_strategy_bus_function = protocol_strategy_static;
+      _dbus_protocol_strategy_message_function = protocol_strategy_last_type;
+    }
+  else /* "last-bus" is default strategy */
+    {
+      _dbus_protocol_strategy_bus_function = protocol_strategy_last_type;
+      _dbus_protocol_strategy_message_function = protocol_strategy_static;
+    }
 }
 
 DBusMessage *
