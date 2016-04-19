@@ -12,13 +12,10 @@ Group:          Base/IPC
 
 %define with_systemd 1
 
-BuildRequires:  doxygen
 BuildRequires:  expat-devel
 BuildRequires:  libtool
-BuildRequires:  libxslt-tools
 BuildRequires:  libzio
 BuildRequires:  pkg-config
-BuildRequires:  xmlto
 %if %{with_systemd}
 BuildRequires:  pkgconfig(libsystemd)
 %endif
@@ -49,26 +46,9 @@ Provides:       dbus-1
 # This is an artificial requirement needed to keep proper order of building of the packages
 BuildRequires:  libdbus = %{version}
 
-
-
-%package devel-doc
-
-Summary:        Developer documentation package for D-Bus
-Group:          Documentation
-Requires:       %{name} = %{version}
-BuildArch:      noarch
-
 %description
 D-Bus is a message bus system, a simple way for applications to talk to
 one another. D-Bus supplies both a system daemon and a
-per-user-login-session daemon. Also, the message bus is built on top of
-a general one-to-one message passing framework, which can be used by
-any two apps to communicate directly (without going through the message
-bus daemon).
-
-%description devel-doc
-D-Bus is a message bus system, a simple way for applications to talk to
-one another. D-BUS supplies both a system daemon and a
 per-user-login-session daemon. Also, the message bus is built on top of
 a general one-to-one message passing framework, which can be used by
 any two apps to communicate directly (without going through the message
@@ -97,7 +77,8 @@ export V=1
     --libdir=%{_libdir}							\
     --with-init-scripts=suse						\
     --enable-inotify							\
-    --enable-doxygen-docs						\
+    --disable-doxygen-docs						\
+    --disable-xml-docs							\
 %if %{with_systemd}
     --enable-systemd							\
 %endif
@@ -148,14 +129,14 @@ rm -rf %{buildroot}/%{_bindir}/dbus-launch
 install -d %{buildroot}%{_sysconfdir}/profile.d
 install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 
+# docs
+rm -rf %{buildroot}%{_datadir}/doc
+
 %pre
 # Add the "dbus" user and group
 /usr/sbin/groupadd -r -g %{dbus_user_uid} dbus 2>/dev/null || :
 /usr/sbin/useradd -c 'System message bus' -u %{dbus_user_uid} -g %{dbus_user_uid} \
         -s /sbin/nologin -r -d '/' dbus 2> /dev/null || :
-
-%docs_package
-%manifest dbus.manifest
 
 %files
 %manifest %{name}.manifest
@@ -201,31 +182,5 @@ install -m0644 %{SOURCE7} %{buildroot}%{_sysconfdir}/profile.d/dbus.sh
 %dir %{_datadir}/dbus-1/services
 %dir %{_datadir}/dbus-1/system-services
 %{_sysconfdir}/profile.d/dbus.sh
-
-%files devel-doc
-%manifest %{name}.manifest
-%defattr(-,root,root)
-%dir %{_datadir}/doc/dbus
-%{_datadir}/doc/dbus/api/
-%doc %{_datadir}/doc/dbus/dbus-cleanup-sockets.1.html
-%doc %{_datadir}/doc/dbus/dbus-daemon.1.html
-%doc %{_datadir}/doc/dbus/dbus-faq.html
-%doc %{_datadir}/doc/dbus/dbus-launch.1.html
-%doc %{_datadir}/doc/dbus/dbus-monitor.1.html
-%doc %{_datadir}/doc/dbus/dbus-run-session.1.html
-%doc %{_datadir}/doc/dbus/dbus-send.1.html
-%doc %{_datadir}/doc/dbus/dbus-specification.html
-%doc %{_datadir}/doc/dbus/dbus-test-plan.html
-%doc %{_datadir}/doc/dbus/dbus-tutorial.html
-%doc %{_datadir}/doc/dbus/dbus-uuidgen.1.html
-%doc %{_datadir}/doc/dbus/dbus-test-tool.1.html
-%doc %{_datadir}/doc/dbus/dbus-update-activation-environment.1.html
-%doc %{_datadir}/doc/dbus/dbus.devhelp
-%doc %{_datadir}/doc/dbus/diagram.*
-%doc %{_datadir}/doc/dbus/system-activation.txt
-%doc doc/*.txt doc/file-boilerplate.c doc/TODO
-%doc %{_datadir}/doc/dbus/examples/GetAllMatchRules.py
-%doc %{_datadir}/doc/dbus/examples/example-session-disable-stats.conf
-%doc %{_datadir}/doc/dbus/examples/example-system-enable-stats.conf
 
 %changelog
