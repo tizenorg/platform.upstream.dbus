@@ -167,7 +167,7 @@ _kdbus_item_add_fds (struct kdbus_item *item,
                      int                fds_count)
 {
   item->type = KDBUS_ITEM_FDS;
-  item->size = KDBUS_ITEM_HEADER_SIZE + fds_count * sizeof (int);
+  item->size = KDBUS_ITEM_HEADER_SIZE + (__u64)fds_count * sizeof (int);
   memcpy (item->fds, fds, fds_count * sizeof (int));
   return KDBUS_ITEM_NEXT (item);
 }
@@ -909,6 +909,11 @@ process_connection_info_cmd (kdbus_t               *kdbus,
   return ret;
 }
 
+/*
+ * In this function either id is equal to 0 AND name is not NULL,
+ * or id is greater than 0 AND name is NULL.
+ * Thus, condition NULL != name is equivalent to 0 == id.
+ */
 static struct kdbus_cmd_info *
 prepare_connection_info_cmd (__u64          id,
                              const char    *name,
@@ -916,17 +921,17 @@ prepare_connection_info_cmd (__u64          id,
 {
   struct kdbus_cmd_info *cmd;
   __u64 size = sizeof (*cmd);
+
   if (NULL != name)
-    {
-      size += KDBUS_ITEM_SIZE (strlen (name) + 1);
-    }
+    size += KDBUS_ITEM_SIZE (strlen (name) + 1);
+
   cmd = dbus_malloc (size);
   if (NULL == cmd)
     return NULL;
 
   cmd->size = size;
   cmd->id = id;
-  if (0 == id)
+  if (NULL != name)
     make_item_name (name, &(cmd->items[0]));
 
   cmd->attach_flags = KDBUS_ATTACH_CREDS | KDBUS_ATTACH_PIDS;

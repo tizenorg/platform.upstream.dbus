@@ -221,8 +221,9 @@ reply_with_error_preset_sender (const char     *error_type,
 
   if (template)
   {
-    error_msg = alloca (strlen (template) + strlen (object) + 1);
-    sprintf (error_msg, template, object);
+    size_t len = strlen (template) + strlen (object) + 1;
+    error_msg = alloca (len);
+    snprintf (error_msg, len, template, object);
   }
   else if (object)
     error_msg = (char*)object;
@@ -375,7 +376,7 @@ bloom_add_pair (kdbus_bloom_data_t *bloom_data,
   if (size > 1024)
     return;
 
-  strcpy (stpcpy (stpcpy (buf, parameter), ":"), value);
+  snprintf (buf, size, "%s:%s", parameter, value);
   _kdbus_bloom_add_data (kdbus, bloom_data, buf, size);
 }
 
@@ -393,7 +394,7 @@ bloom_add_prefixes (kdbus_bloom_data_t *bloom_data,
   if (size > 1024)
     return;
 
-  strcpy (stpcpy (stpcpy (buf, parameter), ":"), value);
+  snprintf (buf, size, "%s:%s", parameter, value);
 
   for (;;)
     {
@@ -445,6 +446,7 @@ setup_bloom_filter_for_message (DBusMessage               *msg,
       char type;
       char buf[sizeof ("arg")-1 + 2 + sizeof ("-slash-prefix")];
       char *e;
+      size_t len;
 
       type = dbus_message_iter_get_arg_type (&args);
       if (type != DBUS_TYPE_STRING &&
@@ -454,20 +456,19 @@ setup_bloom_filter_for_message (DBusMessage               *msg,
 
       dbus_message_iter_get_basic (&args, &str);
 
-      e = stpcpy (buf, "arg");
-      if (i < 10)
-              *(e++) = '0' + (char) i;
-      else {
-              *(e++) = '0' + (char) (i / 10);
-              *(e++) = '0' + (char) (i % 10);
-      }
+      snprintf (buf, sizeof (buf), "arg%d", i);
 
-      *e = 0;
       bloom_add_pair (bloom_data, kdbus, buf, str);
 
-      strcpy (e, "-dot-prefix");
+      /* point e to end of string, we will add suffixes */
+      len = strlen (buf);
+      e = buf + len;
+      /* we need remaining length of the buffer */
+      len = sizeof (buf) - len;
+
+      strncpy (e, "-dot-prefix", len);
       bloom_add_prefixes (bloom_data, kdbus, buf, str, '.');
-      strcpy (e, "-slash-prefix");
+      strncpy (e, "-slash-prefix", len);
       bloom_add_prefixes (bloom_data, kdbus, buf, str, '/');
 
       if (!dbus_message_iter_next (&args))
@@ -1330,17 +1331,17 @@ get_bloom (kdbus_t *kdbus, MatchRule *rule, kdbus_bloom_data_t *bloom_data)
           unsigned int rule_arg_lens = _match_rule_get_arg_lens (rule, i);
           if (rule_arg_lens & MATCH_ARG_IS_PATH)
             {
-              sprintf (argument_buf, "arg%d-slash-prefix", i);
+              snprintf (argument_buf, sizeof (argument_buf), "arg%d-slash-prefix", i);
               bloom_add_prefixes (bloom_data, kdbus, argument_buf, rule_string, '/');
             }
           else if (rule_arg_lens & MATCH_ARG_NAMESPACE)
             {
-              sprintf (argument_buf, "arg%d-dot-prefix", i);
+              snprintf (argument_buf, sizeof (argument_buf), "arg%d-dot-prefix", i);
               bloom_add_prefixes (bloom_data, kdbus, argument_buf, rule_string, '.');
             }
           else
             {
-              sprintf (argument_buf, "arg%d", i);
+              snprintf (argument_buf, sizeof (argument_buf), "arg%d", i);
               bloom_add_pair (bloom_data, kdbus, argument_buf, rule_string);
             }
         }
@@ -1850,7 +1851,7 @@ capture_org_freedesktop_DBus_GetId (DBusTransportKdbus *transport,
   char *bus_id_original = _kdbus_get_bus_id (transport->kdbus);
   int i = 0;
   for (; i < bus_id_size; i++)
-    sprintf (bus_id + 2*i, "%02x", bus_id_original[i]);
+    snprintf (bus_id + 2*i, sizeof (bus_id), "%02x", bus_id_original[i]);
   return reply_1_data (message, DBUS_TYPE_STRING, &bus_id_ptr);
 }
 
@@ -2340,7 +2341,7 @@ msg_id (uint64_t id)
   if (id == ~0ULL)
     return "BROADCAST";
 
-  sprintf (buf, "%llu", (unsigned long long)id);
+  snprintf (buf, sizeof (buf), "%llu", (unsigned long long)id);
 
   const_ptr = buf;
   return const_ptr;
@@ -2460,7 +2461,7 @@ kdbus_handle_name_owner_changed (__u64               type,
   // for ID_ADD and ID_REMOVE this function takes NULL as bus_name
   if (bus_name == NULL)
     {
-      sprintf (tmp_str,":1.%llu", old != 0 ? old : new);
+      snprintf (tmp_str, sizeof (tmp_str), ":1.%llu", old != 0 ? old : new);
       const_ptr = tmp_str;
     }
   else
@@ -2496,7 +2497,7 @@ kdbus_handle_name_owner_changed (__u64               type,
       // determine and append old_id
       if (old != 0)
       {
-        sprintf (tmp_str,":1.%llu", old);
+        snprintf (tmp_str, sizeof (tmp_str), ":1.%llu", old);
         const_ptr = tmp_str;
       }
       else
@@ -2509,7 +2510,7 @@ kdbus_handle_name_owner_changed (__u64               type,
       // determine and append new_id
       if (new != 0)
       {
-        sprintf (tmp_str,":1.%llu", new);
+        snprintf (tmp_str, sizeof (tmp_str), ":1.%llu", new);
         const_ptr = tmp_str;
       }
       else
@@ -3979,15 +3980,9 @@ new_kdbus_transport (kdbus_t          *kdbus,
 
   if (activator!=NULL)
     {
-      int size = strlen (activator);
-      if (size)
-        {
-          kdbus_transport->activator = dbus_new (char, size + 1 );
-          if (kdbus_transport->activator != NULL)
-            strcpy (kdbus_transport->activator, activator);
-          else
-            goto failed_4;
-        }
+      kdbus_transport->activator = _dbus_strdup (activator);
+      if (kdbus_transport->activator == NULL)
+        goto failed_4;
     }
 
   kdbus_transport->matchmaker = matchmaker_new ();
