@@ -221,8 +221,9 @@ reply_with_error_preset_sender (const char     *error_type,
 
   if (template)
   {
-    error_msg = alloca (strlen (template) + strlen (object) + 1);
-    sprintf (error_msg, template, object);
+    size_t len = strlen (template) + strlen (object) + 1;
+    error_msg = alloca (len);
+    snprintf (error_msg, len, template, object);
   }
   else if (object)
     error_msg = (char*)object;
@@ -3979,15 +3980,9 @@ new_kdbus_transport (kdbus_t          *kdbus,
 
   if (activator!=NULL)
     {
-      int size = strlen (activator);
-      if (size)
-        {
-          kdbus_transport->activator = dbus_new (char, size + 1 );
-          if (kdbus_transport->activator != NULL)
-            strcpy (kdbus_transport->activator, activator);
-          else
-            goto failed_4;
-        }
+      kdbus_transport->activator = _dbus_strdup (activator);
+      if (kdbus_transport->activator == NULL)
+        goto failed_4;
     }
 
   kdbus_transport->matchmaker = matchmaker_new ();
