@@ -33,6 +33,7 @@
 #include "dbus-credentials.h"
 #include "dbus-mainloop.h"
 #include "dbus-message.h"
+#include "dbus-message-internal.h"
 #ifdef ENABLE_KDBUS_TRANSPORT
 #include "dbus-transport-kdbus.h"
 #endif
@@ -270,6 +271,7 @@ _dbus_transport_init_base_with_auth (DBusTransport             *transport,
   transport->get_unix_user_function = _dbus_transport_default_get_unix_user;
   transport->get_unix_process_id_function = _dbus_transport_default_get_unix_process_id;
   transport->assure_protocol_function = _dbus_message_assure_dbus1;
+  transport->protocol = DBUS_MAJOR_PROTOCOL_VERSION;
 
   return TRUE;
 }
@@ -279,6 +281,12 @@ _dbus_transport_assure_protocol_version (DBusTransport *transport,
                                          DBusMessage  **message)
 {
   return transport->assure_protocol_function (message);
+}
+
+int
+_dbus_transport_get_protocol (DBusTransport *transport)
+{
+  return transport->protocol;
 }
 
 /**
@@ -571,6 +579,7 @@ _dbus_transport_open (DBusAddressEntry *entry,
        */
       if(expected_guid)
         transport->expected_guid = expected_guid;
+      _dbus_on_new_bus (_dbus_transport_get_protocol (transport));
     }
 
   return transport;
@@ -1461,9 +1470,11 @@ _dbus_transport_set_get_unix_process_id_function (DBusTransport                 
  */
 void
 _dbus_transport_set_assure_protocol_function (DBusTransport                      *transport,
-                                              DBusTransportAssureProtocolFunction function)
+                                              DBusTransportAssureProtocolFunction function,
+                                              int                                 protocol)
 {
   transport->assure_protocol_function = function;
+  transport->protocol = protocol;
 }
 
 /**

@@ -371,6 +371,8 @@ dbus_bool_t dbus_message_get_allow_interactive_authorization (
 
 DBUS_EXPORT
 void        dbus_set_protocol_version (unsigned char version);
+DBUS_EXPORT
+void        dbus_set_default_protocol_strategy (const char *strategy_name);
 
 /** @} */
 

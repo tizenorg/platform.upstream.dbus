@@ -289,6 +289,13 @@ init_connections_unlocked (void)
                 return FALSE;
             }
         }
+
+      s = _dbus_getenv ("DBUS_DEFAULT_PROTOCOL_STRATEGY");
+
+      if (s != NULL)
+        {
+          dbus_set_default_protocol_strategy (s);
+        }
       
       /* If we return FALSE we have to be sure that restarting
        * the above code will work right
