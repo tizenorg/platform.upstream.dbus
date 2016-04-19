@@ -206,12 +206,11 @@ add_message_to_received (DBusMessage     *message,
   return TRUE;
 }
 
-static int
+static DBusMessage *
 reply_with_error_preset_sender (const char     *error_type,
                                 const char     *template,
                                 const char     *object,
                                 DBusMessage    *message,
-                                DBusConnection *connection,
                                 const char     *sender)
 {
   DBusMessage *errMessage;
@@ -230,15 +229,12 @@ reply_with_error_preset_sender (const char     *error_type,
                                                    error_msg);
 
   if (errMessage == NULL)
-     return -1;
+     return NULL;
 
   if (sender)
     dbus_message_set_sender (errMessage, sender);
 
-  if (add_message_to_received (errMessage, connection))
-    return 0;
-
-  return -1;
+  return errMessage;
 }
 
 /**
@@ -251,18 +247,16 @@ reply_with_error_preset_sender (const char     *error_type,
  *      If object is not NULL while template is NULL, the object string
  *      will be the only error description.
  * @param message Message for which the error reply is generated.
- * @param connection The connection.
- * @returns 0 on success, otherwise -1
+ * @returns local error message on success, otherwise NULL
  */
-static int
+static DBusMessage *
 reply_with_error (const char     *error_type,
                   const char     *template,
                   const char     *object,
-                  DBusMessage    *message,
-                  DBusConnection *connection)
+                  DBusMessage    *message)
 {
   return reply_with_error_preset_sender (error_type, template,
-      object, message, connection, NULL);
+      object, message, NULL);
 }
 
 /**
@@ -271,21 +265,19 @@ reply_with_error (const char     *error_type,
  *  @param message The message we are replying to.
  *  @param data_type Type of data sent in the reply.Use DBUS_TYPE_(...)
  *  @param pData Address of data sent in the reply.
- *  @param connection The connection
- *  @returns 0 on success, otherwise -1
+ *  @returns generated reply on success, otherwise NULL
  */
 static int
 reply_1_data (DBusMessage    *message,
               int             data_type,
-              void           *pData,
-              DBusConnection *connection)
+              void           *pData)
 {
   DBusMessageIter args;
   DBusMessage *reply;
 
   reply = dbus_message_new_method_return (message);
   if (reply == NULL)
-    return -1;
+    return NULL;
 
   if (!dbus_message_set_sender (reply, DBUS_SERVICE_DBUS))
     goto oom_free;
@@ -294,48 +286,26 @@ reply_1_data (DBusMessage    *message,
   if (!dbus_message_iter_append_basic (&args, data_type, pData))
     goto oom_free;
 
-  if (!add_message_to_received (reply, connection))
-    goto oom_free;
-
-  return 0;
+  return reply;
 
 oom_free:
   dbus_message_unref (reply);
 
-  return -1;
-}
-
-static int
-reply_ack (DBusMessage    *message,
-           DBusConnection *connection)
-{
-  DBusMessage *reply;
-  int ret = -1;
-
-  reply = dbus_message_new_method_return (message);
-  if (reply != NULL)
-    {
-      if (add_message_to_received (reply, connection))
-        ret = 0;
-      else
-        dbus_message_unref (reply);
-    }
-  return ret;
+  return NULL;
 }
 
 static int
 reply_fixed_array (DBusMessage    *message,
                    int             element_type,
                    const void     *data,
-                   int             n_elements,
-                   DBusConnection *connection)
+                   int             n_elements)
 {
   DBusMessageIter args, array_iter;
   DBusMessage *reply;
 
   reply = dbus_message_new_method_return (message);
   if (reply == NULL)
-    return -1;
+    return NULL;
 
   if (!dbus_message_set_sender (reply, DBUS_SERVICE_DBUS))
     goto oom_free;
@@ -354,17 +324,14 @@ reply_fixed_array (DBusMessage    *message,
   if (!dbus_message_iter_close_container (&args, &array_iter))
     goto oom_free;
 
-  if (!add_message_to_received (reply, connection))
-    goto oom_free;
-
-  return 0;
+  return reply;
 
 oom_array_iter:
   dbus_message_iter_abandon_container (&args, &array_iter);
 
 oom_free:
   dbus_message_unref (reply);
-  return -1;
+  return NULL;
 }
 
 /**
@@ -883,14 +850,24 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
 
   if (check_privileges && !can_send (transport, message))
     {
-      int ret = reply_with_error ( DBUS_ERROR_ACCESS_DENIED,
-                                   NULL,
-                                   "Cannot send message - message rejected "
-                                   "due to security policies",
-                                   message,
-                                   transport->base.connection);
-      if (-1 == ret)
-        ret_size = -1;
+      DBusMessage *reply;
+
+      reply = reply_with_error (DBUS_ERROR_ACCESS_DENIED,
+                                NULL,
+                                "Cannot send message - message rejected "
+                                "due to security policies",
+                                message);
+      if (reply == NULL)
+        {
+          ret_size = -1;
+        }
+      else
+        {
+          /* puts locally generated reply into received messages queue */
+          if (!add_message_to_received (reply, transport->base.connection))
+            ret_size = -1;
+        }
+
       goto out;
     }
 
@@ -902,15 +879,26 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
                     &msg_reply,
                     &error) != 0)
     {
-      int ret = -1;
+      DBusMessage *reply = NULL;
+
       if (dbus_error_is_set (&error))
-        ret = reply_with_error (error.name,
-                                NULL,
-                                error.message,
-                                message,
-                                transport->base.connection);
-      if (-1 == ret)
-        ret_size = -1;
+        {
+          reply = reply_with_error (error.name,
+                                    NULL,
+                                    error.message,
+                                    message);
+        }
+
+      if (reply == NULL)
+        {
+          ret_size = -1;
+        }
+      else
+        {
+          /* puts locally generated reply into received messages queue */
+          if (!add_message_to_received (reply, transport->base.connection))
+            ret_size = -1;
+        }
     }
 
   if (-1 != ret_size && check_sync_reply)
@@ -1501,7 +1489,7 @@ add_match_kdbus (DBusTransportKdbus *transport,
   return TRUE;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_Hello (DBusTransportKdbus *transport,
                                     DBusMessage        *message,
                                     DBusError          *error)
@@ -1516,15 +1504,14 @@ capture_org_freedesktop_DBus_Hello (DBusTransportKdbus *transport,
   if (!bus_register_kdbus (transport, registration_flags, error))
     goto out;
 
-  if (!reply_1_data (message, DBUS_TYPE_STRING, &transport->my_DBus_unique_name, transport->base.connection))
-    return 0;  /* on success we can not free name */
+  return reply_1_data (message, DBUS_TYPE_STRING, &transport->my_DBus_unique_name);
 
 out:
   free (transport->my_DBus_unique_name);
-  return -1;
+  return NULL;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_RequestName (DBusTransportKdbus *transport,
                                           DBusMessage        *message,
                                           DBusError          *error)
@@ -1532,13 +1519,12 @@ capture_org_freedesktop_DBus_RequestName (DBusTransportKdbus *transport,
   int result;
 
   if (!request_DBus_name (transport, message, &result, error))
-    return -1;
+    return NULL;
 
-  return reply_1_data (message, DBUS_TYPE_UINT32, &result,
-      transport->base.connection);
+  return reply_1_data (message, DBUS_TYPE_UINT32, &result);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_ReleaseName (DBusTransportKdbus *transport,
                                           DBusMessage        *message,
                                           DBusError          *error)
@@ -1546,13 +1532,12 @@ capture_org_freedesktop_DBus_ReleaseName (DBusTransportKdbus *transport,
   int result;
 
   if (!release_DBus_name (transport, message, &result, error))
-    return -1;
+    return NULL;
 
-  return reply_1_data (message, DBUS_TYPE_UINT32, &result,
-      transport->base.connection);
+  return reply_1_data (message, DBUS_TYPE_UINT32, &result);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_AddMatch (DBusTransportKdbus *transport,
                                        DBusMessage        *message,
                                        DBusError          *error)
@@ -1587,13 +1572,13 @@ capture_org_freedesktop_DBus_AddMatch (DBusTransportKdbus *transport,
   }
 
   match_rule_unref (rule);
-  return reply_ack (message, connection);
+  return dbus_message_new_method_return (message);
 
 failed:
   if (rule)
     match_rule_unref (rule);
   _dbus_verbose ("Error during AddMatch in lib: %s, %s\n", error->name, error->message);
-  return -1;
+  return NULL;
 }
 
 static dbus_uint64_t
@@ -1615,7 +1600,7 @@ get_match_cookie_for_remove (Matchmaker *matchmaker, MatchRule *rule_to_remove)
   return 0;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_RemoveMatch (DBusTransportKdbus *transport,
                                           DBusMessage        *message,
                                           DBusError          *error)
@@ -1629,7 +1614,7 @@ capture_org_freedesktop_DBus_RemoveMatch (DBusTransportKdbus *transport,
   if (!dbus_message_get_args (message, error,
         DBUS_TYPE_STRING, &arg,
         DBUS_TYPE_INVALID))
-    return -1;
+    return NULL;
 
   _dbus_string_init_const (&arg_str, arg);
 
@@ -1663,10 +1648,10 @@ capture_org_freedesktop_DBus_RemoveMatch (DBusTransportKdbus *transport,
       _dbus_verbose ("Error during RemoveMatch in lib: %s, %s\n",
                      error->name,
                      error->message);
-      return -1;
+      return NULL;
     }
 
-  return reply_ack (message, connection);
+  return dbus_message_new_method_return (message);
 }
 
 static int
@@ -1724,23 +1709,22 @@ get_connection_info_from_message_argument (DBusMessage        *message,
   return get_connection_info_by_name (message, error, info, transport, arg, getLabel);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_GetConnectionCredentials (DBusTransportKdbus *transport,
                                                        DBusMessage        *message,
                                                        DBusError          *error)
 {
   DBusMessage *reply = NULL;
-  DBusConnection *conn = transport->base.connection;
   DBusMessageIter reply_iter;
   DBusMessageIter array_iter;
   struct nameInfo info;
 
   if (get_connection_info_from_message_argument (message, error, &info, transport, TRUE) != 0)
-    return -1;
+    return NULL;
 
   reply = _dbus_asv_new_method_return (message, &reply_iter, &array_iter);
   if (reply == NULL)
-    return -1;
+    return NULL;
 
   /* we can't represent > 32-bit pids; if your system needs them, please
    * add ProcessID64 to the spec or something */
@@ -1776,19 +1760,16 @@ capture_org_freedesktop_DBus_GetConnectionCredentials (DBusTransportKdbus *trans
   if (!dbus_message_set_sender (reply, DBUS_SERVICE_DBUS))
     goto oom;
 
-  if (!add_message_to_received (reply, conn))
-    goto oom;
-
-  return 0;
+  return reply;
 
 oom:
   _dbus_asv_abandon (&reply_iter, &array_iter);
   dbus_message_unref (reply);
 
-  return -1;
+  return NULL;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_GetConnectionSELinuxSecurityContext (DBusTransportKdbus *transport,
                                                                   DBusMessage        *message,
                                                                   DBusError          *error)
@@ -1796,27 +1777,28 @@ capture_org_freedesktop_DBus_GetConnectionSELinuxSecurityContext (DBusTransportK
   struct nameInfo info;
 
   if (get_connection_info_from_message_argument (message, error, &info, transport, TRUE) != 0)
-    return -1;
+    return NULL;
 
   if (info.sec_label != NULL)
     {
-      int ret = reply_fixed_array (message, DBUS_TYPE_BYTE,
-                                   info.sec_label,
-                                   strlen (info.sec_label)+1,
-                                   transport->base.connection);
+      DBusMessage *reply;
+
+      reply = reply_fixed_array (message, DBUS_TYPE_BYTE,
+                                 info.sec_label,
+                                 strlen (info.sec_label)+1);
 
       dbus_free (info.sec_label);
-      return ret;
+      return reply;
     }
   else
     {
       dbus_set_error (error, DBUS_ERROR_NOT_SUPPORTED, "Operation not supported");
     }
 
-  return -1;
+  return NULL;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_GetConnectionUnixProcessID (DBusTransportKdbus *transport,
                                                          DBusMessage        *message,
                                                          DBusError          *error)
@@ -1826,14 +1808,14 @@ capture_org_freedesktop_DBus_GetConnectionUnixProcessID (DBusTransportKdbus *tra
 
   if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0 ||
       info.processId > _DBUS_UINT32_MAX)
-    return -1;
+    return NULL;
 
   processId = info.processId;
 
-  return reply_1_data (message, DBUS_TYPE_UINT32, &processId, transport->base.connection);
+  return reply_1_data (message, DBUS_TYPE_UINT32, &processId);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_GetConnectionUnixUser (DBusTransportKdbus *transport,
                                                     DBusMessage        *message,
                                                     DBusError          *error)
@@ -1843,14 +1825,14 @@ capture_org_freedesktop_DBus_GetConnectionUnixUser (DBusTransportKdbus *transpor
 
   if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0 ||
       info.userId > _DBUS_UINT32_MAX)
-    return -1;
+    return NULL;
 
   userId = info.userId;
 
-  return reply_1_data (message, DBUS_TYPE_UINT32, &userId, transport->base.connection);
+  return reply_1_data (message, DBUS_TYPE_UINT32, &userId);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_GetId (DBusTransportKdbus *transport,
                                     DBusMessage        *message,
                                     DBusError          *error)
@@ -1862,47 +1844,47 @@ capture_org_freedesktop_DBus_GetId (DBusTransportKdbus *transport,
   int i = 0;
   for (; i < bus_id_size; i++)
     sprintf (bus_id + 2*i, "%02x", bus_id_original[i]);
-  return reply_1_data (message, DBUS_TYPE_STRING, &bus_id_ptr, transport->base.connection);
+  return reply_1_data (message, DBUS_TYPE_STRING, &bus_id_ptr);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_GetNameOwner (DBusTransportKdbus *transport,
                                            DBusMessage        *message,
                                            DBusError          *error)
 {
+  DBusMessage *reply;
   struct nameInfo info;
   char *unique_name;
-  int ret;
   const char *arg;
 
   if (!dbus_message_get_args (message, error,
                               DBUS_TYPE_STRING, &arg,
                               DBUS_TYPE_INVALID))
-      return -1;
+      return NULL;
 
   if (strcmp (arg, DBUS_SERVICE_DBUS) == 0)
     {
       if (-1 == asprintf (&unique_name, "%s", DBUS_SERVICE_DBUS))
-        return -1;
+        return NULL;
     }
   else
     {
       if (get_connection_info_by_name (message, error, &info, transport, arg, FALSE) != 0)
-        return -1;
+        return NULL;
 
       unique_name = create_unique_name_from_unique_id (info.uniqueId);
       if (NULL == unique_name)
-        return -1;
+        return NULL;
     }
 
-  ret = reply_1_data (message, DBUS_TYPE_STRING, &unique_name, transport->base.connection);
+  reply = reply_1_data (message, DBUS_TYPE_STRING, &unique_name);
 
   free (unique_name);
 
-  return ret;
+  return reply;
 }
 
-static int
+static DBusMessage *
 reply_listNames (DBusTransportKdbus *transport,
                  DBusMessage        *message,
                  DBusError          *error,
@@ -1926,7 +1908,7 @@ reply_listNames (DBusTransportKdbus *transport,
   if (ret != 0)
     {
       dbus_set_error (error, DBUS_ERROR_FAILED, "Error listing names");
-      return -1;
+      return NULL;
     }
 
   /* Compose the reply on the fly */
@@ -1997,11 +1979,7 @@ reply_listNames (DBusTransportKdbus *transport,
   if (!dbus_message_set_sender (reply, DBUS_SERVICE_DBUS))
     goto oom_reply;
 
-  /* Finally, send the reply */
-  if (!add_message_to_received (reply, transport->base.connection))
-    goto oom_reply;
-
-  return 0;
+  return reply;
 
 oom_iterator:
   dbus_message_iter_abandon_container (&iter, &array_iter);
@@ -2010,10 +1988,10 @@ oom_reply:
   dbus_message_unref (reply);
 oom:
   _kdbus_free_mem (transport->kdbus, name_list);
-  return -1;
+  return NULL;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_ListActivatableNames (DBusTransportKdbus *transport,
                                                    DBusMessage        *message,
                                                    DBusError          *error)
@@ -2021,7 +1999,7 @@ capture_org_freedesktop_DBus_ListActivatableNames (DBusTransportKdbus *transport
   return reply_listNames (transport, message, error, KDBUS_LIST_ACTIVATORS);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_ListNames (DBusTransportKdbus *transport,
                                         DBusMessage        *message,
                                         DBusError          *error)
@@ -2029,7 +2007,7 @@ capture_org_freedesktop_DBus_ListNames (DBusTransportKdbus *transport,
   return reply_listNames (transport, message, error, KDBUS_LIST_UNIQUE | KDBUS_LIST_NAMES);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_ListQueuedOwners (DBusTransportKdbus *transport,
                                                DBusMessage        *message,
                                                DBusError          *error)
@@ -2037,12 +2015,12 @@ capture_org_freedesktop_DBus_ListQueuedOwners (DBusTransportKdbus *transport,
   struct nameInfo info;
 
   if (get_connection_info_from_message_argument (message, error, &info, transport, FALSE) != 0)
-    return -1;
+    return NULL;
 
   return reply_listNames (transport, message, error, KDBUS_LIST_QUEUED);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_NameHasOwner (DBusTransportKdbus *transport,
                                            DBusMessage        *message,
                                            DBusError          *error)
@@ -2058,13 +2036,13 @@ capture_org_freedesktop_DBus_NameHasOwner (DBusTransportKdbus *transport,
           dbus_error_free (error);
         }
       else
-        return -1;
+        return NULL;
     }
 
-  return reply_1_data (message, DBUS_TYPE_BOOLEAN, &result, transport->base.connection);
+  return reply_1_data (message, DBUS_TYPE_BOOLEAN, &result);
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_ReloadConfig (DBusTransportKdbus *transport,
                                            DBusMessage        *message,
                                            DBusError          *error)
@@ -2077,27 +2055,24 @@ capture_org_freedesktop_DBus_ReloadConfig (DBusTransportKdbus *transport,
     {
       dbus_set_error (error, DBUS_ERROR_INVALID_ARGS,
           "Call to 'ReloadConfig' has wrong args");
-      return -1;
+      return NULL;
     }
 
   reply = dbus_message_new_method_return (message);
   if (reply == NULL)
-    return -1;
+    return NULL;
 
   if (!dbus_message_set_sender (reply, DBUS_SERVICE_DBUS))
     goto oom;
 
-  if (!add_message_to_received (reply, transport->base.connection))
-    goto oom;
-
-  return 0;
+  return reply;
 
 oom:
   dbus_message_unref (reply);
-  return -1;
+  return NULL;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
                                                  DBusMessage        *message,
                                                  DBusError          *error)
@@ -2112,7 +2087,7 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
                               DBUS_TYPE_STRING, &name,
                               DBUS_TYPE_UINT32, &flags,
                               DBUS_TYPE_INVALID))
-    return -1;
+    return NULL;
 
   dbus_service = (strncmp (name, DBUS_SERVICE_DBUS, strlen (DBUS_SERVICE_DBUS) + 1) == 0);
 
@@ -2127,7 +2102,7 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
   if (dbus_service || 0 == ret)
     {
       dbus_uint32_t status = DBUS_START_REPLY_ALREADY_RUNNING;
-      return reply_1_data (message, DBUS_TYPE_UINT32, &status, transport->base.connection);
+      return reply_1_data (message, DBUS_TYPE_UINT32, &status);
     }
   else if (-ESRCH == ret) /* there is an activator */
     {
@@ -2139,7 +2114,7 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
       /* send method call to org.freedesktop.DBus.Peer.Ping */
       sub_message = dbus_message_new_method_call (name, "/", DBUS_INTERFACE_PEER, "Ping");
       if (sub_message == NULL)
-        return -1;
+        return NULL;
 
       /* The serial number here is set to -1. A message needs a valid serial number.
        * We do not have access to connection's serial numbers counter, so we need to make up one.
@@ -2151,11 +2126,11 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
       dbus_message_lock (sub_message);
 
       if (kdbus_write_msg_internal (transport, sub_message, name, FALSE, FALSE) == -1)
-          return -1;
+          return NULL;
       else
         {
           dbus_uint32_t status = DBUS_START_REPLY_SUCCESS;
-          return reply_1_data (message, DBUS_TYPE_UINT32, &status, transport->base.connection);
+          return reply_1_data (message, DBUS_TYPE_UINT32, &status);
         }
     }
   else
@@ -2171,20 +2146,20 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
                       name);
     }
 
-  return -1;
+  return NULL;
 }
 
-static int
+static DBusMessage *
 capture_org_freedesktop_DBus_UpdateActivationEnvironment (DBusTransportKdbus *transport,
                                                           DBusMessage        *message,
                                                           DBusError          *error)
 {
   dbus_set_error (error, DBUS_ERROR_NOT_SUPPORTED,
       "'%s' method not supported", dbus_message_get_member (message));
-  return -1;
+  return NULL;
 }
 
-typedef int (*CaptureHandler)(DBusTransportKdbus *, DBusMessage *, DBusError *);
+typedef DBusMessage * (*CaptureHandler)(DBusTransportKdbus *, DBusMessage *, DBusError *);
 struct CaptureHandlers {
   const char *method_name;
   CaptureHandler handler;
@@ -2232,14 +2207,16 @@ static struct CaptureHandlers capture_handlers[] =
  *
  * @param transport Transport
  * @param message Message being sent.
- * @returns 1 if message is not captured and should be passed to daemon
+ * @returns
+        1 if message is not captured and should be passed to kdbus
  *      0 if message was handled locally and correctly (it includes proper return of error reply),
  *     -1 message to org.freedesktop.DBus was not handled correctly.
  */
 static int
 capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
                               const char         *destination,
-                              DBusMessage        *message)
+                              DBusMessage        *message,
+                              DBusMessage       **reply)
 {
   int ret = 1;
   if (!strcmp (destination, DBUS_SERVICE_DBUS))
@@ -2251,10 +2228,9 @@ capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
 
           dbus_error_init (&error);
 
-          ret = -1;
           if (!strcmp (member, "Hello"))
             {
-              ret = capture_org_freedesktop_DBus_Hello (transport, message, &error);
+              *reply = capture_org_freedesktop_DBus_Hello (transport, message, &error);
             }
           else
             {
@@ -2266,7 +2242,7 @@ capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
 
               if (i < handlers_size)
                 {
-                  ret = capture_handlers[i].handler (transport, message, &error);
+                  *reply = capture_handlers[i].handler (transport, message, &error);
                 }
               else
                 {
@@ -2275,19 +2251,24 @@ capture_org_freedesktop_DBus (DBusTransportKdbus *transport,
                 }
             }
 
-          if (ret != 0 && dbus_error_is_set (&error))
+          if (*reply == NULL && dbus_error_is_set (&error))
             {
-              ret = reply_with_error ((char*)error.name,
-                                      NULL,
-                                      error.message,
-                                      message,
-                                      transport->base.connection);
+              *reply = reply_with_error ((char*)error.name,
+                                         NULL,
+                                         error.message,
+                                         message);
               dbus_error_free (&error);
             }
-        }
-    }
 
-  return ret;  //send message to daemon
+           if (*reply == NULL)
+             ret = -1;
+           else
+             ret = 0;
+
+        } /* id DBUS_INTERFACE_DBUS */
+    } /* if DBUS_SERVICE_DBUS */
+
+  return ret;
 }
 
 #ifdef DBUS_ENABLE_VERBOSE_MODE
@@ -3366,6 +3347,7 @@ do_writing (DBusTransport *transport)
     {
       int bytes_written;
       DBusMessage *message;
+      DBusMessage *reply;
       const DBusString *header;
       const DBusString *body;
       const char* pDestination;
@@ -3377,6 +3359,7 @@ do_writing (DBusTransport *transport)
           goto out;
         }
 
+      reply = NULL;
       message = _dbus_connection_get_message_to_send (transport->connection);
       _dbus_assert (message != NULL);
       pDestination = dbus_message_get_destination (message);
@@ -3385,14 +3368,21 @@ do_writing (DBusTransport *transport)
         {
           int ret;
 
-          ret = capture_org_freedesktop_DBus ((DBusTransportKdbus*)transport, pDestination, message);
+          ret = capture_org_freedesktop_DBus ((DBusTransportKdbus*)transport, pDestination, message, &reply);
           if (ret < 0)  //error
             {
               bytes_written = -1;
               goto written;
             }
-          else if (ret == 0)  //hello message captured and handled correctly
+          else if (ret == 0)  //message captured and handled correctly
             {
+              /* puts locally generated reply into received messages queue */
+              if (!add_message_to_received (reply, kdbus_transport->base.connection))
+                {
+                  bytes_written = -1;
+                  goto written;
+                }
+
               _dbus_message_get_network_data (message, &header, &body);
               bytes_written = _dbus_string_get_length (header) + _dbus_string_get_length (body);
               goto written;
