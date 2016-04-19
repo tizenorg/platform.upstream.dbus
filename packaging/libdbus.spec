@@ -81,6 +81,8 @@ export V=1
     --with-init-scripts=suse						\
     --enable-inotify							\
     --with-console-auth-dir=/var/run/dbus/at_console/			\
+    --disable-doxygen-docs						\
+    --disable-xml-docs							\
 %if %{with_systemd}
     --enable-systemd							\
 %endif
