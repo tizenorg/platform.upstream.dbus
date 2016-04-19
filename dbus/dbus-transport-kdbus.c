@@ -24,7 +24,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
-#include "../config.h"
+#include <config.h>
 #include "dbus-transport.h"
 #include "dbus-transport-kdbus.h"
 #include "dbus-transport-protected.h"
@@ -37,6 +37,7 @@
 #include "dbus-errors.h"
 #include "dbus-bus.h"
 #include "kdbus-common.h"
+#include "dbus-protocol-gvariant.h"
 #include <linux/types.h>
 #include <errno.h>
 #include <stdio.h>
@@ -67,7 +68,9 @@
 #  include <linux/memfd.h>
 #endif
 
+#ifdef DBUS_ENABLE_VERBOSE_MODE
 int debug = -1;
+#endif
 
 /* FIXME shouldn't it be in fcntl.h header file? copied from systemd's missing.h */
 #ifndef F_LINUX_SPECIFIC_BASE
@@ -654,6 +657,7 @@ kdbus_close_message (DBusTransportKdbus *transport, struct kdbus_msg *msg)
   _kdbus_free_mem (transport->kdbus, msg);
 }
 
+#ifdef DBUS_ENABLE_VERBOSE_MODE
 static void
 debug_c_str (const char *msg, const char *str, int len)
 {
@@ -672,6 +676,7 @@ debug_str (const char *msg, const DBusString *str)
 {
   debug_c_str (msg, _dbus_string_get_const_data (str), _dbus_string_get_length (str));
 }
+#endif
 
 static dbus_bool_t
 can_send (DBusTransportKdbus *transport,
@@ -841,11 +846,13 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
         {
           const char* body_data = _dbus_string_get_const_data (body);
 
+#ifdef DBUS_ENABLE_VERBOSE_MODE
           if (-1 != debug)
-          {
-            debug_str ("Header to send:", header);
-            debug_str ("Body to send:", body);
-          }
+            {
+              debug_str ("Header to send:", header);
+              debug_str ("Body to send:", body);
+            }
+#endif
 
           while (body_size > 0)
             {
@@ -2779,10 +2786,12 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
             data += item->vec.size;
             ret_size += item->vec.size;
 
+#ifdef DBUS_ENABLE_VERBOSE_MODE
             if (-1 != debug)
-            {
-              debug_c_str ("Message part arrived:", (char *)msg+item->vec.offset, item->vec.size);
-            }
+              {
+                debug_c_str ("Message part arrived:", (char *)msg+item->vec.offset, item->vec.size);
+              }
+#endif
 
             _dbus_verbose ("  +%s (%llu bytes) off=%llu size=%llu\n",
                 enum_MSG (item->type), item->size,
@@ -3971,7 +3980,8 @@ new_kdbus_transport (kdbus_t          *kdbus,
   _dbus_transport_set_get_unix_process_id_function (&kdbus_transport->base,
                                                     _dbus_transport_kdbus_get_unix_process_id);
   _dbus_transport_set_assure_protocol_function (&kdbus_transport->base,
-                                                _dbus_message_assure_gvariant);
+                                                _dbus_message_assure_gvariant,
+                                                DBUS_PROTOCOL_VERSION_GVARIANT);
 
   /* These values should probably be tunable or something. */
   kdbus_transport->max_bytes_read_per_iteration = MAX_BYTES_PER_ITERATION;
@@ -4041,7 +4051,8 @@ _dbus_transport_new_for_kdbus (const char *path,
   DBusString address;
   kdbus_t *kdbus;
 
-  const char *dbgenv = getenv ("G_DBUS_DEBUG");
+#ifdef DBUS_ENABLE_VERBOSE_MODE
+  const char *dbgenv = _dbus_getenv ("G_DBUS_DEBUG");
   if (dbgenv != NULL)
   {
     if (!strcmp (dbgenv, "message"))
@@ -4049,6 +4060,7 @@ _dbus_transport_new_for_kdbus (const char *path,
     else if (!strcmp (dbgenv, "all"))
       debug = 2;
   }
+#endif
 
   _DBUS_ASSERT_ERROR_IS_CLEAR (error);
 

@@ -118,6 +118,7 @@ struct DBusTransport
   DBusTransportGetUnixUserFunction get_unix_user_function;      /**< Function for getting Unix user ID */
   DBusTransportGetUnixPIDFunction get_unix_process_id_function; /**< Function for getting Unix process ID */
   DBusTransportAssureProtocolFunction assure_protocol_function; /**< Function for converting messages, if needed */
+  int protocol;                               /**< type of protocol for this transport */
   
   unsigned int disconnected : 1;              /**< #TRUE if we are disconnected. */
   unsigned int authenticated : 1;             /**< Cache of auth state; use _dbus_transport_peek_is_authenticated() to query value */
@@ -143,7 +144,9 @@ void        _dbus_transport_set_get_unix_user_function       (DBusTransport     
 void        _dbus_transport_set_get_unix_process_id_function (DBusTransport                    *transport,
                                                               DBusTransportGetUnixPIDFunction   function);
 void        _dbus_transport_set_assure_protocol_function     (DBusTransport                    *transport,
-                                                              DBusTransportAssureProtocolFunction function);
+                                                              DBusTransportAssureProtocolFunction function,
+                                                              int                               protocol);
+int         _dbus_transport_get_protocol                     (DBusTransport                    *transport);
 
 typedef enum
 {
