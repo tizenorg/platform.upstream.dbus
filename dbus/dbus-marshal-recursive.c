@@ -693,7 +693,7 @@ array_reader_next (DBusTypeReader *reader,
         {
           /* fixed size - move on; consider alignment */
           reader->value_pos = _DBUS_ALIGN_VALUE(reader->value_pos, alignment) + size;
-          reader->finished = (reader->value_pos >= reader->value_end);
+          reader->finished = ((size_t)reader->value_pos >= reader->value_end);
         }
       return;
     }

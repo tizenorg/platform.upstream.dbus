@@ -429,7 +429,7 @@ _kdbus_send (kdbus_t           *kdbus,
   VALGRIND_MAKE_MEM_DEFINED (&cmd, sizeof (cmd));
 
   cmd.size = sizeof (cmd);
-  cmd.msg_address = (__u64)msg;
+  cmd.msg_address = (uintptr_t)msg;
   cmd.flags = flags;
 
   if (-1 == safe_ioctl (kdbus->fd, KDBUS_CMD_SEND, &cmd))

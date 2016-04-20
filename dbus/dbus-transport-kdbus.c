@@ -271,7 +271,7 @@ reply_with_error (const char     *error_type,
  *  @param pData Address of data sent in the reply.
  *  @returns generated reply on success, otherwise NULL
  */
-static int
+static DBusMessage *
 reply_1_data (DBusMessage    *message,
               int             data_type,
               void           *pData)
@@ -298,7 +298,7 @@ oom_free:
   return NULL;
 }
 
-static int
+static DBusMessage *
 reply_fixed_array (DBusMessage    *message,
                    int             element_type,
                    const void     *data,
@@ -694,7 +694,7 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
   uint64_t dst_id = KDBUS_DST_ID_BROADCAST;
   const DBusString *header;
   const DBusString *body;
-  uint64_t ret_size = -1;
+  int64_t ret_size = -1;
   uint64_t body_size = 0;
   uint64_t header_size = 0;
   int memfd = -1;
@@ -809,7 +809,7 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
       _dbus_verbose ("sending data by vec\n");
       item = _kdbus_item_add_payload_vec (item,
                                           header_size,
-                                          (dbus_uint64_t)header_data);
+                                          (uintptr_t)header_data);
       if (body_size > 0)
         {
           const char* body_data = _dbus_string_get_const_data (body);
@@ -832,7 +832,7 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
               _dbus_verbose ("attaching body part\n");
               item = _kdbus_item_add_payload_vec (item,
                                                   part_size,
-                                                  (dbus_uint64_t)body_data);
+                                                  (uintptr_t)body_data);
               body_data += part_size;
               body_size -= part_size;
             }

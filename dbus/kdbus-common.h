@@ -31,13 +31,15 @@
 #include <dbus/dbus-transport.h>
 #include "dbus-signals.h"
 #include "kdbus.h"
+#include <stdint.h>
 
 #define KDBUS_ALIGN8(l) (((l) + 7) & ~7)
 
 #define KDBUS_ITEM_HEADER_SIZE          offsetof(struct kdbus_item, data)
 #define KDBUS_ITEM_SIZE(s) KDBUS_ALIGN8(KDBUS_ITEM_HEADER_SIZE + (s))
+#define KDBUS_ITEM_NEXT_ADDRESS(item) ((uintptr_t)(((uint8_t *)item) + KDBUS_ALIGN8((item)->size)))
 #define KDBUS_ITEM_NEXT(item) \
-        (typeof(item))(((uint8_t *)item) + KDBUS_ALIGN8((item)->size))
+        (typeof(item))KDBUS_ITEM_NEXT_ADDRESS(item)
 #define KDBUS_ITEM_FOREACH(item, head, first)                           \
         for (item = (head)->first;                                      \
              (uint8_t *)(item) < (uint8_t *)(head) + (head)->size;      \

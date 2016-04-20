@@ -194,10 +194,10 @@ _dbus_header_toggle_gvariant (DBusHeader *header, dbus_bool_t gvariant)
   header->protocol_version = gvariant ? DBUS_PROTOCOL_VERSION_GVARIANT : DBUS_MAJOR_PROTOCOL_VERSION;
 }
 
-static const char *
+static uintptr_t
 get_next_field_address (const char *array_buffer, size_t offset)
 {
-  return array_buffer + _DBUS_ALIGN_VALUE(offset, 8);
+  return (uintptr_t)array_buffer + _DBUS_ALIGN_VALUE(offset, 8);
 }
 
 static dbus_uint64_t
@@ -390,7 +390,7 @@ get_offsets (const char *buffer, size_t container_size,
     size_t last_offset_position = container_size - (*offset_size);
     size_t last_offset = bus_gvariant_read_word_le (buffer + last_offset_position,
                                                     (*offset_size));
-    int i;
+    size_t i;
 
     *n_fields_offsets = (container_size - last_offset) / (*offset_size);
     fields_offsets[(*n_fields_offsets)-1] = last_offset;
@@ -411,7 +411,8 @@ find_field (int field, const char *array_buffer, size_t *fields_offsets, size_t 
     size_t i = 0;
     size_t next_offset = 0;
 
-    while ( next_offset < last_offset && get_field_after (array_buffer, next_offset) != field)
+    while ( next_offset < last_offset &&
+            get_field_after (array_buffer, next_offset) != (dbus_uint64_t) field)
     {
       next_offset = fields_offsets[i];
       i++;

@@ -5180,7 +5180,7 @@ _dbus_message_remarshal (DBusMessage *message, dbus_bool_t gvariant)
 {
   DBusMessage *ret;
   DBusMessageIter iter, ret_iter;
-  int i;
+  size_t i;
   dbus_uint32_t serial;
   const char *sender;
 
