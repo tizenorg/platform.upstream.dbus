@@ -66,7 +66,7 @@ struct DBusMessageLoader
   DBusList *messages;  /**< Complete messages. */
 
   long max_message_size; /**< Maximum size of a message */
-  long max_message_unix_fds; /**< Maximum unix fds in a message */
+  unsigned long max_message_unix_fds; /**< Maximum unix fds in a message */
 
   DBusValidity corruption_reason; /**< why we were corrupted */
 

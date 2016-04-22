@@ -1784,7 +1784,7 @@ bus_activation_activate_service (BusActivation  *activation,
   char **argv;
   char **envp = NULL;
   int argc;
-  dbus_bool_t retval;
+  dbus_bool_t retval = FALSE;
   dbus_bool_t was_pending_activation;
   DBusString command;
 

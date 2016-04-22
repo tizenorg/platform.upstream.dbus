@@ -1202,7 +1202,7 @@ recover_unused_bytes (DBusTransport *transport)
                                    &bytes);
 
       succeeded = TRUE;
-      if (!_dbus_string_copy (bytes, 0, buffer, _dbus_string_get_length (buffer)))
+      if (!_dbus_string_copy (bytes, 0, buffer, orig_len))
         succeeded = FALSE;
       
       _dbus_verbose (" %d unused bytes sent to message loader\n", 

@@ -1150,7 +1150,7 @@ void
 _dbus_type_reader_recurse (DBusTypeReader *reader,
                            DBusTypeReader *sub)
 {
-  const DBusTypeReaderClass *klass;
+  const DBusTypeReaderClass *klass = NULL;
   int t;
 
   t = _dbus_first_type_in_signature (reader->type_str, reader->type_pos);
