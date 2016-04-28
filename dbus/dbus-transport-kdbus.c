@@ -4003,17 +4003,14 @@ new_kdbus_transport (kdbus_t          *kdbus,
 }
 
 static dbus_bool_t
-initialize_policies (DBusTransportKdbus *transport, DBusBusType bus_type)
+initialize_policies (DBusTransportKdbus *transport, const char *path)
 {
   dbus_bool_t result = TRUE;
 
 #ifdef LIBDBUSPOLICY
-  if (DBUS_BUS_SYSTEM == bus_type || DBUS_BUS_SESSION == bus_type)
-    {
-      transport->policy = dbuspolicy1_init (bus_type);
-      if (NULL == transport->policy)
-        result = FALSE;
-    }
+  transport->policy = dbuspolicy1_init (path);
+  if (NULL == transport->policy)
+    result = FALSE;
 #endif
 
   return result;
@@ -4088,8 +4085,7 @@ _dbus_transport_new_for_kdbus (const char *path,
       goto failed_1;
     }
 
-  if (!initialize_policies (transport,
-                            _dbus_bus_get_address_type (_dbus_string_get_data (&address))))
+  if (!initialize_policies (transport, path))
     {
       dbus_set_error (error,
                       DBUS_ERROR_FAILED,

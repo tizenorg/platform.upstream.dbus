@@ -160,7 +160,6 @@ const char* _dbus_connection_get_address (DBusConnection *connection);
  */
 
 void           _dbus_bus_notify_shared_connection_disconnected_unlocked (DBusConnection *connection);
-DBusBusType    _dbus_bus_get_address_type (const char *address);
 
 /** @} */
 
