@@ -33,6 +33,9 @@
     <allow eavesdrop="true"/>
     <!-- Allow anyone to own anything -->
     <allow own="*"/>
+    <allow send_type="method_call"/>
+    <allow receive_type="method_call"/>
+    <allow receive_type="method_return"/>
   </policy>
 
   <!-- Include legacy configuration location -->
