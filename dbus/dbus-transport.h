@@ -42,6 +42,7 @@ dbus_bool_t        _dbus_transport_peek_is_authenticated  (DBusTransport        
 dbus_bool_t        _dbus_transport_try_to_authenticate    (DBusTransport              *transport);
 dbus_bool_t        _dbus_transport_get_is_anonymous       (DBusTransport              *transport);
 dbus_bool_t        _dbus_transport_can_pass_unix_fd       (DBusTransport              *transport);
+dbus_bool_t        _dbus_transport_can_send_sync_call     (DBusTransport              *transport);
 
 const char*        _dbus_transport_get_address            (DBusTransport              *transport);
 const char*        _dbus_transport_get_server_id          (DBusTransport              *transport);
@@ -106,6 +107,8 @@ void               _dbus_transport_set_pending_fds_function (DBusTransport *tran
                                                              void *data);
 
 dbus_bool_t        _dbus_transport_assure_protocol_version (DBusTransport             *transport,
+                                                            DBusMessage              **message);
+DBusMessage*       _dbus_transport_send_sync_call          (DBusTransport             *transport,
                                                             DBusMessage              **message);
 
 

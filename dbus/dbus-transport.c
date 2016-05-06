@@ -271,6 +271,7 @@ _dbus_transport_init_base_with_auth (DBusTransport             *transport,
   transport->get_unix_user_function = _dbus_transport_default_get_unix_user;
   transport->get_unix_process_id_function = _dbus_transport_default_get_unix_process_id;
   transport->assure_protocol_function = _dbus_message_assure_dbus1;
+  transport->send_sync_call_function = NULL;
   transport->protocol = DBUS_MAJOR_PROTOCOL_VERSION;
 
   return TRUE;
@@ -281,6 +282,13 @@ _dbus_transport_assure_protocol_version (DBusTransport *transport,
                                          DBusMessage  **message)
 {
   return transport->assure_protocol_function (message);
+}
+
+DBusMessage *
+_dbus_transport_send_sync_call (DBusTransport *transport,
+                                DBusMessage  **message)
+{
+  return transport->send_sync_call_function (transport, message);
 }
 
 int
@@ -981,6 +989,21 @@ _dbus_transport_can_pass_unix_fd(DBusTransport *transport)
 }
 
 /**
+ * Returns TRUE if the transport supports sending synchronous calls.
+ *
+ * @param transport the transport
+ * @returns #TRUE if TRUE it is possible to send sync call across the transport.
+ */
+dbus_bool_t
+_dbus_transport_can_send_sync_call (DBusTransport *transport)
+{
+  if (transport->send_sync_call_function)
+    return TRUE;
+  else
+    return FALSE;
+}
+
+/**
  * Gets the address of a transport. It will be
  * #NULL for a server-side transport.
  *
@@ -1460,6 +1483,19 @@ _dbus_transport_set_get_unix_process_id_function (DBusTransport                 
                                                   DBusTransportGetUnixPIDFunction   function)
 {
   transport->get_unix_process_id_function = function;
+}
+
+/**
+ * Sets a function used to send synchronous calls.
+ *
+ * @param transport the transport
+ * @param function the getter function
+ */
+void
+_dbus_transport_set_send_sync_call_function (DBusTransport                     *transport,
+                                             DBusTransportSendSyncCallFunction  function)
+{
+  transport->send_sync_call_function = function;
 }
 
 /**

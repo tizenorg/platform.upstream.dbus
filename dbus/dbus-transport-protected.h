@@ -75,6 +75,8 @@ typedef dbus_bool_t (*DBusTransportGetUnixUserFunction) (DBusTransport *transpor
                                                          unsigned long *uid);
 typedef dbus_bool_t (*DBusTransportGetUnixPIDFunction)  (DBusTransport *transport,
                                                          unsigned long *uid);
+typedef DBusMessage * (*DBusTransportSendSyncCallFunction) (DBusTransport *transport,
+                                                            DBusMessage   *message);
 typedef dbus_bool_t (*DBusTransportAssureProtocolFunction) (DBusMessage **message);
 /**
  * Object representing a transport such as a socket.
@@ -118,6 +120,7 @@ struct DBusTransport
   DBusTransportGetUnixUserFunction get_unix_user_function;      /**< Function for getting Unix user ID */
   DBusTransportGetUnixPIDFunction get_unix_process_id_function; /**< Function for getting Unix process ID */
   DBusTransportAssureProtocolFunction assure_protocol_function; /**< Function for converting messages, if needed */
+  DBusTransportSendSyncCallFunction send_sync_call_function;    /**< Function for sending synchronous calls */
   int protocol;                               /**< type of protocol for this transport */
   
   unsigned int disconnected : 1;              /**< #TRUE if we are disconnected. */
@@ -143,6 +146,8 @@ void        _dbus_transport_set_get_unix_user_function       (DBusTransport     
                                                               DBusTransportGetUnixUserFunction  function);
 void        _dbus_transport_set_get_unix_process_id_function (DBusTransport                    *transport,
                                                               DBusTransportGetUnixPIDFunction   function);
+void        _dbus_transport_set_send_sync_call_function      (DBusTransport                     *transport,
+                                                              DBusTransportSendSyncCallFunction  function);
 void        _dbus_transport_set_assure_protocol_function     (DBusTransport                    *transport,
                                                               DBusTransportAssureProtocolFunction function,
                                                               int                               protocol);
