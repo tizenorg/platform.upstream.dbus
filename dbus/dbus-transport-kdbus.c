@@ -3726,11 +3726,16 @@ kdbus_do_iteration (DBusTransport *transport,
     * When timeout is set to -1 in client application,
     * error messages are inserted directly to incoming queue and
     * application hangs on dbus_poll.
-    */
+    *
+    * This causes a busy loop in _dbus_connection_block_pending_call() 
+    * There is no case of waiting for the locally-generated error reply
+
    if (_dbus_connection_get_n_incoming (transport->connection) > 0)
    {
      timeout_milliseconds = 0;
    }
+    */
+
    /* This is kind of a hack; if we have stuff to write, then try
     * to avoid the poll. This is probably about a 5% speedup on an
     * echo client/server.
