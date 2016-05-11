@@ -109,7 +109,7 @@ void               _dbus_transport_set_pending_fds_function (DBusTransport *tran
 dbus_bool_t        _dbus_transport_assure_protocol_version (DBusTransport             *transport,
                                                             DBusMessage              **message);
 DBusMessage*       _dbus_transport_send_sync_call          (DBusTransport             *transport,
-                                                            DBusMessage              **message);
+                                                            DBusMessage               *message);
 
 
 /* if DBUS_ENABLE_STATS */

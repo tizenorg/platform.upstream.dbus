@@ -122,6 +122,11 @@ void            _dbus_check_fdleaks_leave (DBusInitialFDs *fds);
 
 DBusMessage *      _dbus_message_remarshal(DBusMessage *message, dbus_bool_t gvariant);
 
+DBusMessage *      _dbus_decode_kmsg                            (DBusString  *data,
+                                                                 uint64_t     sender_id,
+                                                                 int         *fds,
+                                                                 unsigned     n_fds);
+
 DBusMessage *      _dbus_generate_local_error_message           (dbus_uint32_t serial,
                                                                  char *error_name,
                                                                  char *error_msg);

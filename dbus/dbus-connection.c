@@ -3580,6 +3580,22 @@ dbus_connection_send_with_reply_and_block (DBusConnection     *connection,
   _dbus_return_val_if_fail (timeout_milliseconds >= 0 || timeout_milliseconds == -1, NULL);
   _dbus_return_val_if_error_is_set (error, NULL);
 
+  if (_dbus_transport_can_send_sync_call (connection->transport))
+    {
+      dbus_int32_t serial;
+
+      /* set serial */
+      serial = dbus_message_get_serial (message);
+      if (serial == 0)
+        {
+          serial = _dbus_connection_get_next_client_serial (connection);
+          dbus_message_set_serial (message, serial);
+        }
+
+      reply = _dbus_transport_send_sync_call (connection->transport, message);
+      goto out;
+    }
+
 #ifdef HAVE_UNIX_FD_PASSING
 
   CONNECTION_LOCK (connection);
@@ -3615,9 +3631,11 @@ dbus_connection_send_with_reply_and_block (DBusConnection     *connection,
   /* call_complete_and_unlock() called from pending_call_block() should
    * always fill this in.
    */
+
+out:
   _dbus_assert (reply != NULL);
   
-   if (dbus_set_error_from_message (error, reply))
+  if (dbus_set_error_from_message (error, reply))
     {
       dbus_message_unref (reply);
       return NULL;
