@@ -113,7 +113,7 @@ int debug = -1;
  */
 
 /** Default Size of the memory area for received non-memfd messages. */
-#define RECEIVE_POOL_SIZE_DEFAULT_SIZE (2 * 1024LU * 1024LU)
+#define RECEIVE_POOL_SIZE_DEFAULT_SIZE (16 * 1024LU * 1024LU)
 /** Name of environmental variable to define receive pool size*/
 #define RECEIVE_POOL_SIZE_ENV_VAR_NAME "KDBUS_MEMORY_POOL_SIZE"
 /** Max size of pool size in megabytes*/
