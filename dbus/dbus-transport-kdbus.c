@@ -2789,7 +2789,7 @@ kdbus_decode_dbus_message (const struct kdbus_msg *msg,
               size = item->memfd.size;
               _dbus_verbose ("memfd.size : %llu\n", (unsigned long long)size);
 
-              buf = mmap (NULL, size, PROT_READ , MAP_SHARED, item->memfd.fd, 0);
+              buf = mmap (NULL, size, PROT_READ, MAP_PRIVATE, item->memfd.fd, 0);
               if (buf == MAP_FAILED)
                 {
                   _dbus_verbose ("mmap () fd=%i failed:%m", item->memfd.fd);
