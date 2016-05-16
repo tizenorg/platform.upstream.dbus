@@ -187,6 +187,7 @@ AC_ARG_ENABLE(launchd, AS_HELP_STRING([--enable-launchd],[build with launchd aut
 AC_ARG_ENABLE(systemd, AS_HELP_STRING([--enable-systemd],[build with systemd at_console support]),enable_systemd=$enableval,enable_systemd=auto)
 AC_ARG_ENABLE(kdbus-transport, AS_HELP_STRING([--enable-kdbus-transport],[build with kdbus transport support]),enable_kdbus_transport=$enableval,enable_kdbus_transport=no)
 AC_ARG_ENABLE(libdbuspolicy,[AS_HELP_STRING([--enable-libdbuspolicy],[enable libdbuspolicy for kdbus transport [default=no]])],,[enable_libdbuspolicy=no])
+AC_ARG_ENABLE(kdbus-sync-calls,[AS_HELP_STRING([--enable-kdbus-sync-calls],[enable native sync calls support for kdbus transport [default=no]])],,[enable_kdbus_sync_calls=no])
 
 AC_ARG_WITH(init-scripts, AS_HELP_STRING([--with-init-scripts=[redhat]],[Style of init scripts to install]))
 AC_ARG_WITH(session-socket-dir, AS_HELP_STRING([--with-session-socket-dir=[dirname]],[Where to put sockets for the per-login-session message bus]))
@@ -1297,6 +1298,10 @@ if test x$enable_kdbus_transport = xyes; then
 fi
 AM_CONDITIONAL([ENABLE_KDBUS_TRANSPORT], [test x$enable_kdbus_transport = xyes])
 
+if test x$enable_kdbus_sync_calls = xyes; then
+    AC_DEFINE(ENABLE_KDBUS_SYNC_CALLS,1,[Enable kdbus sync calls support])
+fi
+
 AC_MSG_CHECKING([whether to enable libdbuspolicy for kdbus transport])
 AM_CONDITIONAL(LIBDBUSPOLICY, [test "x$enable_libdbuspolicy" = "xyes"])
 AS_IF([test "x$enable_libdbuspolicy" = "xyes"], [
@@ -2030,6 +2035,7 @@ echo "
         Building launchd support: ${have_launchd}
         Building kdbus support:   ${enable_kdbus_transport}
           with libdbuspolicy:     ${enable_libdbuspolicy}
+          with sync calls:        ${enable_kdbus_sync_calls}
         Init scripts style:       ${with_init_scripts}
         Abstract socket names:    ${ac_cv_have_abstract_sockets}
         System bus socket:        ${DBUS_SYSTEM_SOCKET}
