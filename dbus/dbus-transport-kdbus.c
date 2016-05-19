@@ -590,7 +590,6 @@ send_message (DBusTransportKdbus *transport,
           case EMLINK:
             dbus_set_error (error,
                             DBUS_ERROR_LIMITS_EXCEEDED,
-                            NULL,
                             "The maximum number of pending replies per connection has been reached");
             break;
 
@@ -598,11 +597,20 @@ send_message (DBusTransportKdbus *transport,
           case EXFULL:
             dbus_set_error (error,
                             DBUS_ERROR_LIMITS_EXCEEDED,
-                            "No space in receiver's buffer",
-                            destination);
+                            "No space in receiver's buffer");
+            break;
+
+          case ETIMEDOUT:
+            dbus_set_error (error,
+                            DBUS_ERROR_TIMEOUT,
+                            "Connection does not receive a reply");
             break;
 
           default:
+            dbus_set_error (error,
+                            DBUS_ERROR_FAILED,
+                            "Something went wrong: %s",
+                            _dbus_strerror (ret));
             break;
         }
 
@@ -681,11 +689,20 @@ can_send (DBusTransportKdbus *transport,
   return result;
 }
 
+/* function prototypes */
+static int kdbus_message_size (const struct kdbus_msg *msg,
+                               int                    *n_fds);
+static int kdbus_decode_dbus_message (const struct kdbus_msg *msg,
+                                      char                   *data,
+                                      DBusTransportKdbus     *kdbus_transport,
+                                      int                    *fds,
+                                      int                    *n_fds);
+
 static int
 kdbus_write_msg_internal (DBusTransportKdbus  *transport,
                           DBusMessage         *message,
                           const char          *destination,
-                          dbus_bool_t          check_sync_reply,
+                          DBusMessage        **sync_reply,
                           dbus_bool_t          check_privileges)
 {
   struct kdbus_msg *msg = NULL;
@@ -705,9 +722,12 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
   dbus_uint64_t items_size;
   dbus_uint64_t flags = 0;
   dbus_uint64_t timeout_ns_or_cookie_reply = 0;
-
+  dbus_bool_t check_sync_reply = FALSE;
 
   dbus_error_init (&error);
+
+  if (sync_reply != NULL)
+    check_sync_reply = TRUE;
 
   // determine destination and destination id
   if (destination)
@@ -871,11 +891,17 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
         }
       else
         {
-          /* puts locally generated reply into received messages queue */
-          if (!add_message_to_received (reply, transport->base.connection))
-            ret_size = -1;
+          if (check_sync_reply)
+            {
+              *sync_reply = reply;
+            }
+          else
+            {
+              /* puts locally generated reply into received messages queue */
+              if (!add_message_to_received (reply, transport->base.connection))
+                ret_size = -1;
+            }
         }
-
       goto out;
     }
 
@@ -903,16 +929,71 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
         }
       else
         {
-          /* puts locally generated reply into received messages queue */
-          if (!add_message_to_received (reply, transport->base.connection))
-            ret_size = -1;
+          if (check_sync_reply)
+            {
+              *sync_reply = reply;
+            }
+          else
+            {
+              /* puts locally generated reply into received messages queue */
+              if (!add_message_to_received (reply, transport->base.connection))
+                ret_size = -1;
+            }
         }
+      goto out;
     }
 
-  if (-1 != ret_size && check_sync_reply)
-    kdbus_close_message (transport, msg_reply);
+  if (check_sync_reply)
+    {
+      DBusString str;
+      int size, ret, *fds;
+      unsigned n_fds;
+      char *data;
 
-  out:
+      /* check message size */
+      size = kdbus_message_size (msg_reply, &n_fds);
+      if (size <= 0)
+        {
+          ret_size = -1;
+          kdbus_close_message (transport, msg_reply);
+          goto out;
+        }
+
+      /* alloc buffer for decoded message */
+      data = dbus_malloc (sizeof (char) * size);
+      if (data == NULL)
+        {
+          ret_size = -1;
+          kdbus_close_message (transport, msg_reply);
+          goto out;
+        }
+
+      /* alloc palce for fds */
+      fds = dbus_malloc (sizeof (int) * (n_fds + 1));
+
+      /* decode dbus message */
+      ret = kdbus_decode_dbus_message (msg_reply, data,
+                                       transport, fds, &n_fds);
+      if (ret <= 0)
+        {
+          ret_size = -1;
+          kdbus_close_message (transport, msg_reply);
+          dbus_free (data);
+          goto out;
+        }
+      _dbus_string_init_const_len (&str, data, ret);
+
+      /* create DBusMessage from kmsg */
+      *sync_reply = _dbus_decode_kmsg (&str, msg_reply->src_id, fds, n_fds);
+      if (*sync_reply == NULL)
+        ret_size = -1;
+
+      kdbus_close_message (transport, msg_reply);
+      dbus_free (fds);
+      dbus_free (data);
+    }
+
+out:
   if (msg)
     _kdbus_free_msg (msg);
   if (memfd >= 0)
@@ -939,7 +1020,7 @@ kdbus_write_msg (DBusTransportKdbus  *transport,
                  DBusMessage         *message,
                  const char          *destination)
 {
-  return kdbus_write_msg_internal (transport, message, destination, FALSE, TRUE);
+  return kdbus_write_msg_internal (transport, message, destination, NULL, TRUE);
 }
 
 static dbus_uint64_t
@@ -2133,7 +2214,7 @@ capture_org_freedesktop_DBus_StartServiceByName (DBusTransportKdbus *transport,
 
       dbus_message_lock (sub_message);
 
-      if (kdbus_write_msg_internal (transport, sub_message, name, FALSE, FALSE) == -1)
+      if (kdbus_write_msg_internal (transport, sub_message, name, NULL, FALSE) == -1)
           return NULL;
       else
         {
@@ -2369,7 +2450,8 @@ get_next_client_serial (DBusTransportKdbus *transport)
  * @return the length of the kdbus message's payload.
  */
 static int
-kdbus_message_size (const struct kdbus_msg *msg)
+kdbus_message_size (const struct kdbus_msg *msg,
+                    int                    *n_fds)
 {
   const struct kdbus_item *item;
   int ret_size = 0;
@@ -2388,6 +2470,9 @@ kdbus_message_size (const struct kdbus_msg *msg)
             break;
           case KDBUS_ITEM_PAYLOAD_MEMFD:
             ret_size += item->memfd.size;
+            break;
+          case KDBUS_ITEM_FDS:
+            *n_fds = (item->size - KDBUS_ITEM_HEADER_SIZE) / sizeof (int);
             break;
           default:
             break;
@@ -3136,7 +3221,7 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
       return -1;
     }
 
-  buf_size = kdbus_message_size (msg);
+  buf_size = kdbus_message_size (msg, n_fds);
   if (buf_size == -1)
     {
       _dbus_verbose ("kdbus error - too short message: %d (%m)\n", errno);
@@ -3175,6 +3260,56 @@ kdbus_read_message (DBusTransportKdbus *kdbus_transport,
   }
 
   return ret_size;
+}
+
+static DBusMessage *
+kdbus_send_sync_call (DBusTransportKdbus  *transport,
+                      DBusMessage         *message)
+{
+  DBusMessage *reply = NULL;
+  DBusError error;
+  const char *destination;
+
+  dbus_message_lock (message);
+
+  destination = dbus_message_get_destination (message);
+  if (destination)
+    {
+      int ret;
+
+      ret = capture_org_freedesktop_DBus ((DBusTransportKdbus*)transport, destination, message, &reply);
+      if (ret < 0)
+        goto error;
+      else if (ret == 0)
+        goto out;
+    }
+
+  kdbus_write_msg_internal (transport, message, destination, &reply, TRUE);
+  if (reply == NULL)
+    goto error;
+  else
+    goto out;
+
+error:
+
+  dbus_error_init (&error);
+
+  dbus_set_error (&error, DBUS_ERROR_FAILED,
+                  "Something went wrong");
+
+  reply = reply_with_error ((char*)error.name,
+                            NULL,
+                            error.message,
+                            message);
+
+  dbus_error_free (&error);
+
+out:
+
+  _dbus_assert (reply != NULL);
+  dbus_message_lock (reply);
+
+  return reply;
 }
 
 /**
@@ -3975,6 +4110,8 @@ new_kdbus_transport (kdbus_t          *kdbus,
                                               _dbus_transport_kdbus_get_unix_user);
   _dbus_transport_set_get_unix_process_id_function (&kdbus_transport->base,
                                                     _dbus_transport_kdbus_get_unix_process_id);
+  _dbus_transport_set_send_sync_call_function (&kdbus_transport->base,
+                                               (DBusTransportSendSyncCallFunction) kdbus_send_sync_call);
   _dbus_transport_set_assure_protocol_function (&kdbus_transport->base,
                                                 _dbus_message_assure_gvariant,
                                                 DBUS_PROTOCOL_VERSION_GVARIANT);

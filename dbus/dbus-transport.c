@@ -286,7 +286,7 @@ _dbus_transport_assure_protocol_version (DBusTransport *transport,
 
 DBusMessage *
 _dbus_transport_send_sync_call (DBusTransport *transport,
-                                DBusMessage  **message)
+                                DBusMessage   *message)
 {
   return transport->send_sync_call_function (transport, message);
 }

@@ -4582,6 +4582,172 @@ _dbus_message_loader_queue_messages (DBusMessageLoader *loader)
   return TRUE;
 }
 
+DBusMessage *
+_dbus_decode_kmsg (DBusString  *data,
+                   uint64_t     sender_id,
+                   int         *fds,
+                   unsigned     n_fds)
+{
+  if (_dbus_string_get_length (data) >= DBUS_MINIMUM_HEADER_SIZE)
+    {
+
+      DBusValidity validity;
+      int byte_order, fields_array_len, header_len, body_len;
+      dbus_bool_t is_gvariant;
+
+      if (_dbus_header_have_message_untrusted (DBUS_MAXIMUM_MESSAGE_LENGTH,
+                                               &validity,
+                                               &byte_order,
+                                               &fields_array_len,
+                                               &header_len,
+                                               &body_len,
+                                               data, 0,
+                                               _dbus_string_get_length (data),
+                                               &is_gvariant))
+        {
+          DBusMessage *message;
+          dbus_uint32_t n_unix_fds = 0;
+          const DBusString *type_str = NULL;
+          int type_pos = 0;
+
+          _dbus_assert (validity == DBUS_VALID);
+
+          message = dbus_message_new_empty_header (is_gvariant);
+          if (message == NULL)
+            return NULL;
+
+          /*
+           * Validate and copy over header
+           */
+          _dbus_assert (_dbus_string_get_length (&message->header.data) == 0);
+          _dbus_assert ((header_len + body_len) <= _dbus_string_get_length (data));
+
+          if (!_dbus_header_load (&message->header,
+                                  DBUS_VALIDATION_MODE_DATA_IS_UNTRUSTED,
+                                  &validity,
+                                  byte_order,
+                                  fields_array_len,
+                                  header_len,
+                                  body_len,
+                                  data, 0,
+                                  _dbus_string_get_length (data)))
+            {
+              _dbus_verbose ("Failed to load header for new message code %d\n", validity);
+              dbus_message_unref (message);
+              return NULL;
+            }
+
+          _dbus_assert (validity == DBUS_VALID);
+
+          /*
+           * Validate body
+           */
+          if (_dbus_message_is_gvariant (message))
+            {
+              validity = _dbus_validate_gvariant_body_with_reason (type_str,
+                                                                   type_pos,
+                                                                   byte_order,
+                                                                   NULL,
+                                                                   data,
+                                                                   header_len,
+                                                                   body_len);
+            }
+          else
+            {
+              _dbus_verbose ("Not valid GVariant dbus message\n");
+              dbus_message_unref (message);
+              return NULL;
+            }
+
+          if (validity != DBUS_VALID)
+            {
+              _dbus_verbose ("Failed to validate message body code %d\n", validity);
+              dbus_message_unref (message);
+              return NULL;
+            }
+
+          /*
+           * Copy over Unix FDS
+           */
+          _dbus_header_get_field_basic(&message->header,
+                                       DBUS_HEADER_FIELD_UNIX_FDS,
+                                       DBUS_TYPE_UINT32,
+                                       &n_unix_fds);
+
+#ifdef HAVE_UNIX_FD_PASSING
+
+          if (n_unix_fds > n_fds)
+            {
+              _dbus_verbose("Message contains references to more unix fds than were sent %u != %u\n",
+                            n_unix_fds, loader->n_unix_fds);
+              dbus_message_unref (message);
+              return NULL;
+            }
+
+          /* If this was a recycled message there might still be
+             some memory allocated for the fds */
+          dbus_free(message->unix_fds);
+
+          if (n_unix_fds > 0)
+            {
+              message->unix_fds = _dbus_memdup(fds, n_unix_fds * sizeof(message->unix_fds[0]));
+              if (message->unix_fds == NULL)
+                {
+                  _dbus_verbose ("Failed to allocate file descriptor array\n");
+                  dbus_message_unref (message);
+                  return NULL;
+                }
+
+              message->n_unix_fds_allocated = message->n_unix_fds = n_unix_fds;
+            }
+          else
+            message->unix_fds = NULL;
+#else
+          if (n_unix_fds > 0)
+            {
+              _dbus_verbose ("Hmm, message claims to come with file descriptors "
+                             "but that's not supported on our platform, disconnecting.\n");
+              dbus_message_unref (message);
+              return NULL;
+            }
+#endif
+
+          /*
+           * Copy over message body
+           */
+          _dbus_assert (_dbus_string_get_length (&message->body) == 0);
+          _dbus_assert (_dbus_string_get_length (data) >= (header_len + body_len));
+
+          if (!_dbus_string_copy_len (data, header_len, body_len, &message->body, 0))
+            {
+              _dbus_verbose ("Failed to move body into new message\n");
+              dbus_message_unref (message);
+              return NULL;
+            }
+
+          _dbus_assert (_dbus_string_get_length (&message->header.data) == header_len);
+          _dbus_assert (_dbus_string_get_length (&message->body) == body_len);
+
+           set_unique_sender (message, sender_id);
+           message->locked = TRUE;
+
+           /* Yupi, we have DBusMessage* */
+           return message;
+        }
+      else
+        {
+          _dbus_verbose ("Data broken with invalid code %d\n", validity);
+          return NULL;
+        } /* if _dbus_header_have_message_untrusted() */
+
+    }
+  else
+    {
+      _dbus_verbose ("message size < DBUS_MINIMUM_HEADER_SIZE\n");
+      return NULL;
+    } /* if DBUS_MINIMUM_HEADER_SIZE */
+}
+
 /**
  * Peeks at first loaded message, returns #NULL if no messages have
  * been queued.
