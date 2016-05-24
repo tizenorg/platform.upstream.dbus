@@ -6,7 +6,7 @@
 Name:           dbus
 Url:            http://dbus.freedesktop.org/
 Summary:        D-Bus Message Bus System
-License:        GPL-2.0+ or AFL-2.1, BSD-2.0, LGPL-2.1+
+License:        GPL-2.0+ or AFL-2.1, BSD-2.0, LGPL-2.1+, MIT
 Group:          Base/IPC
 # COMMON1-BEGIN
 
