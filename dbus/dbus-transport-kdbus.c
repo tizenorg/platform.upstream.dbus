@@ -4110,8 +4110,10 @@ new_kdbus_transport (kdbus_t          *kdbus,
                                               _dbus_transport_kdbus_get_unix_user);
   _dbus_transport_set_get_unix_process_id_function (&kdbus_transport->base,
                                                     _dbus_transport_kdbus_get_unix_process_id);
+#ifdef ENABLE_KDBUS_SYNC_CALLS
   _dbus_transport_set_send_sync_call_function (&kdbus_transport->base,
                                                (DBusTransportSendSyncCallFunction) kdbus_send_sync_call);
+#endif
   _dbus_transport_set_assure_protocol_function (&kdbus_transport->base,
                                                 _dbus_message_assure_gvariant,
                                                 DBUS_PROTOCOL_VERSION_GVARIANT);
