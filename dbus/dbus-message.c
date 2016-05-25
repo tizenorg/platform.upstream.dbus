@@ -4679,7 +4679,7 @@ _dbus_decode_kmsg (DBusString  *data,
           if (n_unix_fds > n_fds)
             {
               _dbus_verbose("Message contains references to more unix fds than were sent %u != %u\n",
-                            n_unix_fds, loader->n_unix_fds);
+                            n_unix_fds, message->n_unix_fds);
               dbus_message_unref (message);
               return NULL;
             }

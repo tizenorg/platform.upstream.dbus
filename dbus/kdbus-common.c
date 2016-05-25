@@ -698,16 +698,21 @@ _kdbus_compute_msg_items_size (kdbus_t       *kdbus,
 {
   __u64 items_size = 0;
 
+  /*  header */
+  items_size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_vec));
+
   if (use_memfd)
     {
+      /* body */
       items_size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_memfd));
+
+      /* footer */
+      items_size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_vec));
     }
   else
     {
       __u64 vectors = (body_size + KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE - 1)
                        / KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
-      /* 1st vector -> for header */
-      items_size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_vec));
       /* subsequent vectors -> parts of body */
       items_size += vectors * KDBUS_ITEM_SIZE (sizeof (struct kdbus_vec));
     }

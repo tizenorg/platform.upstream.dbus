@@ -504,30 +504,22 @@ parse_name (const char *name)
 
 static int
 prepare_mfd (int memfd,
-             const char *header,
-             uint64_t header_size,
              const char *body,
              uint64_t body_size)
 {
-  const char *data[] = { header, body };
-  uint64_t count[] = { header_size, body_size };
   int64_t wr;
-  size_t p;
 
   _dbus_verbose ("sending data via memfd\n");
-  for (p = 0; p < sizeof (data) / sizeof (data[0]); ++p)
+  while (body_size)
     {
-      while (count[p])
+      wr = write (memfd, body, body_size);
+      if (wr < 0)
         {
-          wr = write (memfd, data[p], count[p]);
-          if (wr < 0)
-            {
-              _dbus_verbose ("writing to memfd failed: (%d) %m\n", errno);
-              return -1;
-            }
-          count[p] -= wr;
-          data[p] += wr;
+          _dbus_verbose ("writing to memfd failed: (%d) %m\n", errno);
+          return -1;
         }
+      body_size -= wr;
+      body += wr;
     }
 
   // seal data - kdbus module needs it
@@ -717,6 +709,7 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
   int memfd = -1;
   const int *unix_fds;
   unsigned fds_count;
+  const char* header_data;
   DBusError error;
 
   dbus_uint64_t items_size;
@@ -807,47 +800,79 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
   /* build message contents */
   item = msg->items;
 
-  if (memfd >= 0)
-    {
-      if (prepare_mfd (memfd,
-                       _dbus_string_get_const_data (header), header_size,
-                       _dbus_string_get_const_data (body), body_size) == -1)
-        {
-          ret_size = -1;
-          goto out;
-        }
+  header_data = _dbus_string_get_const_data (header);
 
-      item = _kdbus_item_add_payload_memfd (item,
-                                            0,
-                                            ret_size,
-                                            memfd);
-    }
-  else
+  _dbus_verbose ("sending data by vec\n");
+  item = _kdbus_item_add_payload_vec (item,
+                                      header_size,
+                                      (uintptr_t)header_data);
+  if (body_size > 0)
     {
-      const char* header_data = _dbus_string_get_const_data (header);
-
-      _dbus_verbose ("sending data by vec\n");
-      item = _kdbus_item_add_payload_vec (item,
-                                          header_size,
-                                          (uintptr_t)header_data);
-      if (body_size > 0)
-        {
-          const char* body_data = _dbus_string_get_const_data (body);
+      const char* body_data = _dbus_string_get_const_data (body);
 
 #ifdef DBUS_ENABLE_VERBOSE_MODE
-          if (-1 != debug)
-            {
-              debug_str ("Header to send:", header);
-              debug_str ("Body to send:", body);
-            }
+      if (-1 != debug)
+        {
+          debug_str ("Header to send:", header);
+          debug_str ("Body to send:", body);
+        }
 #endif
 
+      if (memfd >= 0)
+        {
+
+          size_t body_offsets_size;
+	  const char *footer_ptr;
+
+          /* determine body offsets size */
+          if (ret_size <= 0xFF)
+            body_offsets_size = 1;
+          else if (ret_size <= 0xFFFF)
+            body_offsets_size = 2;
+          else if (ret_size <= 0xFFFFFFFF)
+            body_offsets_size = 4;
+          else
+            body_offsets_size = 8;
+
+          /* check footer size */
+          footer_ptr = body_data + body_size - body_offsets_size -1;
+          while (footer_ptr >= body_data && (*footer_ptr) != 0)
+            footer_ptr--;
+
+          if (footer_ptr < body_data)
+            {
+              ret_size = -1;
+              goto out;
+            }
+
+          /* prepare memfd for body */
+          if (prepare_mfd (memfd,
+                           body_data,
+                           (footer_ptr - body_data) * sizeof(char)) == -1)
+            {
+              ret_size = -1;
+              goto out;
+            }
+
+	  /* body */
+          item = _kdbus_item_add_payload_memfd (item,
+                                                0,
+                                                (footer_ptr - body_data) * sizeof(char),
+                                                memfd);
+
+	  /* footer */
+          item = _kdbus_item_add_payload_vec (item,
+                                              (body_data + body_size - footer_ptr) * sizeof(char),
+                                              (uintptr_t)footer_ptr);
+        }
+      else
+        {
           while (body_size > 0)
             {
               dbus_uint64_t part_size = body_size;
 
               if (part_size > KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE)
-                part_size = KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
+                  part_size = KDBUS_MSG_MAX_PAYLOAD_VEC_SIZE;
 
               _dbus_verbose ("attaching body part\n");
               item = _kdbus_item_add_payload_vec (item,
@@ -856,8 +881,8 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
               body_data += part_size;
               body_size -= part_size;
             }
-        }
-    }
+        } /* memfd */
+    } /* body_size */
 
   if (fds_count)
       item = _kdbus_item_add_fds (item, unix_fds, fds_count);
