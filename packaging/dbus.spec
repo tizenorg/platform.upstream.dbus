@@ -108,9 +108,10 @@ export V=1
 %if %{with kdbus}
     --enable-kdbus-transport                                            \
 %if %{with dbuspolicy}
-    --enable-libdbuspolicy                      \
+    --enable-libdbuspolicy                      			\
 %endif
 %endif
+    --with-system-pid-file=/tmp/dbus_launch				\
     --with-console-auth-dir=/var/run/dbus/at_console/			\
     --with-systemdsystemunitdir=%{_unitdir}				\
     --enable-smack \
