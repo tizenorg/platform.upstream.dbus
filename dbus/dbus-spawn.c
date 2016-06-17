@@ -1353,7 +1353,17 @@ _dbus_spawn_async_with_babysitter (DBusBabysitter          **sitter_p,
           _dbus_assert_not_reached ("Got to code after write_err_and_exit()");
 	}
       else if (grandchild_pid == 0)
-      {
+        {
+          #ifdef __linux__
+	  int fd = open ("/proc/self/oom_score_adj", O_WRONLY | O_CLOEXEC);
+	  
+          if (fd >= 0)
+          {
+            write (fd, "0", sizeof (char));
+            _dbus_close (fd, NULL);
+          }
+	  #endif
+
           /* Go back to ignoring SIGPIPE, since it's evil
            */
           signal (SIGPIPE, SIG_IGN);
