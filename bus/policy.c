@@ -387,6 +387,7 @@ bus_policy_create_client_policy (BusPolicy      *policy,
         {
           nomem_err = !add_list_to_client (list, client);
           _dbus_list_clear (list);
+          dbus_free(list);
         }
 
       if (nomem_err)
