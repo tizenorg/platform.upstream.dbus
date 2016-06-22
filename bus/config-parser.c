@@ -454,7 +454,7 @@ bus_config_parser_new (const DBusString      *basedir,
       parser->limits.pending_fd_timeout = 150000; /* 2.5 minutes */
       
       parser->limits.max_incomplete_connections = 64;
-      parser->limits.max_connections_per_user = 256;
+      parser->limits.max_connections_per_user = 512; /* 256 -> 512 */
       
       /* Note that max_completed_connections / max_connections_per_user
        * is the number of users that would have to work together to
