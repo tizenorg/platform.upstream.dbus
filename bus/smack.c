@@ -209,8 +209,10 @@ bus_smack_generate_allowed_list (DBusConnection *connection,
   return allowed_list;
 
 nomem:
-  if (allowed_list != NULL)
+  if (allowed_list != NULL) {
     _dbus_list_clear (allowed_list);
+    dbus_free (allowed_list);
+  }
 
   *nomem_err = TRUE;
   return NULL;
