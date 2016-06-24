@@ -373,10 +373,10 @@ bloom_add_pair (kdbus_bloom_data_t *bloom_data,
     return;
 
   size = strlen (parameter) + strlen (value) + 1;
-  if (size > 1024)
+  if (size >= 1024)
     return;
 
-  snprintf (buf, size, "%s:%s", parameter, value);
+  snprintf (buf, size + 1, "%s:%s", parameter, value);
   _kdbus_bloom_add_data (kdbus, bloom_data, buf, size);
 }
 
@@ -391,10 +391,10 @@ bloom_add_prefixes (kdbus_bloom_data_t *bloom_data,
   size_t size;
 
   size = strlen (parameter) + strlen (value) + 1;
-  if (size > 1024)
+  if (size >= 1024)
     return;
 
-  snprintf (buf, size, "%s:%s", parameter, value);
+  snprintf (buf, size + 1, "%s:%s", parameter, value);
 
   for (;;)
     {
