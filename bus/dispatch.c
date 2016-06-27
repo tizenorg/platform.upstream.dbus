@@ -71,7 +71,7 @@ send_one_message (DBusConnection *connection,
   BusResult result;
 
   result = bus_context_check_security_policy (context, transaction, sender, addressed_recipient,
-      connection, message, NULL, &deferred_message);
+      connection, message, &stack_error, &deferred_message);
 
   if (result == BUS_RESULT_FALSE)
     {
