@@ -283,7 +283,8 @@ bus_check_privilege (BusCheck *check,
 
   if (!dbus_connection_get_is_connected(connection))
     {
-      return BUS_RESULT_FALSE;
+      if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_SIGNAL) /* If message type is signal, ignore dropping message. */
+          return BUS_RESULT_FALSE;
     }
 
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
