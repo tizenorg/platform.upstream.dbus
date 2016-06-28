@@ -2,6 +2,10 @@
 #
 # use consolekit to support legacy at_console setting
 #
+
+# to defend against a security attack of changing external PATH
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 reason="$1"
 
 dir=/var/run/dbus/at_console
