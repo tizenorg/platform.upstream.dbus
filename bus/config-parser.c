@@ -480,7 +480,7 @@ bus_config_parser_new (const DBusString      *basedir,
       /* this is effectively a limit on message queue size for messages
        * that require a reply
        */
-      parser->limits.max_replies_per_connection = 128;
+      parser->limits.max_replies_per_connection = 1024; /* 128 -> 1024 */
     }
       
   parser->refcount = 1;
