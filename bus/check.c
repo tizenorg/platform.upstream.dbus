@@ -281,12 +281,6 @@ bus_check_privilege (BusCheck *check,
 
   connection = check_type == BUS_DEFERRED_MESSAGE_CHECK_RECEIVE ? proposed_recipient : sender;
 
-  if (!dbus_connection_get_is_connected(connection))
-    {
-      if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_SIGNAL) /* If message type is signal, ignore dropping message. */
-          return BUS_RESULT_FALSE;
-    }
-
 #ifdef DBUS_ENABLE_EMBEDDED_TESTS
   if (bus_check_test_override)
     return bus_check_test_override (connection, privilege);
