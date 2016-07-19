@@ -102,7 +102,7 @@ int debug = -1;
              ((uint8_t *)(iter) < (uint8_t *)(first) + (_size)) &&      \
                ((uint8_t *)(iter) >= (uint8_t *)(first));               \
              iter = (void*)(((uint8_t *)iter) + ALIGN8((iter)->size)))
-#define KDBUS_DEFAULT_TIMEOUT_NS   5000000000LU
+#define KDBUS_DEFAULT_TIMEOUT_NS   50000000000LLU
 
 /**
  * @defgroup DBusTransportKdbus DBusTransport implementations for kdbus
