@@ -1190,10 +1190,10 @@ _dbus_writer_gvariant_add_offset_with_variability (DBusTypeWriter *writer,
   else if (DBUS_TYPE_STRUCT == writer->container_type ||
            DBUS_TYPE_DICT_ENTRY == writer->container_type)
   {
+    check_offsets_for_adding (writer);
+
     if (writer->u.struct_or_dict.last_offset != 0)
     {
-      check_offsets_for_adding (writer);
-
       prepend_offset (writer->offsets,
                       writer->u.struct_or_dict.last_offset,
                       writer->offsets_size);
