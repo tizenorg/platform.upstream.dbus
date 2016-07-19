@@ -1173,10 +1173,10 @@ _dbus_writer_gvariant_add_offset_with_variability (DBusTypeWriter *writer,
 
   if (writer->body_container)
   {
+    check_offsets_in_body_for_adding (writer);
+
     if (*writer->u.root.last_offset != 0)
     {
-      check_offsets_in_body_for_adding (writer);
-
       write_offset (writer->value_str,
                     *writer->u.root.last_offset,
                     writer->offsets_size,
