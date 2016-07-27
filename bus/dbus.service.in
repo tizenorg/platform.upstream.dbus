@@ -7,4 +7,6 @@ Requires=dbus.socket
 ExecStart=@EXPANDED_BINDIR@/dbus-daemon --system --address=systemd: --nofork --systemd-activation
 ExecReload=@EXPANDED_BINDIR@/dbus-send --print-reply --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig
 OOMScoreAdjust=-900
+User=dbus
+Group=dbus
 SmackProcessLabel=System
