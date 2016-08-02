@@ -225,7 +225,7 @@ struct kdbus_item *
 _kdbus_item_add_id (struct kdbus_item *item,
                     __u64              id)
 {
-  item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (struct kdbus_notify_id_change);
+  item->size = KDBUS_ITEM_HEADER_SIZE + sizeof (id);
   item->type = KDBUS_ITEM_ID;
   item->id = id;
   return KDBUS_ITEM_NEXT (item);
@@ -502,7 +502,7 @@ _kdbus_compute_match_items_size (kdbus_t       *kdbus,
     size += KDBUS_ITEM_SIZE (kdbus->bloom.size);
 
   if (KDBUS_MATCH_ID_ANY != sender_id) /* unique name present */
-    size += KDBUS_ITEM_SIZE (sizeof (struct kdbus_notify_id_change));
+    size += KDBUS_ITEM_SIZE (sizeof (sender_id));
   else if (NULL != sender_name)
     size += KDBUS_ITEM_SIZE (strlen (sender_name) + 1);
 
