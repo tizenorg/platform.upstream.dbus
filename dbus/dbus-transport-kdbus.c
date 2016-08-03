@@ -646,15 +646,13 @@ debug_str (const char *msg, const DBusString *str)
 }
 #endif
 
-static dbus_bool_t
+static int
 can_send (DBusTransportKdbus *transport,
           DBusMessage        *message)
 {
-  dbus_bool_t result = TRUE;
+  int ret = DBUSPOLICY_RESULT_ALLOW;
 
 #ifdef LIBDBUSPOLICY
-  {
-    int ret = 1;
     if (NULL != transport->policy)
       {
         dbus_uint32_t reply_serial = dbus_message_get_reply_serial (message);
@@ -674,11 +672,9 @@ can_send (DBusTransportKdbus *transport,
                                        reply_serial,
                                        !dbus_message_get_no_reply (message));
       }
-    result = (1 == ret);
-  }
 #endif
 
-  return result;
+  return ret;
 }
 
 /* function prototypes */
@@ -901,34 +897,69 @@ kdbus_write_msg_internal (DBusTransportKdbus  *transport,
       setup_bloom_filter_for_message (message, transport->kdbus, filter);
     }
 
-  if (check_privileges && !can_send (transport, message))
+  if (check_privileges)
     {
-      DBusMessage *reply;
+      int check;
 
-      reply = reply_with_error (DBUS_ERROR_ACCESS_DENIED,
-                                NULL,
-                                "Cannot send message - message rejected "
-                                "due to security policies",
-                                message);
-      if (reply == NULL)
+      check = can_send (transport, message);
+
+      if (check != DBUSPOLICY_RESULT_ALLOW)
         {
-          ret_size = -1;
-        }
-      else
-        {
-          if (check_sync_reply)
+          DBusMessage *reply;
+
+          switch (check)
             {
-              *sync_reply = reply;
+              case DBUSPOLICY_RESULT_DENY:
+                reply = reply_with_error (DBUS_ERROR_ACCESS_DENIED, NULL,
+                                          "Cannot send message - message rejected due to XML security policies",
+                                          message);
+              break;
+
+              case DBUSPOLICY_RESULT_DEST_NOT_AVAILABLE:
+                reply = reply_with_error (DBUS_ERROR_SERVICE_UNKNOWN, NULL,
+                                          "Cannot send message - destination not known",
+                                          message);
+              break;
+
+              case DBUSPOLICY_RESULT_KDBUS_ERROR:
+                reply = reply_with_error (DBUS_ERROR_ACCESS_DENIED, NULL,
+                                          "Cannot send message - message rejected due to internal libdbuspolicy error (kdbus)",
+                                          message);
+              break;
+
+              case DBUSPOLICY_RESULT_CYNARA_ERROR:
+                reply = reply_with_error (DBUS_ERROR_ACCESS_DENIED, NULL,
+                                          "Cannot send message - message rejected due to internal libdbuspolicy error (Cynara)",
+                                          message);
+              break;
+
+              default:
+                reply = reply_with_error (DBUS_ERROR_ACCESS_DENIED, NULL,
+                                          "Cannot send message - unknown libdbuspolicy error",
+                                          message);
+              break;
+            }
+
+          if (reply == NULL)
+            {
+              ret_size = -1;
             }
           else
             {
-              /* puts locally generated reply into received messages queue */
-              if (!add_message_to_received (reply, transport->base.connection))
-                ret_size = -1;
+              if (check_sync_reply)
+                {
+                  *sync_reply = reply;
+                }
+              else
+                {
+                  /* puts locally generated reply into received messages queue */
+                  if (!add_message_to_received (reply, transport->base.connection))
+                    ret_size = -1;
+                }
             }
-        }
-      goto out;
-    }
+          goto out;
+        } /* ret != DBUSPOLICY_RESULT_ALLOW */
+    } /* check_privileges */
 
   if (send_message (transport,
                     msg,
